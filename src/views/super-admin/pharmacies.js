@@ -69,6 +69,9 @@ function renderRows(pharmacies) {
       <td class="text-sm text-muted">${formatDate(p.created_at)}</td>
       <td>
         <div class="flex gap-2">
+          <button class="btn btn-ghost btn-sm edit-pharmacy-btn" data-id="${p.id}" data-pharmacy='${JSON.stringify(p)}'>
+            Edit
+          </button>
           <button class="btn btn-ghost btn-sm toggle-status-btn" data-id="${p.id}" data-active="${p.is_active}">
             ${p.is_active ? 'Disable' : 'Enable'}
           </button>
@@ -79,6 +82,17 @@ function renderRows(pharmacies) {
 }
 
 function bindRowActions(pharmacies, user) {
+  // Edit button handlers
+  document.querySelectorAll('.edit-pharmacy-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const pharmacy = JSON.parse(btn.dataset.pharmacy);
+      showEditPharmacyModal(pharmacy, () => {
+        import('../app.js').then(m => m.navigate('pharmacies'));
+      });
+    });
+  });
+
+  // Toggle status button handlers
   document.querySelectorAll('.toggle-status-btn').forEach(btn => {
     btn.addEventListener('click', async () => {
       const id = btn.dataset.id;
@@ -183,6 +197,91 @@ export function showAddPharmacyModal() {
       errEl.classList.remove('hidden');
       saveBtn.disabled = false;
       saveBtn.textContent = 'Create Pharmacy';
+    }
+  });
+}
+
+export function showEditPharmacyModal(pharmacy, onSave) {
+  const { overlay, closeModal } = createModal({
+    id: 'edit-pharmacy',
+    title: 'Edit Pharmacy Information',
+    body: `
+      <form id="edit-pharmacy-form">
+        <div class="form-group">
+          <label class="form-label">Pharmacy Name *</label>
+          <input type="text" class="form-input" id="ep-name" value="${pharmacy.name}" required />
+        </div>
+        <div class="grid-2">
+          <div class="form-group">
+            <label class="form-label">Email</label>
+            <input type="email" class="form-input" id="ep-email" value="${pharmacy.email || ''}" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Phone</label>
+            <input type="text" class="form-input" id="ep-phone" value="${pharmacy.phone || ''}" />
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Address</label>
+          <input type="text" class="form-input" id="ep-address" value="${pharmacy.address || ''}" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">Currency Code</label>
+          <input type="text" class="form-input" id="ep-currency" value="${pharmacy.currency_code || 'USD'}" placeholder="USD" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">Currency Symbol</label>
+          <input type="text" class="form-input" id="ep-symbol" value="${pharmacy.currency_symbol || '$'}" placeholder="$" />
+        </div>
+        <div id="edit-pharmacy-error" class="alert alert-danger hidden"></div>
+      </form>
+    `,
+    footer: `
+      <button class="btn btn-ghost" id="cancel-edit-pharmacy">Cancel</button>
+      <button class="btn btn-primary" id="save-edit-pharmacy">Save Changes</button>
+    `
+  });
+
+  overlay.querySelector('#cancel-edit-pharmacy').addEventListener('click', closeModal);
+
+  overlay.querySelector('#save-edit-pharmacy').addEventListener('click', async () => {
+    const saveBtn = overlay.querySelector('#save-edit-pharmacy');
+    const errEl = overlay.querySelector('#edit-pharmacy-error');
+    errEl.classList.add('hidden');
+
+    const name = overlay.querySelector('#ep-name').value.trim();
+    const email = overlay.querySelector('#ep-email').value.trim();
+    const phone = overlay.querySelector('#ep-phone').value.trim();
+    const address = overlay.querySelector('#ep-address').value.trim();
+    const currencyCode = overlay.querySelector('#ep-currency').value.trim();
+    const currencySymbol = overlay.querySelector('#ep-symbol').value.trim();
+
+    if (!name) {
+      errEl.textContent = 'Pharmacy name is required.';
+      errEl.classList.remove('hidden');
+      return;
+    }
+
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Saving...';
+
+    try {
+      await updatePharmacy(pharmacy.id, { 
+        name, 
+        email, 
+        phone, 
+        address,
+        currency_code: currencyCode,
+        currency_symbol: currencySymbol
+      });
+      showToast('Pharmacy updated successfully!');
+      closeModal();
+      onSave();
+    } catch (err) {
+      errEl.textContent = err.message;
+      errEl.classList.remove('hidden');
+      saveBtn.disabled = false;
+      saveBtn.textContent = 'Save Changes';
     }
   });
 }
