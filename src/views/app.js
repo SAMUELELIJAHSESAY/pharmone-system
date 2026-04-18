@@ -123,7 +123,13 @@ export function renderApp(user) {
     : role === 'admin' ? 'admin-dashboard'
     : 'salesman-dashboard';
 
-  navigate(defaultView);
+  // Try to restore last visited view from localStorage
+  const savedView = localStorage.getItem('currentView');
+  const savedParams = localStorage.getItem('currentParams');
+  const viewToLoad = savedView || defaultView;
+  const paramsToLoad = savedParams ? JSON.parse(savedParams) : {};
+
+  navigate(viewToLoad, paramsToLoad);
 
   document.querySelectorAll('.nav-item').forEach(item => {
     item.addEventListener('click', () => {
@@ -137,6 +143,10 @@ export function renderApp(user) {
 export function navigate(view, params = {}) {
   currentView = view;
   currentParams = params;
+
+  // Save current view to localStorage for persistence on refresh
+  localStorage.setItem('currentView', view);
+  localStorage.setItem('currentParams', JSON.stringify(params));
 
   document.querySelectorAll('.nav-item').forEach(item => {
     item.classList.toggle('active', item.dataset.view === view);
