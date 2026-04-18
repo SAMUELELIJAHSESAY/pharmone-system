@@ -7,6 +7,9 @@ export async function signIn(email, password) {
 }
 
 export async function signUp(email, password, fullName, role, pharmacyId = null) {
+  // Store current session before signup
+  const { data: { session: currentSession } } = await supabase.auth.getSession();
+
   const { data, error } = await supabase.auth.signUp({
     email,
     password,
@@ -24,6 +27,12 @@ export async function signUp(email, password, fullName, role, pharmacyId = null)
     });
     if (profileError) throw profileError;
   }
+
+  // Restore the admin's session if it existed
+  if (currentSession) {
+    await supabase.auth.setSession(currentSession);
+  }
+
   return data;
 }
 
