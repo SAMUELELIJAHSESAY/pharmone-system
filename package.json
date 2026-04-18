@@ -12,6 +12,7 @@
     "@supabase/supabase-js": "^2.39.0"
   },
   "devDependencies": {
-    "vite": "^5.4.2"
+    "vite": "^5.4.2",
+    "terser": "^5.29.0"
   }
 }
