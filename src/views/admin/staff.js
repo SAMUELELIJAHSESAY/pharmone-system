@@ -2,6 +2,7 @@ import { getProfiles, updateProfile } from '../../database.js';
 import { signUp } from '../../auth.js';
 import { formatDate, showToast, showConfirm } from '../../utils.js';
 import { createModal } from '../../components/modal.js';
+import { supabase } from '../../config.js';
 
 export async function renderStaff(container, user) {
   const pharmacyId = user.profile?.pharmacy_id;
@@ -75,9 +76,14 @@ function renderRows(profiles, currentUser) {
       <td class="text-sm text-muted">${formatDate(p.created_at)}</td>
       <td>
         ${p.id !== currentUser.id ? `
-          <button class="btn btn-ghost btn-sm toggle-staff-btn" data-id="${p.id}" data-active="${p.is_active}">
-            ${p.is_active ? 'Disable' : 'Enable'}
-          </button>
+          <div class="flex gap-2">
+            <button class="btn btn-ghost btn-sm edit-staff-btn" data-id="${p.id}" data-staff='${JSON.stringify(p)}'>
+              Edit
+            </button>
+            <button class="btn btn-ghost btn-sm toggle-staff-btn" data-id="${p.id}" data-active="${p.is_active}">
+              ${p.is_active ? 'Disable' : 'Enable'}
+            </button>
+          </div>
         ` : '<span class="text-xs text-muted">You</span>'}
       </td>
     </tr>
@@ -85,6 +91,15 @@ function renderRows(profiles, currentUser) {
 }
 
 function bindActions(profiles, user, reload) {
+  // Edit button handlers
+  document.querySelectorAll('.edit-staff-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const staff = JSON.parse(btn.dataset.staff);
+      showEditStaffModal(staff, reload);
+    });
+  });
+
+  // Toggle button handlers
   document.querySelectorAll('.toggle-staff-btn').forEach(btn => {
     btn.addEventListener('click', async () => {
       const isActive = btn.dataset.active === 'true';
@@ -167,6 +182,108 @@ function showAddStaffModal(user, reload) {
       errEl.classList.remove('hidden');
       saveBtn.disabled = false;
       saveBtn.textContent = 'Add Staff';
+    }
+  });
+}
+
+function showEditStaffModal(staff, reload) {
+  const { overlay, closeModal } = createModal({
+    id: 'edit-staff',
+    title: 'Edit Staff Member',
+    body: `
+      <form id="edit-staff-form">
+        <div class="form-group">
+          <label class="form-label">Full Name *</label>
+          <input type="text" class="form-input" id="es-name" value="${staff.full_name || ''}" required />
+        </div>
+        <div class="form-group">
+          <label class="form-label">Email *</label>
+          <input type="email" class="form-input" id="es-email" value="${staff.email}" required />
+        </div>
+        <div class="form-group">
+          <label class="form-label">Role</label>
+          <select class="form-select" id="es-role">
+            <option value="salesman" ${staff.role === 'salesman' ? 'selected' : ''}>Salesman</option>
+            <option value="admin" ${staff.role === 'admin' ? 'selected' : ''}>Admin</option>
+          </select>
+        </div>
+        <hr class="divider" />
+        <p class="text-sm font-semibold" style="margin-bottom:0.75rem;color:var(--gray-700)">Change Password (Optional)</p>
+        <div class="form-group">
+          <label class="form-label">New Password</label>
+          <input type="password" class="form-input" id="es-password" placeholder="Leave empty to keep current password" minlength="8" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">Confirm Password</label>
+          <input type="password" class="form-input" id="es-password-confirm" placeholder="Confirm new password" minlength="8" />
+        </div>
+        <div id="edit-staff-error" class="alert alert-danger hidden"></div>
+      </form>
+    `,
+    footer: `
+      <button class="btn btn-ghost" id="cancel-edit-staff">Cancel</button>
+      <button class="btn btn-primary" id="save-edit-staff">Save Changes</button>
+    `
+  });
+
+  overlay.querySelector('#cancel-edit-staff').addEventListener('click', closeModal);
+
+  overlay.querySelector('#save-edit-staff').addEventListener('click', async () => {
+    const saveBtn = overlay.querySelector('#save-edit-staff');
+    const errEl = overlay.querySelector('#edit-staff-error');
+    errEl.classList.add('hidden');
+
+    const name = overlay.querySelector('#es-name').value.trim();
+    const email = overlay.querySelector('#es-email').value.trim();
+    const role = overlay.querySelector('#es-role').value;
+    const newPassword = overlay.querySelector('#es-password').value;
+    const confirmPassword = overlay.querySelector('#es-password-confirm').value;
+
+    if (!name || !email) {
+      errEl.textContent = 'Name and email are required.';
+      errEl.classList.remove('hidden');
+      return;
+    }
+
+    if ((newPassword || confirmPassword) && newPassword !== confirmPassword) {
+      errEl.textContent = 'Passwords do not match.';
+      errEl.classList.remove('hidden');
+      return;
+    }
+
+    if (newPassword && newPassword.length < 8) {
+      errEl.textContent = 'Password must be at least 8 characters.';
+      errEl.classList.remove('hidden');
+      return;
+    }
+
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Saving...';
+
+    try {
+      // Update profile information
+      await updateProfile(staff.id, { 
+        full_name: name,
+        email: email,
+        role: role
+      });
+
+      // Update password if provided
+      if (newPassword) {
+        const { error: pwdError } = await supabase.auth.admin.updateUserById(staff.id, {
+          password: newPassword
+        });
+        if (pwdError) throw pwdError;
+      }
+
+      showToast('Staff member updated successfully!');
+      closeModal();
+      reload();
+    } catch (err) {
+      errEl.textContent = err.message || 'Failed to update staff member';
+      errEl.classList.remove('hidden');
+      saveBtn.disabled = false;
+      saveBtn.textContent = 'Save Changes';
     }
   });
 }
