@@ -42,6 +42,37 @@ export async function getCurrentUser() {
     .eq('id', user.id)
     .maybeSingle();
 
+  // Check if user is disabled
+  if (profile && !profile.is_active) {
+    // User is disabled, sign them out
+    await signOut().catch(() => {}); // Ignore errors
+    return null;
+  }
+
+  // For salesman/non-super-admin users, also check if their admin is disabled
+  if (profile && profile.role !== 'super_admin' && profile.pharmacy_id) {
+    const { data: pharmacy } = await supabase
+      .from('pharmacies')
+      .select('id, owner_id')
+      .eq('id', profile.pharmacy_id)
+      .maybeSingle();
+
+    // If pharmacy has an owner (admin), check if that admin is disabled
+    if (pharmacy && pharmacy.owner_id) {
+      const { data: adminProfile } = await supabase
+        .from('profiles')
+        .select('is_active')
+        .eq('id', pharmacy.owner_id)
+        .maybeSingle();
+
+      if (adminProfile && !adminProfile.is_active) {
+        // Admin is disabled, sign out this user too
+        await signOut().catch(() => {}); // Ignore errors
+        return null;
+      }
+    }
+  }
+
   return { ...user, profile };
 }
 
