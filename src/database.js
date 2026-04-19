@@ -1,5 +1,7 @@
 import { supabase } from './config.js';
 
+export { supabase }; // Export supabase for use in other modules
+
 // ===================== PHARMACIES =====================
 export async function getPharmacies() {
   const { data, error } = await supabase.from('pharmacies').select('*').order('created_at', { ascending: false });
