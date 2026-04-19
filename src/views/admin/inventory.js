@@ -485,13 +485,33 @@ async function importProductsFromCSV(csvText, user, reload, progressDiv) {
       return;
     }
     
-    // Parse CSV - expect: name,category,description,cost_price,selling_price,low_stock_threshold,stock_boxes
-    const headers = lines[0].split(',').map(h => h.trim().toLowerCase().replace(/"/g, ''));
-    const products = [];
+    // Parse CSV header
+    const headerLine = lines[0];
+    const headers = parseCSVLine(headerLine).map(h => h.trim().toLowerCase());
+    
+    // Map header positions for flexible column matching
+    const getColumnIndex = (possibleNames) => {
+      for (const name of possibleNames) {
+        const idx = headers.findIndex(h => h.includes(name.toLowerCase()));
+        if (idx !== -1) return idx;
+      }
+      return -1;
+    };
+    
+    const nameIdx = getColumnIndex(['product', 'name']);
+    const categoryIdx = getColumnIndex(['category']);
+    const descIdx = getColumnIndex(['description']);
+    const costPriceIdx = getColumnIndex(['cost', 'price']);
+    const sellingPriceIdx = getColumnIndex(['selling', 'price']);
+    const lowStockIdx = getColumnIndex(['low', 'stock']);
+    const stockBoxesIdx = getColumnIndex(['stock', 'boxes', 'quantity']);
+    
     let successCount = 0;
     let errorCount = 0;
-    
     const statusDiv = document.getElementById('import-status');
+    
+    console.log('CSV Headers detected:', headers);
+    console.log('Column indices:', { nameIdx, categoryIdx, descIdx, costPriceIdx, sellingPriceIdx, lowStockIdx, stockBoxesIdx });
     
     for (let i = 1; i < lines.length; i++) {
       try {
@@ -499,22 +519,37 @@ async function importProductsFromCSV(csvText, user, reload, progressDiv) {
         
         const values = parseCSVLine(lines[i]);
         
-        if (values.length < 5) continue; // Skip incomplete rows
+        // Skip empty rows
+        if (values.every(v => !v || !v.trim())) {
+          continue;
+        }
+        
+        const getValue = (idx) => idx !== -1 && values[idx] ? values[idx].trim() : '';
         
         const product = {
-          name: values[0]?.trim() || '',
-          category: values[1]?.trim() || 'Other',
-          description: values[2]?.trim() || '',
-          cost_price: parseFloat(values[3]) || 0,
-          selling_price: parseFloat(values[4]) || 0,
-          low_stock_threshold: parseFloat(values[5]) || 10,
-          stock_boxes: parseFloat(values[6]) || 0,
+          name: getValue(nameIdx),
+          category: getValue(categoryIdx) || 'Other',
+          description: getValue(descIdx),
+          cost_price: parseFloat(getValue(costPriceIdx)) || 0,
+          selling_price: parseFloat(getValue(sellingPriceIdx)) || 0,
+          low_stock_threshold: parseFloat(getValue(lowStockIdx)) || 10,
+          stock_boxes: parseFloat(getValue(stockBoxesIdx)) || 0,
           pharmacy_id: user.profile.pharmacy_id,
           branch_id: selectedBranchId || null,
           is_active: true
         };
         
-        if (!product.name || !product.selling_price) {
+        console.log('Parsed product row', i, product);
+        
+        // Validate required fields
+        if (!product.name || product.name.length === 0) {
+          console.warn(`Row ${i}: Missing product name`);
+          errorCount++;
+          continue;
+        }
+        
+        if (!product.selling_price || product.selling_price === 0) {
+          console.warn(`Row ${i}: Missing or invalid selling price`);
           errorCount++;
           continue;
         }
@@ -531,6 +566,7 @@ async function importProductsFromCSV(csvText, user, reload, progressDiv) {
     if (progressDiv) progressDiv.style.display = 'none';
     reload();
   } catch (err) {
+    console.error('CSV import error:', err);
     showToast('Failed to import CSV: ' + err.message, 'error');
     if (progressDiv) progressDiv.style.display = 'none';
   }
@@ -566,6 +602,9 @@ async function importProductsFromExcel(arrayBuffer, fileName, user, reload, prog
     let errorCount = 0;
     const statusDiv = document.getElementById('import-status');
     
+    console.log('Excel sheet parsed, found', rows.length, 'rows');
+    console.log('First row keys:', rows.length > 0 ? Object.keys(rows[0]) : 'N/A');
+    
     for (let i = 0; i < rows.length; i++) {
       try {
         if (statusDiv) statusDiv.textContent = `Processing row ${i + 1} of ${rows.length}...`;
@@ -573,26 +612,41 @@ async function importProductsFromExcel(arrayBuffer, fileName, user, reload, prog
         const row = rows[i];
         
         // Extract values - handle both lowercase and original case headers
-        const getValue = (key) => {
+        const getValue = (possibleNames) => {
           const keys = Object.keys(row);
-          const matchingKey = keys.find(k => k.toLowerCase() === key.toLowerCase());
-          return row[matchingKey] || '';
+          for (const name of possibleNames) {
+            const matchingKey = keys.find(k => k.toLowerCase().includes(name.toLowerCase()));
+            if (matchingKey && row[matchingKey]) {
+              return row[matchingKey].toString().trim();
+            }
+          }
+          return '';
         };
         
         const product = {
-          name: (getValue('name') || getValue('product_name') || '').toString().trim(),
-          category: (getValue('category') || 'Other').toString().trim(),
-          description: (getValue('description') || '').toString().trim(),
-          cost_price: parseFloat(getValue('cost_price')) || 0,
-          selling_price: parseFloat(getValue('selling_price') || getValue('price')) || 0,
-          low_stock_threshold: parseFloat(getValue('low_stock_threshold')) || 10,
-          stock_boxes: parseFloat(getValue('stock_boxes') || getValue('stock')) || 0,
+          name: getValue(['product', 'name']),
+          category: getValue(['category']) || 'Other',
+          description: getValue(['description']),
+          cost_price: parseFloat(getValue(['cost', 'price'])) || 0,
+          selling_price: parseFloat(getValue(['selling', 'price'])) || 0,
+          low_stock_threshold: parseFloat(getValue(['low', 'stock'])) || 10,
+          stock_boxes: parseFloat(getValue(['stock', 'boxes', 'quantity'])) || 0,
           pharmacy_id: user.profile.pharmacy_id,
           branch_id: selectedBranchId || null,
           is_active: true
         };
         
-        if (!product.name || !product.selling_price) {
+        console.log('Parsed product row', i + 1, product);
+        
+        // Validate required fields
+        if (!product.name || product.name.length === 0) {
+          console.warn(`Row ${i + 1}: Missing product name`);
+          errorCount++;
+          continue;
+        }
+        
+        if (!product.selling_price || product.selling_price === 0) {
+          console.warn(`Row ${i + 1}: Missing or invalid selling price`);
           errorCount++;
           continue;
         }
