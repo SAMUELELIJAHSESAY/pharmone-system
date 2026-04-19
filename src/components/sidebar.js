@@ -52,6 +52,9 @@ export function renderSidebar(user) {
       <button class="nav-item" data-view="returns">
         <span class="nav-icon">&#x21A9;</span> Returns
       </button>
+      <button class="nav-item" data-view="returns-management">
+        <span class="nav-icon">📋</span> Return Requests
+      </button>
       <button class="nav-item" data-view="alerts">
         <span class="nav-icon">&#x1F514;</span> Alerts
       </button>
@@ -71,6 +74,9 @@ export function renderSidebar(user) {
       <button class="nav-item" data-view="reports">
         <span class="nav-icon">&#128202;</span> Reports
       </button>
+      <button class="nav-item" data-view="sales-reports">
+        <span class="nav-icon">&#128202;</span> Sales Reports
+      </button>
     `;
   } else {
     navItems = `
@@ -81,6 +87,9 @@ export function renderSidebar(user) {
       <button class="nav-item" data-view="pos">
         <span class="nav-icon">&#128179;</span> Point of Sale
       </button>
+      <button class="nav-item" data-view="sales-history">
+        <span class="nav-icon">&#128202;</span> Sales History
+      </button>
       <button class="nav-item" data-view="customers">
         <span class="nav-icon">&#128100;</span> Customers
       </button>
@@ -89,6 +98,9 @@ export function renderSidebar(user) {
         <span class="nav-icon">&#128104;</span> Patients
       </button>
       <div class="sidebar-section-label">Operations</div>
+      <button class="nav-item" data-view="returns-request">
+        <span class="nav-icon">&#x21A9;</span> Return Requests
+      </button>
       <button class="nav-item" data-view="expenses">
         <span class="nav-icon">&#128181;</span> Expenses
       </button>

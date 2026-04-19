@@ -7,18 +7,22 @@ import { renderInventory } from './admin/inventory.js';
 import { renderSales } from './admin/sales.js';
 import { renderCustomers } from './admin/customers.js';
 import { renderReports } from './admin/reports.js';
+import { renderAdminSalesReports } from './admin/sales-reports.js';
 import { renderStaff } from './admin/staff.js';
 import { renderBranches } from './admin/branches.js';
 import { renderBranchDetailsView } from './admin/branch-details.js';
 import { renderSuppliers } from './admin/suppliers.js';
 import { renderPurchases } from './admin/purchases.js';
 import { renderReturns } from './admin/returns.js';
+import { renderAdminReturnsManagement } from './admin/returns-management.js';
 import { renderAlerts } from './admin/alerts.js';
 import { renderPatientManagementView } from './admin/patients.js';
 import { renderExpenseManagement } from './admin/expenses.js';
 import { renderStockTransfers } from './admin/stock-transfers.js';
 import { renderSalesmanDashboard } from './salesman/dashboard.js';
 import { renderPOS } from './salesman/pos.js';
+import { renderSalesHistory } from './salesman/sales-history.js';
+import { renderSalesmanReturnsRequest } from './salesman/returns-request.js';
 import { renderPharmacies } from './super-admin/pharmacies.js';
 import { renderAllUsers } from './super-admin/users.js';
 import { renderSettings } from './super-admin/settings.js';
@@ -173,13 +177,17 @@ export function navigate(view, params = {}) {
     'suppliers': 'Suppliers',
     'purchases': 'Purchase Orders',
     'returns': 'Sales Returns',
+    'returns-management': 'Return Requests',
     'alerts': 'Alerts & Notifications',
     'reports': 'Reports',
+    'sales-reports': 'Sales Reports',
     'staff': 'Staff',
     'branches': 'Branches',
     'branch-details': 'Branch Details',
     'salesman-dashboard': 'Dashboard',
     'pos': 'Point of Sale',
+    'sales-history': 'My Sales History',
+    'returns-request': 'Return Requests',
   };
 
   if (titleEl) titleEl.textContent = titles[view] || 'Dashboard';
@@ -199,8 +207,10 @@ export function navigate(view, params = {}) {
     case 'suppliers': renderSuppliers(content, currentUser); break;
     case 'purchases': renderPurchases(content, currentUser); break;
     case 'returns': renderReturns(content, currentUser); break;
+    case 'returns-management': renderAdminReturnsManagement(content, currentUser); break;
     case 'alerts': renderAlerts(content, currentUser); break;
     case 'reports': renderReports(content, currentUser); break;
+    case 'sales-reports': renderAdminSalesReports(content, currentUser); break;
     case 'staff': renderStaff(content, currentUser); break;
     case 'branches': renderBranches(content, currentUser); break;
     case 'branch-details': 
@@ -210,6 +220,8 @@ export function navigate(view, params = {}) {
       break;
     case 'salesman-dashboard': renderSalesmanDashboard(content, currentUser); break;
     case 'pos': renderPOS(content, currentUser); break;
+    case 'sales-history': renderSalesHistory(content, currentUser); break;
+    case 'returns-request': renderSalesmanReturnsRequest(content, currentUser); break;
     default: content.innerHTML = '<div class="empty-state"><div class="empty-state-icon">&#128269;</div><div class="empty-state-title">Page not found</div></div>';
   }
 }

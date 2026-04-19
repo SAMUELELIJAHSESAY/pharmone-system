@@ -430,7 +430,7 @@ async function savePatient(event) {
     const { data: userData } = await supabase.auth.getUser();
     const { data: profileData } = await supabase
       .from('profiles')
-      .select('pharmacy_id')
+      .select('pharmacy_id, branch_id')
       .eq('id', userData.user.id)
       .single();
     
@@ -448,14 +448,39 @@ async function savePatient(event) {
       emergency_phone: document.getElementById('patient-emergency-phone').value || null,
       allergies: document.getElementById('patient-allergies').value || null,
       medical_notes: document.getElementById('patient-medical-notes').value || null,
-      pharmacy_id: profileData.pharmacy_id
+      pharmacy_id: profileData.pharmacy_id,
+      branch_id: profileData.branch_id,
+      is_active: true,
+      created_at: new Date().toISOString()
     };
     
-    await createPatient(patient);
+    const savedPatient = await createPatient(patient);
     
-    alert('Patient registered successfully!');
-    closeModal('add-patient-modal');
-    location.reload();
+    if (savedPatient && savedPatient.id) {
+      alert('Patient registered successfully!');
+      closeModal('add-patient-modal');
+      
+      // Clear form
+      document.getElementById('patient-name').value = '';
+      document.getElementById('patient-phone').value = '';
+      document.getElementById('patient-email').value = '';
+      document.getElementById('patient-gender').value = '';
+      document.getElementById('patient-dob').value = '';
+      document.getElementById('patient-address').value = '';
+      document.getElementById('patient-id-number').value = '';
+      document.getElementById('patient-insurance-provider').value = '';
+      document.getElementById('patient-insurance-number').value = '';
+      document.getElementById('patient-emergency-contact').value = '';
+      document.getElementById('patient-emergency-phone').value = '';
+      document.getElementById('patient-allergies').value = '';
+      document.getElementById('patient-medical-notes').value = '';
+      
+      // Reload patient list
+      const patients = await getPatients(profileData.pharmacy_id, profileData.branch_id);
+      displayPatients(patients);
+    } else {
+      alert('Failed to register patient');
+    }
     
   } catch (error) {
     console.error('Error saving patient:', error);

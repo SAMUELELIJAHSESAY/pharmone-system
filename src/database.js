@@ -557,6 +557,81 @@ export async function createSalesReturn(returnPayload, items) {
   return ret;
 }
 
+// ===================== ADVANCED RETURNS MANAGEMENT =====================
+export async function processPartialReturn(returnId, saleId, returnedItems, refundAmount, newTotal) {
+  const { error } = await supabase.rpc('process_partial_return', {
+    p_return_id: returnId,
+    p_sale_id: saleId,
+    p_returned_items: returnedItems,
+    p_refund_amount: refundAmount,
+    p_new_total: newTotal
+  });
+  if (error) throw error;
+  return true;
+}
+
+export async function processFullReturn(returnId, saleId, refundAmount) {
+  const { error } = await supabase.rpc('process_full_return', {
+    p_return_id: returnId,
+    p_sale_id: saleId,
+    p_refund_amount: refundAmount
+  });
+  if (error) throw error;
+  return true;
+}
+
+export async function getBranchReturnStats(pharmacyId, branchId) {
+  const { data, error } = await supabase.rpc('get_branch_return_stats', {
+    p_pharmacy_id: pharmacyId,
+    p_branch_id: branchId
+  });
+  if (error) throw error;
+  return data?.[0] || {};
+}
+
+export async function getReturnAuditLog(pharmacyId, returnId = null, limit = 50) {
+  let query = supabase
+    .from('return_audit_log')
+    .select('*, profiles(full_name, email)')
+    .eq('pharmacy_id', pharmacyId)
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  
+  if (returnId) query = query.eq('return_id', returnId);
+  
+  const { data, error } = await query;
+  if (error) throw error;
+  return data || [];
+}
+
+export async function getReturnsByStatus(pharmacyId, status, branchId = null) {
+  let query = supabase
+    .from('sales_returns')
+    .select('*, customers(name), profiles(full_name)')
+    .eq('pharmacy_id', pharmacyId)
+    .eq('status', status);
+  
+  if (branchId) query = query.eq('branch_id', branchId);
+  
+  const { data, error } = await query.order('created_at', { ascending: false });
+  if (error) throw error;
+  return data || [];
+}
+
+export async function getReturnsByType(pharmacyId, type, branchId = null) {
+  let query = supabase
+    .from('sales_returns')
+    .select('*, customers(name), profiles(full_name)')
+    .eq('pharmacy_id', pharmacyId)
+    .eq('return_type', type);
+  
+  if (branchId) query = query.eq('branch_id', branchId);
+  
+  const { data, error } = await query.order('created_at', { ascending: false });
+  if (error) throw error;
+  return data || [];
+}
+
 // ===================== STOCK ADJUSTMENTS =====================
 export async function getStockAdjustments(pharmacyId) {
   const { data, error } = await supabase
