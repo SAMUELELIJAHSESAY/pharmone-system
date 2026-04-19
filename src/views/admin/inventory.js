@@ -52,11 +52,11 @@ function renderView(container, products, user, branchList) {
         </div>
         <div class="flex gap-2" style="display:flex;gap:0.5rem">
           <button class="btn btn-ghost" id="stock-log-btn">Stock History</button>
-          <button class="btn btn-ghost" id="import-csv-btn">📥 Import CSV</button>
+          <button class="btn btn-ghost" id="import-csv-btn">📥 Import CSV/Excel</button>
           <button class="btn btn-primary" id="add-product-btn">+ Add Product</button>
         </div>
       </div>
-      <input type="file" id="csv-import-input" accept=".csv" style="display:none;" />
+      <input type="file" id="csv-import-input" accept=".csv,.xlsx,.xls" style="display:none;" />
       <div id="import-progress" style="display:none;margin-bottom:1rem;padding:1rem;background:var(--info-light);border-radius:var(--radius);">
         <div class="text-sm font-semibold">Importing products...</div>
         <div id="import-status" class="text-xs text-muted" style="margin-top:0.5rem;"></div>
@@ -158,11 +158,35 @@ function renderView(container, products, user, branchList) {
     const file = e.target.files[0];
     if (!file) return;
     
-    const reader = new FileReader();
-    reader.onload = async (event) => {
-      await importProductsFromCSV(event.target.result, user, reload);
-    };
-    reader.readAsText(file);
+    // Show progress indicator
+    const progressDiv = document.getElementById('import-progress');
+    if (progressDiv) progressDiv.style.display = 'block';
+    
+    try {
+      // Detect file type by extension
+      const fileName = file.name.toLowerCase();
+      if (fileName.endsWith('.xlsx') || fileName.endsWith('.xls')) {
+        // Handle Excel files
+        const reader = new FileReader();
+        reader.onload = async (event) => {
+          await importProductsFromExcel(event.target.result, file.name, user, reload, progressDiv);
+        };
+        reader.readAsArrayBuffer(file);
+      } else if (fileName.endsWith('.csv')) {
+        // Handle CSV files
+        const reader = new FileReader();
+        reader.onload = async (event) => {
+          await importProductsFromCSV(event.target.result, user, reload, progressDiv);
+        };
+        reader.readAsText(file);
+      } else {
+        showToast('File format not supported. Please use CSV or Excel (.xlsx/.xls) files.', 'error');
+        if (progressDiv) progressDiv.style.display = 'none';
+      }
+    } catch (err) {
+      showToast('Failed to read file: ' + err.message, 'error');
+      if (progressDiv) progressDiv.style.display = 'none';
+    }
   });
 
   const search = debounce((q) => {
@@ -449,7 +473,7 @@ async function showStockLogs(user) {
   });
 }
 
-async function importProductsFromCSV(csvText, user, reload) {
+async function importProductsFromCSV(csvText, user, reload, progressDiv) {
   const { createProduct } = await import('../../database.js');
   const { showToast } = await import('../../utils.js');
   
@@ -457,6 +481,7 @@ async function importProductsFromCSV(csvText, user, reload) {
     const lines = csvText.split('\n').map(line => line.trim()).filter(line => line.length > 0);
     if (lines.length < 2) {
       showToast('CSV file must have header row and at least one product', 'error');
+      if (progressDiv) progressDiv.style.display = 'none';
       return;
     }
     
@@ -466,8 +491,12 @@ async function importProductsFromCSV(csvText, user, reload) {
     let successCount = 0;
     let errorCount = 0;
     
+    const statusDiv = document.getElementById('import-status');
+    
     for (let i = 1; i < lines.length; i++) {
       try {
+        if (statusDiv) statusDiv.textContent = `Processing row ${i} of ${lines.length - 1}...`;
+        
         const values = parseCSVLine(lines[i]);
         
         if (values.length < 5) continue; // Skip incomplete rows
@@ -481,7 +510,7 @@ async function importProductsFromCSV(csvText, user, reload) {
           low_stock_threshold: parseFloat(values[5]) || 10,
           stock_boxes: parseFloat(values[6]) || 0,
           pharmacy_id: user.profile.pharmacy_id,
-          branch_id: user.profile.branch_id || null,
+          branch_id: selectedBranchId || null,
           is_active: true
         };
         
@@ -498,10 +527,91 @@ async function importProductsFromCSV(csvText, user, reload) {
       }
     }
     
-    showToast(`Imported ${successCount} products. ${errorCount} errors.`, successCount > 0 ? 'success' : 'warning');
+    showToast(`✓ Imported ${successCount} products. ${errorCount} errors.`, successCount > 0 ? 'success' : 'warning');
+    if (progressDiv) progressDiv.style.display = 'none';
     reload();
   } catch (err) {
     showToast('Failed to import CSV: ' + err.message, 'error');
+    if (progressDiv) progressDiv.style.display = 'none';
+  }
+}
+
+async function importProductsFromExcel(arrayBuffer, fileName, user, reload, progressDiv) {
+  try {
+    // Dynamically import xlsx library
+    const XLSX = await import('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/+esm');
+    const { createProduct } = await import('../../database.js');
+    const { showToast } = await import('../../utils.js');
+    
+    // Parse Excel file
+    const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+    const sheetName = workbook.SheetNames[0];
+    
+    if (!sheetName) {
+      showToast('Excel file has no sheets', 'error');
+      if (progressDiv) progressDiv.style.display = 'none';
+      return;
+    }
+    
+    const sheet = workbook.Sheets[sheetName];
+    const rows = XLSX.utils.sheet_to_json(sheet);
+    
+    if (rows.length === 0) {
+      showToast('Excel sheet is empty or has no valid data', 'error');
+      if (progressDiv) progressDiv.style.display = 'none';
+      return;
+    }
+    
+    let successCount = 0;
+    let errorCount = 0;
+    const statusDiv = document.getElementById('import-status');
+    
+    for (let i = 0; i < rows.length; i++) {
+      try {
+        if (statusDiv) statusDiv.textContent = `Processing row ${i + 1} of ${rows.length}...`;
+        
+        const row = rows[i];
+        
+        // Extract values - handle both lowercase and original case headers
+        const getValue = (key) => {
+          const keys = Object.keys(row);
+          const matchingKey = keys.find(k => k.toLowerCase() === key.toLowerCase());
+          return row[matchingKey] || '';
+        };
+        
+        const product = {
+          name: (getValue('name') || getValue('product_name') || '').toString().trim(),
+          category: (getValue('category') || 'Other').toString().trim(),
+          description: (getValue('description') || '').toString().trim(),
+          cost_price: parseFloat(getValue('cost_price')) || 0,
+          selling_price: parseFloat(getValue('selling_price') || getValue('price')) || 0,
+          low_stock_threshold: parseFloat(getValue('low_stock_threshold')) || 10,
+          stock_boxes: parseFloat(getValue('stock_boxes') || getValue('stock')) || 0,
+          pharmacy_id: user.profile.pharmacy_id,
+          branch_id: selectedBranchId || null,
+          is_active: true
+        };
+        
+        if (!product.name || !product.selling_price) {
+          errorCount++;
+          continue;
+        }
+        
+        await createProduct(product);
+        successCount++;
+      } catch (err) {
+        console.error('Error importing row', i + 1, err);
+        errorCount++;
+      }
+    }
+    
+    showToast(`✓ Imported ${successCount} products from Excel. ${errorCount} errors.`, successCount > 0 ? 'success' : 'warning');
+    if (progressDiv) progressDiv.style.display = 'none';
+    reload();
+  } catch (err) {
+    console.error('Excel import error:', err);
+    showToast('Failed to import Excel file: ' + err.message, 'error');
+    if (progressDiv) progressDiv.style.display = 'none';
   }
 }
 
