@@ -154,13 +154,15 @@ function renderProductCards(products) {
     const totalUnits = (p.stock_boxes * p.units_per_box) + p.stock_units;
     const inCart = cart.find(c => c.product_id === p.id);
     const outOfStock = totalUnits <= 0;
+    const unitType = (p.unit_type || 'box').charAt(0).toUpperCase() + (p.unit_type || 'box').slice(1);
     return `
       <div class="pos-product-card ${outOfStock ? 'out-of-stock' : ''}" data-id="${p.id}" data-stock="${totalUnits}">
         <div class="pos-product-category">${p.category}</div>
         <div class="pos-product-name">${p.name}</div>
-        <div class="pos-product-price">${formatCurrency(p.price)}</div>
+        <div style="font-size:0.75rem;color:var(--primary);font-weight:600;margin-top:0.25rem">Sold by: ${unitType}</div>
+        <div class="pos-product-price">${formatCurrency(p.price)} per ${unitType.toLowerCase()}</div>
         <div class="pos-product-stock">${outOfStock ? 'Out of stock' : totalUnits + ' units'}</div>
-        ${inCart ? `<div style="margin-top:0.375rem"><span class="badge badge-primary">${inCart.quantity} in cart</span></div>` : ''}
+        ${inCart ? `<div style="margin-top:0.375rem"><span class="badge badge-primary">${inCart.quantity} ${unitType.toLowerCase()}s in cart</span></div>` : ''}
       </div>
     `;
   }).join('');
@@ -183,15 +185,19 @@ function bindProductClicks() {
           return;
         }
       } else {
+        const unitType = product.unit_type || 'box';
+        const minSell = product.min_sell_quantity || 1;
         cart.push({
           product_id: productId,
           product_name: product.name,
+          unit_type: unitType,
           unit_price: product.price,
-          quantity: 1,
+          quantity: minSell,
           maxStock: stock,
-          priceSet: product.price > 0,  // Lock price if already set
-          packaging_type: 'unit',  // Default: individual units
-          units_per_box: product.units_per_box || 1
+          priceSet: product.price > 0,
+          packaging_type: 'unit',
+          units_per_box: product.units_per_box || 1,
+          min_sell_quantity: minSell
         });
       }
 
@@ -223,17 +229,16 @@ function renderCart() {
   }
 
   cartItems.innerHTML = cart.map(item => {
-    const packagingInfo = getPackagingInfo(item.packaging_type, item.units_per_box);
-    const actualUnits = item.quantity * packagingInfo.units_per_unit;
+    const unitType = (item.unit_type || 'unit').charAt(0).toUpperCase() + (item.unit_type || 'unit').slice(1);
     return `
     <div class="cart-item" data-id="${item.product_id}">
       <div class="cart-item-info">
         <div class="cart-item-name">${item.product_name}</div>
-        <div style="font-size:0.8rem;color:var(--gray-500);margin-top:0.25rem">
-          Qty: ${item.quantity} × ${packagingInfo.label} = ${actualUnits} units
+        <div style="font-size:0.85rem;color:var(--gray-600);margin-top:0.25rem;font-weight:500">
+          ${item.quantity} × <strong>${unitType}</strong>
         </div>
-        <button class="btn btn-ghost btn-sm" onclick="window.editCartItemPackaging('${item.product_id}')" style="margin-top:0.375rem;font-size:0.75rem">
-          ✏️ Edit Packaging
+        <button class="btn btn-ghost btn-sm" onclick="window.editCartItemQty('${item.product_id}')" style="margin-top:0.375rem;font-size:0.75rem">
+          ✏️ Edit Qty
         </button>
         ${item.unit_price === 0 && !item.priceSet ? `
           <div style="display:flex;gap:0.5rem;align-items:center;margin-top:0.25rem">
@@ -243,7 +248,7 @@ function renderCart() {
               placeholder="0.00" />
           </div>
         ` : `
-          <div class="cart-item-price">${formatCurrency(item.unit_price)} each${item.priceSet && item.unit_price > 0 ? ' (locked)' : ''}</div>
+          <div class="cart-item-price">${formatCurrency(item.unit_price)} per ${(item.unit_type || 'unit').toLowerCase()}${item.priceSet && item.unit_price > 0 ? ' (locked)' : ''}</div>
         `}
       </div>
       <div class="cart-item-qty">

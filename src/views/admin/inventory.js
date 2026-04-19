@@ -247,6 +247,7 @@ function renderRows(products, branchList) {
         <td>
           <div class="font-semibold">${p.name}</div>
           <div class="text-xs text-muted">${p.description || ''}</div>
+          <div style="margin-top:0.25rem;"><span class="badge" style="background:var(--primary-light);color:var(--primary)">${(p.unit_type || 'box').charAt(0).toUpperCase() + (p.unit_type || 'box').slice(1)}</span></div>
         </td>
         <td><span class="badge badge-blue">${branchName}</span></td>
         <td><span class="badge badge-gray">${p.category}</span></td>
