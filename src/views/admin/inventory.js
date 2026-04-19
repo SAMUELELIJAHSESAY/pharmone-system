@@ -983,12 +983,12 @@ function showAddMultipleModal(user, reload, branchList) {
       <div id="product-rows-container" style="max-height:500px;overflow-y:auto;margin-bottom:1rem;">
         ${generateProductRow(0)}
       </div>
-      <button class="btn btn-ghost" id="add-row-btn" style="width:100%;margin-bottom:1rem">+ Add Another Product</button>
-      <div id="add-multiple-err" class="alert alert-danger hidden"></div>
-    `,
-    footer: `
-      <button class="btn btn-ghost" id="cancel-add-multiple">Cancel</button>
-      <button class="btn btn-primary" id="save-add-multiple">Add All Products</button>
+      <button type="button" class="btn btn-ghost" id="add-row-btn" style="width:100%;margin-bottom:1rem">+ Add Another Product</button>
+      <div id="add-multiple-err" class="alert alert-danger hidden" style="margin-bottom:1rem"></div>
+      <div style="display:flex;gap:0.5rem;border-top:1px solid var(--border);padding-top:1rem;margin-top:1rem">
+        <button type="button" class="btn btn-ghost" id="cancel-add-multiple">Cancel</button>
+        <button type="button" class="btn btn-primary" id="save-add-multiple" style="flex:1">✓ Add All Products</button>
+      </div>
     `
   });
 
