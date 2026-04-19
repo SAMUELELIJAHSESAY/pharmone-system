@@ -1168,6 +1168,33 @@ function generateProductRow(rowId) {
           <input type="number" class="form-input row-cost" min="0" step="0.01" placeholder="0.00" />
         </div>
       </div>
+      <div class="grid-2">
+        <div class="form-group">
+          <label class="form-label">Unit Type *</label>
+          <select class="form-input row-unit-type">
+            <option value="">Select unit type</option>
+            <option value="tablet">Tablet</option>
+            <option value="capsule">Capsule</option>
+            <option value="bottle">Bottle</option>
+            <option value="vial">Vial</option>
+            <option value="injection">Injection</option>
+            <option value="ml">ML</option>
+            <option value="box">Box</option>
+            <option value="blister">Blister</option>
+            <option value="jar">Jar</option>
+            <option value="tube">Tube</option>
+            <option value="sachet">Sachet</option>
+            <option value="strip">Strip</option>
+            <option value="bag">Bag</option>
+            <option value="pack">Pack</option>
+            <option value="piece">Piece</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Min Sell Quantity</label>
+          <input type="number" class="form-input row-min-sell" value="1" min="1" />
+        </div>
+      </div>
       <div class="grid-3">
         <div class="form-group">
           <label class="form-label">Units Per Box</label>
