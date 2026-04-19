@@ -53,6 +53,7 @@ function renderView(container, products, user, branchList) {
         <div class="flex gap-2" style="display:flex;gap:0.5rem">
           <button class="btn btn-ghost" id="stock-log-btn">Stock History</button>
           <button class="btn btn-ghost" id="import-csv-btn">📥 Import CSV/Excel</button>
+          <button class="btn btn-ghost" id="add-multiple-btn">➕ Add Multiple</button>
           <button class="btn btn-primary" id="add-product-btn">+ Add Product</button>
         </div>
       </div>
@@ -157,6 +158,7 @@ function renderView(container, products, user, branchList) {
   });
 
   document.getElementById('add-product-btn').addEventListener('click', () => showProductModal(null, user, reload, branchList));
+  document.getElementById('add-multiple-btn').addEventListener('click', () => showAddMultipleModal(user, reload, branchList));
   document.getElementById('stock-log-btn').addEventListener('click', () => showStockLogs(user));
   
   document.getElementById('import-csv-btn').addEventListener('click', () => {
@@ -966,5 +968,201 @@ function showBulkEditModal(productIds, productMap, user, reload) {
       saveBtn.disabled = false;
       saveBtn.textContent = 'Update Products';
     }
+  });
+}
+
+function showAddMultipleModal(user, reload, branchList) {
+  const { overlay, closeModal } = createModal({
+    id: 'add-multiple-modal',
+    title: 'Add Multiple Products',
+    size: 'modal-xl',
+    body: `
+      <div class="alert alert-info">
+        <strong>Add up to 20 products at once.</strong> Fill in the Product Name and Selling Price (required). Other fields are optional.
+      </div>
+      <div id="product-rows-container" style="max-height:500px;overflow-y:auto;margin-bottom:1rem;">
+        ${generateProductRow(0)}
+      </div>
+      <button class="btn btn-ghost" id="add-row-btn" style="width:100%;margin-bottom:1rem">+ Add Another Product</button>
+      <div id="add-multiple-err" class="alert alert-danger hidden"></div>
+    `,
+    footer: `
+      <button class="btn btn-ghost" id="cancel-add-multiple">Cancel</button>
+      <button class="btn btn-primary" id="save-add-multiple">Add All Products</button>
+    `
+  });
+
+  let rowCount = 1;
+
+  overlay.querySelector('#add-row-btn').addEventListener('click', () => {
+    if (rowCount >= 20) {
+      showToast('Maximum 20 products per batch', 'warning');
+      return;
+    }
+    const container = overlay.querySelector('#product-rows-container');
+    container.insertAdjacentHTML('beforeend', generateProductRow(rowCount));
+    rowCount++;
+    
+    // Bind remove buttons for new row
+    bindRemoveButtons(overlay, rowCount);
+  });
+
+  bindRemoveButtons(overlay, rowCount);
+
+  overlay.querySelector('#cancel-add-multiple').addEventListener('click', closeModal);
+  overlay.querySelector('#save-add-multiple').addEventListener('click', async () => {
+    const saveBtn = overlay.querySelector('#save-add-multiple');
+    const errEl = overlay.querySelector('#add-multiple-err');
+    errEl.classList.add('hidden');
+
+    // Collect all products
+    const products = [];
+    const rows = overlay.querySelectorAll('.product-row');
+    
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      const name = row.querySelector('.row-name').value.trim();
+      const category = row.querySelector('.row-category').value.trim() || 'General';
+      const price = parseFloat(row.querySelector('.row-price').value) || 0;
+      const cost = parseFloat(row.querySelector('.row-cost').value) || 0;
+      const upb = parseInt(row.querySelector('.row-upb').value) || 1;
+      const boxes = parseInt(row.querySelector('.row-boxes').value) || 0;
+      const units = parseInt(row.querySelector('.row-units').value) || 0;
+      const threshold = parseInt(row.querySelector('.row-threshold').value) || 5;
+      const expiry = row.querySelector('.row-expiry').value || null;
+      const desc = row.querySelector('.row-desc').value.trim();
+
+      // Validate required fields
+      if (!name) {
+        errEl.textContent = `Row ${i + 1}: Product name is required`;
+        errEl.classList.remove('hidden');
+        return;
+      }
+
+      if (price === 0) {
+        errEl.textContent = `Row ${i + 1}: Selling price must be greater than 0`;
+        errEl.classList.remove('hidden');
+        return;
+      }
+
+      products.push({
+        name,
+        category,
+        price,
+        cost_price: cost,
+        units_per_box: upb,
+        stock_boxes: boxes,
+        stock_units: units,
+        low_stock_threshold: threshold,
+        expiry_date: expiry,
+        description: desc,
+        pharmacy_id: user.profile.pharmacy_id,
+        branch_id: selectedBranchId || null,
+        is_active: true
+      });
+    }
+
+    if (products.length === 0) {
+      errEl.textContent = 'Please add at least one product';
+      errEl.classList.remove('hidden');
+      return;
+    }
+
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Adding...';
+
+    try {
+      const { createProduct } = await import('../../database.js');
+      let successCount = 0;
+      let errorCount = 0;
+
+      for (const product of products) {
+        try {
+          await createProduct(product);
+          successCount++;
+        } catch (err) {
+          console.error('Error creating product:', err);
+          errorCount++;
+        }
+      }
+
+      showToast(`✓ Added ${successCount} product(s). ${errorCount} failed.`, errorCount === 0 ? 'success' : 'warning');
+      closeModal();
+      reload();
+    } catch (err) {
+      errEl.textContent = err.message;
+      errEl.classList.remove('hidden');
+      saveBtn.disabled = false;
+      saveBtn.textContent = 'Add All Products';
+    }
+  });
+}
+
+function generateProductRow(rowId) {
+  return `
+    <div class="product-row" style="padding:1rem;border:1px solid var(--border);border-radius:var(--radius);margin-bottom:0.5rem;background:var(--bg-secondary)">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem">
+        <span class="font-semibold">Product ${rowId + 1}</span>
+        ${rowId > 0 ? `<button type="button" class="btn btn-ghost btn-sm remove-row-btn" data-row="${rowId}" style="color:var(--danger)">Remove</button>` : ''}
+      </div>
+      <div class="grid-2">
+        <div class="form-group">
+          <label class="form-label">Product Name *</label>
+          <input type="text" class="form-input row-name" placeholder="e.g. Amoxicillin 500mg" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">Selling Price *</label>
+          <input type="number" class="form-input row-price" min="0" step="0.01" placeholder="0.00" />
+        </div>
+      </div>
+      <div class="grid-2">
+        <div class="form-group">
+          <label class="form-label">Category</label>
+          <input type="text" class="form-input row-category" placeholder="Antibiotics, Painkillers..." />
+        </div>
+        <div class="form-group">
+          <label class="form-label">Cost Price</label>
+          <input type="number" class="form-input row-cost" min="0" step="0.01" placeholder="0.00" />
+        </div>
+      </div>
+      <div class="grid-3">
+        <div class="form-group">
+          <label class="form-label">Units Per Box</label>
+          <input type="number" class="form-input row-upb" value="1" min="1" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">Stock (Boxes)</label>
+          <input type="number" class="form-input row-boxes" value="0" min="0" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">Stock (Units)</label>
+          <input type="number" class="form-input row-units" value="0" min="0" />
+        </div>
+      </div>
+      <div class="grid-3">
+        <div class="form-group">
+          <label class="form-label">Low Stock Threshold</label>
+          <input type="number" class="form-input row-threshold" value="5" min="0" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">Expiry Date</label>
+          <input type="date" class="form-input row-expiry" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">Description</label>
+          <input type="text" class="form-input row-desc" placeholder="Optional description" />
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function bindRemoveButtons(overlay, rowCount) {
+  overlay.querySelectorAll('.remove-row-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      const row = btn.closest('.product-row');
+      if (row) row.remove();
+    });
   });
 }
