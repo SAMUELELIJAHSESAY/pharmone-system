@@ -414,7 +414,8 @@ async function processCheckout() {
     created_by: currentUser.id,
     pharmacy_id: currentUser.profile.pharmacy_id,
     branch_id: staffBranchId,
-    status: 'completed'
+    status: 'completed',
+    created_at: new Date().toISOString()  // Use client's current timestamp with timezone
   };
 
   try {
@@ -451,6 +452,7 @@ async function processCheckout() {
 }
 
 function showReceiptModal(sale, items, total, discount, paymentMethod) {
+  const saleDate = new Date(sale.created_at).toLocaleString();
   const { overlay, closeModal } = createModal({
     id: 'receipt-modal',
     title: 'Sale Complete!',
@@ -460,6 +462,7 @@ function showReceiptModal(sale, items, total, discount, paymentMethod) {
           <div style="font-size:3rem;margin-bottom:0.5rem">&#9989;</div>
           <div style="font-size:1.25rem;font-weight:700;color:var(--success)">${formatCurrency(total)}</div>
           <div class="text-sm text-muted">${sale.invoice_number}</div>
+          <div class="text-xs text-muted" style="margin-top:0.25rem">${saleDate}</div>
         </div>
         <div style="background:var(--gray-50);border-radius:var(--radius);padding:1rem;margin-bottom:1rem">
           ${items.map(i => {
@@ -511,7 +514,7 @@ function showReceiptModal(sale, items, total, discount, paymentMethod) {
           <div class="receipt">
             <div class="title">Receipt</div>
             <div class="row"><span>Invoice:</span><span><strong>${sale.invoice_number}</strong></span></div>
-            <div class="row"><span>Date:</span><span>${new Date().toLocaleString()}</span></div>
+            <div class="row"><span>Date:</span><span>${new Date(sale.created_at).toLocaleString()}</span></div>
             <div class="divider"></div>
             ${items.map(i => {
               const packagingInfo = getPackagingInfo(i.packaging_type || 'unit', i.units_per_box || 10);
