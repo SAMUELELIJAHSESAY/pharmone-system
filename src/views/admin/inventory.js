@@ -485,16 +485,24 @@ async function importProductsFromCSV(csvText, user, reload, progressDiv) {
       return;
     }
     
+    console.log('CSV import started, total lines:', lines.length);
+    
     // Parse CSV header
     const headerLine = lines[0];
     const headers = parseCSVLine(headerLine).map(h => h.trim().toLowerCase());
+    
+    console.log('CSV Headers:', headers);
     
     // Map header positions for flexible column matching
     const getColumnIndex = (possibleNames) => {
       for (const name of possibleNames) {
         const idx = headers.findIndex(h => h.includes(name.toLowerCase()));
-        if (idx !== -1) return idx;
+        if (idx !== -1) {
+          console.log(`Found column "${name}" at index ${idx}`);
+          return idx;
+        }
       }
+      console.warn(`Column not found for: ${possibleNames.join(', ')}`);
       return -1;
     };
     
@@ -506,12 +514,13 @@ async function importProductsFromCSV(csvText, user, reload, progressDiv) {
     const lowStockIdx = getColumnIndex(['low', 'stock']);
     const stockBoxesIdx = getColumnIndex(['stock', 'boxes', 'quantity']);
     
+    console.log('Column indices:', { nameIdx, categoryIdx, descIdx, costPriceIdx, sellingPriceIdx, lowStockIdx, stockBoxesIdx });
+    console.log('Current branch:', selectedBranchId);
+    console.log('Current pharmacy:', user.profile.pharmacy_id);
+    
     let successCount = 0;
     let errorCount = 0;
     const statusDiv = document.getElementById('import-status');
-    
-    console.log('CSV Headers detected:', headers);
-    console.log('Column indices:', { nameIdx, categoryIdx, descIdx, costPriceIdx, sellingPriceIdx, lowStockIdx, stockBoxesIdx });
     
     for (let i = 1; i < lines.length; i++) {
       try {
@@ -539,32 +548,38 @@ async function importProductsFromCSV(csvText, user, reload, progressDiv) {
           is_active: true
         };
         
-        console.log('Parsed product row', i, product);
+        console.log(`Row ${i} parsed:`, product);
         
         // Validate required fields
         if (!product.name || product.name.length === 0) {
-          console.warn(`Row ${i}: Missing product name`);
+          console.warn(`Row ${i}: Missing product name (raw value at index ${nameIdx}: "${getValue(nameIdx)}")`);
           errorCount++;
           continue;
         }
         
         if (!product.selling_price || product.selling_price === 0) {
-          console.warn(`Row ${i}: Missing or invalid selling price`);
+          console.warn(`Row ${i}: Invalid selling price. Raw value: "${getValue(sellingPriceIdx)}", Parsed: ${product.selling_price}`);
           errorCount++;
           continue;
         }
         
-        await createProduct(product);
+        console.log(`Creating CSV product: ${product.name}`);
+        const result = await createProduct(product);
+        console.log('CSV product created:', result);
         successCount++;
       } catch (err) {
-        console.error('Error importing row', i, err);
+        console.error('Error importing CSV row', i, ':', err);
         errorCount++;
       }
     }
     
+    console.log(`CSV Import completed: ${successCount} successful, ${errorCount} failed`);
     showToast(`✓ Imported ${successCount} products. ${errorCount} errors.`, successCount > 0 ? 'success' : 'warning');
     if (progressDiv) progressDiv.style.display = 'none';
-    reload();
+    
+    if (successCount > 0) {
+      setTimeout(() => reload(), 500);
+    }
   } catch (err) {
     console.error('CSV import error:', err);
     showToast('Failed to import CSV: ' + err.message, 'error');
@@ -579,6 +594,10 @@ async function importProductsFromExcel(arrayBuffer, fileName, user, reload, prog
     const { createProduct } = await import('../../database.js');
     const { showToast } = await import('../../utils.js');
     
+    console.log('Starting Excel import for file:', fileName);
+    console.log('Current branch ID:', selectedBranchId);
+    console.log('Current pharmacy ID:', user.profile.pharmacy_id);
+    
     // Parse Excel file
     const workbook = XLSX.read(arrayBuffer, { type: 'array' });
     const sheetName = workbook.SheetNames[0];
@@ -592,6 +611,12 @@ async function importProductsFromExcel(arrayBuffer, fileName, user, reload, prog
     const sheet = workbook.Sheets[sheetName];
     const rows = XLSX.utils.sheet_to_json(sheet);
     
+    console.log('Parsed rows from Excel:', rows.length);
+    if (rows.length > 0) {
+      console.log('First row keys:', Object.keys(rows[0]));
+      console.log('First row data:', rows[0]);
+    }
+    
     if (rows.length === 0) {
       showToast('Excel sheet is empty or has no valid data', 'error');
       if (progressDiv) progressDiv.style.display = 'none';
@@ -602,21 +627,24 @@ async function importProductsFromExcel(arrayBuffer, fileName, user, reload, prog
     let errorCount = 0;
     const statusDiv = document.getElementById('import-status');
     
-    console.log('Excel sheet parsed, found', rows.length, 'rows');
-    console.log('First row keys:', rows.length > 0 ? Object.keys(rows[0]) : 'N/A');
-    
     for (let i = 0; i < rows.length; i++) {
       try {
         if (statusDiv) statusDiv.textContent = `Processing row ${i + 1} of ${rows.length}...`;
         
         const row = rows[i];
+        const keys = Object.keys(row);
         
         // Extract values - handle both lowercase and original case headers
         const getValue = (possibleNames) => {
-          const keys = Object.keys(row);
+          if (!Array.isArray(possibleNames)) {
+            possibleNames = [possibleNames];
+          }
+          
           for (const name of possibleNames) {
-            const matchingKey = keys.find(k => k.toLowerCase().includes(name.toLowerCase()));
-            if (matchingKey && row[matchingKey]) {
+            const matchingKey = keys.find(k => 
+              k && k.toLowerCase().includes(name.toLowerCase())
+            );
+            if (matchingKey !== undefined && row[matchingKey] !== undefined && row[matchingKey] !== null && row[matchingKey] !== '') {
               return row[matchingKey].toString().trim();
             }
           }
@@ -624,19 +652,19 @@ async function importProductsFromExcel(arrayBuffer, fileName, user, reload, prog
         };
         
         const product = {
-          name: getValue(['product', 'name']),
-          category: getValue(['category']) || 'Other',
-          description: getValue(['description']),
-          cost_price: parseFloat(getValue(['cost', 'price'])) || 0,
-          selling_price: parseFloat(getValue(['selling', 'price'])) || 0,
-          low_stock_threshold: parseFloat(getValue(['low', 'stock'])) || 10,
-          stock_boxes: parseFloat(getValue(['stock', 'boxes', 'quantity'])) || 0,
+          name: getValue(['Product', 'Name']),
+          category: getValue(['Category']) || 'Other',
+          description: getValue(['Description']),
+          cost_price: parseFloat(getValue(['Cost', 'Price'])) || 0,
+          selling_price: parseFloat(getValue(['Selling', 'Price'])) || 0,
+          low_stock_threshold: parseFloat(getValue(['Low', 'Stock'])) || 10,
+          stock_boxes: parseFloat(getValue(['Stock', 'Boxes'])) || 0,
           pharmacy_id: user.profile.pharmacy_id,
           branch_id: selectedBranchId || null,
           is_active: true
         };
         
-        console.log('Parsed product row', i + 1, product);
+        console.log(`Row ${i + 1} parsed product:`, product);
         
         // Validate required fields
         if (!product.name || product.name.length === 0) {
@@ -646,22 +674,28 @@ async function importProductsFromExcel(arrayBuffer, fileName, user, reload, prog
         }
         
         if (!product.selling_price || product.selling_price === 0) {
-          console.warn(`Row ${i + 1}: Missing or invalid selling price`);
+          console.warn(`Row ${i + 1}: Missing or invalid selling price (got: ${getValue(['Selling', 'Price'])})`);
           errorCount++;
           continue;
         }
         
-        await createProduct(product);
+        console.log(`Creating product: ${product.name} - Price: ${product.selling_price}`);
+        const result = await createProduct(product);
+        console.log(`Product created successfully:`, result);
         successCount++;
       } catch (err) {
-        console.error('Error importing row', i + 1, err);
+        console.error('Error importing row', i + 1, ':', err);
         errorCount++;
       }
     }
     
+    console.log(`Import completed: ${successCount} successful, ${errorCount} failed`);
     showToast(`✓ Imported ${successCount} products from Excel. ${errorCount} errors.`, successCount > 0 ? 'success' : 'warning');
     if (progressDiv) progressDiv.style.display = 'none';
-    reload();
+    
+    if (successCount > 0) {
+      setTimeout(() => reload(), 500);
+    }
   } catch (err) {
     console.error('Excel import error:', err);
     showToast('Failed to import Excel file: ' + err.message, 'error');
