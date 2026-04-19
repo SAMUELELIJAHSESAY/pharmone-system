@@ -197,7 +197,8 @@ function bindProductClicks() {
           priceSet: product.price > 0,
           packaging_type: 'unit',
           units_per_box: product.units_per_box || 1,
-          min_sell_quantity: minSell
+          min_sell_quantity: minSell,
+          notes: ''
         });
       }
 
@@ -230,12 +231,27 @@ function renderCart() {
 
   cartItems.innerHTML = cart.map(item => {
     const unitType = (item.unit_type || 'unit').charAt(0).toUpperCase() + (item.unit_type || 'unit').slice(1);
+    const unitsPerBox = item.units_per_box || 10;
+    const unitsPerStrip = Math.ceil(unitsPerBox / 10) || 1;
+    
+    // Determine display label based on packaging type
+    let packagingLabel = unitType;
+    let totalUnitsInCart = item.quantity;
+    
+    if (item.packaging_type === 'strip') {
+      packagingLabel = `Strip (${unitsPerStrip} ${unitType.toLowerCase()}s)`;
+      totalUnitsInCart = item.quantity * unitsPerStrip;
+    } else if (item.packaging_type === 'box') {
+      packagingLabel = `Box (${unitsPerBox} ${unitType.toLowerCase()}s)`;
+      totalUnitsInCart = item.quantity * unitsPerBox;
+    }
+    
     return `
     <div class="cart-item" data-id="${item.product_id}">
       <div class="cart-item-info">
         <div class="cart-item-name">${item.product_name}</div>
         <div style="font-size:0.85rem;color:var(--gray-600);margin-top:0.25rem;font-weight:500">
-          ${item.quantity} × <strong>${unitType}</strong>
+          ${item.quantity} × <strong>${packagingLabel}</strong> <span style="color:var(--gray-500);font-size:0.75rem">(${totalUnitsInCart} ${unitType.toLowerCase()}s)</span>
         </div>
         ${item.notes ? `<div style="font-size:0.8rem;color:var(--primary);font-style:italic;margin-top:0.25rem">📝 ${item.notes}</div>` : ''}
         <button class="btn btn-ghost btn-sm" onclick="window.editCartItemQty('${item.product_id}')" style="margin-top:0.375rem;font-size:0.75rem">
@@ -249,7 +265,7 @@ function renderCart() {
               placeholder="0.00" />
           </div>
         ` : `
-          <div class="cart-item-price">${formatCurrency(item.unit_price)} per ${(item.unit_type || 'unit').toLowerCase()}${item.priceSet && item.unit_price > 0 ? ' (locked)' : ''}</div>
+          <div class="cart-item-price">${formatCurrency(item.unit_price)} per ${packagingLabel.toLowerCase()}${item.priceSet && item.unit_price > 0 ? ' (locked)' : ''}</div>
         `}
       </div>
       <div class="cart-item-qty">
@@ -303,9 +319,26 @@ function renderCart() {
 function adjustQty(productId, delta) {
   const item = cart.find(c => c.product_id === productId);
   if (!item) return;
+  
   const newQty = item.quantity + delta;
   if (newQty <= 0) { removeFromCart(productId); return; }
-  if (newQty > item.maxStock) { showToast('Not enough stock', 'error'); return; }
+  
+  // Calculate actual units based on packaging type
+  const unitsPerBox = item.units_per_box || 10;
+  const unitsPerStrip = Math.ceil(unitsPerBox / 10) || 1;
+  let unitsToValidate = newQty;
+  
+  if (item.packaging_type === 'strip') {
+    unitsToValidate = newQty * unitsPerStrip;
+  } else if (item.packaging_type === 'box') {
+    unitsToValidate = newQty * unitsPerBox;
+  }
+  
+  if (unitsToValidate > item.maxStock) { 
+    showToast(`Not enough stock (only ${item.maxStock} units available)`, 'error'); 
+    return; 
+  }
+  
   item.quantity = newQty;
   renderCart();
   filterProducts();
