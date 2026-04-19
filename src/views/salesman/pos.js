@@ -565,133 +565,79 @@ function getPackagingInfo(type, unitsPerBox) {
   return packagingOptions[type] || packagingOptions['unit'];
 }
 
-window.editCartItemPackaging = function(productId) {
+window.editCartItemQty = function(productId) {
   const item = cart.find(c => c.product_id === productId);
   if (!item) return;
 
   const product = allProducts.find(p => p.id === productId);
   if (!product) return;
 
-  const unitsPerBox = product.units_per_box || 10;
+  const unitType = (item.unit_type || 'unit').charAt(0).toUpperCase() + (item.unit_type || 'unit').slice(1);
   const totalAvailableUnits = item.maxStock;
-  const unitInfo = getPackagingInfo('unit', unitsPerBox);
-  const stripInfo = getPackagingInfo('strip', unitsPerBox);
-  const cardInfo = getPackagingInfo('card', unitsPerBox);
-  const boxInfo = getPackagingInfo('box', unitsPerBox);
+  const minSellQty = item.min_sell_quantity || 1;
 
   const { overlay, closeModal } = createModal({
-    id: 'packaging-modal',
-    title: `Edit Packaging: ${item.product_name}`,
+    id: 'qty-modal',
+    title: `Edit Quantity: ${item.product_name}`,
     body: `
       <div style="display:flex;flex-direction:column;gap:1rem">
         <div style="background:var(--info-light);padding:0.75rem;border-radius:var(--radius);font-size:0.875rem;border-left:4px solid var(--info)">
-          <strong>Available Stock:</strong> ${totalAvailableUnits} units total
+          <strong>Selling Unit:</strong> ${unitType}<br>
+          <strong>Available Stock:</strong> ${totalAvailableUnits} units<br>
+          <strong>Minimum Order:</strong> ${minSellQty} ${unitType.toLowerCase()}(s)
         </div>
         
         <div class="form-group">
-          <label class="form-label">Select Packaging Type</label>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem">
-            <label style="display:flex;align-items:center;gap:0.5rem;padding:0.75rem;border:2px solid ${item.packaging_type === 'unit' ? 'var(--primary)' : 'var(--gray-200)'};border-radius:var(--radius);cursor:pointer">
-              <input type="radio" name="packaging" value="unit" ${item.packaging_type === 'unit' ? 'checked' : ''} />
-              <span>${unitInfo.label} (${unitInfo.units_per_unit} unit)</span>
-            </label>
-            <label style="display:flex;align-items:center;gap:0.5rem;padding:0.75rem;border:2px solid ${item.packaging_type === 'strip' ? 'var(--primary)' : 'var(--gray-200)'};border-radius:var(--radius);cursor:pointer">
-              <input type="radio" name="packaging" value="strip" ${item.packaging_type === 'strip' ? 'checked' : ''} />
-              <span>${stripInfo.label} (${stripInfo.units_per_unit} units)</span>
-            </label>
-            <label style="display:flex;align-items:center;gap:0.5rem;padding:0.75rem;border:2px solid ${item.packaging_type === 'card' ? 'var(--primary)' : 'var(--gray-200)'};border-radius:var(--radius);cursor:pointer">
-              <input type="radio" name="packaging" value="card" ${item.packaging_type === 'card' ? 'checked' : ''} />
-              <span>${cardInfo.label} (${cardInfo.units_per_unit} units)</span>
-            </label>
-            <label style="display:flex;align-items:center;gap:0.5rem;padding:0.75rem;border:2px solid ${item.packaging_type === 'box' ? 'var(--primary)' : 'var(--gray-200)'};border-radius:var(--radius);cursor:pointer">
-              <input type="radio" name="packaging" value="box" ${item.packaging_type === 'box' ? 'checked' : ''} />
-              <span>${boxInfo.label} (${boxInfo.units_per_unit} units)</span>
-            </label>
-          </div>
-        </div>
-
-        <div class="form-group">
-          <label class="form-label">Quantity (how many <span id="pkg-type-label">${getPackagingInfo(item.packaging_type, unitsPerBox).label.toLowerCase()}s</span>)</label>
-          <input type="number" id="pkg-qty" class="form-input" value="${item.quantity}" min="1" max="999" style="font-size:1rem;padding:0.75rem" />
+          <label class="form-label">Quantity (${unitType.toLowerCase()}s)</label>
+          <input type="number" id="qty-input" class="form-input" value="${item.quantity}" min="${minSellQty}" max="999" step="${minSellQty}" style="font-size:1rem;padding:0.75rem" />
           <div style="font-size:0.8rem;color:var(--gray-500);margin-top:0.25rem">
-            Max available: <span id="pkg-max-qty">1</span> × <span id="pkg-unit-size">${getPackagingInfo(item.packaging_type, unitsPerBox).units_per_unit}</span> = <span id="pkg-max-units">1</span> units
+            Available: ${totalAvailableUnits} units
           </div>
         </div>
         
         <div style="background:var(--gray-50);padding:1rem;border-radius:var(--radius);border:2px solid var(--gray-200)">
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem">
-            <div>
-              <div style="font-size:0.875rem;color:var(--gray-600);margin-bottom:0.25rem">Selected Quantity</div>
-              <div style="font-size:1.75rem;font-weight:700;color:var(--primary)"><span id="pkg-qty-display">${item.quantity}</span> ${getPackagingInfo(item.packaging_type, unitsPerBox).label.toLowerCase()}s</div>
-            </div>
-            <div>
-              <div style="font-size:0.875rem;color:var(--gray-600);margin-bottom:0.25rem">Total Units</div>
-              <div style="font-size:1.75rem;font-weight:700;color:var(--success)"><span id="pkg-total-units">${item.quantity * getPackagingInfo(item.packaging_type, unitsPerBox).units_per_unit}</span> units</div>
-            </div>
+          <div style="text-align:center">
+            <div style="font-size:0.875rem;color:var(--gray-600);margin-bottom:0.5rem">Total Order</div>
+            <div style="font-size:2rem;font-weight:700;color:var(--primary)"><span id="qty-display">${item.quantity}</span> ${unitType.toLowerCase()}s</div>
+            <div style="font-size:0.9rem;color:var(--success);margin-top:0.5rem">@ ${formatCurrency(item.unit_price)} per ${unitType.toLowerCase()} = <strong id="total-price">${formatCurrency(item.quantity * item.unit_price)}</strong></div>
           </div>
-          <div id="pkg-error" style="color:var(--danger);font-weight:600;margin-top:0.75rem;display:none"></div>
+          <div id="qty-error" style="color:var(--danger);font-weight:600;margin-top:0.75rem;display:none"></div>
         </div>
       </div>
     `,
     footer: `
-      <button class="btn btn-ghost" id="pkg-cancel">Cancel</button>
-      <button class="btn btn-primary" id="pkg-save">Save</button>
+      <button class="btn btn-ghost" id="qty-cancel">Cancel</button>
+      <button class="btn btn-primary" id="qty-save">Save</button>
     `
   });
 
-  // Helper to update display
-  function updateDisplay() {
-    const selectedType = overlay.querySelector('input[name="packaging"]:checked').value;
-    const selectedInfo = getPackagingInfo(selectedType, unitsPerBox);
-    const qty = parseInt(overlay.querySelector('#pkg-qty').value) || 1;
-    const totalUnits = qty * selectedInfo.units_per_unit;
-    const maxQtyForThis = Math.floor(totalAvailableUnits / selectedInfo.units_per_unit);
-    const errorEl = overlay.querySelector('#pkg-error');
-
-    overlay.querySelector('#pkg-type-label').textContent = selectedInfo.label.toLowerCase() + 's';
-    overlay.querySelector('#pkg-unit-size').textContent = selectedInfo.units_per_unit;
-    overlay.querySelector('#pkg-max-qty').textContent = maxQtyForThis;
-    overlay.querySelector('#pkg-max-units').textContent = maxQtyForThis * selectedInfo.units_per_unit;
-    overlay.querySelector('#pkg-qty-display').textContent = qty;
-    overlay.querySelector('#pkg-total-units').textContent = totalUnits;
-
-    // Validate
-    if (totalUnits > totalAvailableUnits) {
-      errorEl.textContent = `❌ Cannot sell ${totalUnits} units. Only ${totalAvailableUnits} available!`;
-      errorEl.style.display = 'block';
-      overlay.querySelector('#pkg-save').disabled = true;
-    } else {
-      errorEl.style.display = 'none';
-      overlay.querySelector('#pkg-save').disabled = false;
-    }
-  }
-
-  // Events
-  const radios = overlay.querySelectorAll('input[name="packaging"]');
-  radios.forEach(radio => {
-    radio.addEventListener('change', updateDisplay);
+  // Update display as user types
+  overlay.querySelector('#qty-input').addEventListener('input', (e) => {
+    const qty = parseInt(e.target.value) || minSellQty;
+    overlay.querySelector('#qty-display').textContent = qty;
+    overlay.querySelector('#total-price').textContent = formatCurrency(qty * item.unit_price);
   });
 
-  const qtyInput = overlay.querySelector('#pkg-qty');
-  qtyInput.addEventListener('input', updateDisplay);
-  qtyInput.addEventListener('change', updateDisplay);
-
-  overlay.querySelector('#pkg-cancel').addEventListener('click', closeModal);
-  overlay.querySelector('#pkg-save').addEventListener('click', () => {
-    const selected = overlay.querySelector('input[name="packaging"]:checked').value;
-    const newQty = parseInt(overlay.querySelector('#pkg-qty').value) || 1;
+  overlay.querySelector('#qty-cancel').addEventListener('click', closeModal);
+  overlay.querySelector('#qty-save').addEventListener('click', () => {
+    const qty = parseInt(overlay.querySelector('#qty-input').value) || minSellQty;
+    const errorEl = overlay.querySelector('#qty-error');
     
-    // Validate one more time
-    const info = getPackagingInfo(selected, unitsPerBox);
-    if ((newQty * info.units_per_unit) > totalAvailableUnits) {
-      showToast('Cannot sell that many units. Stock limit exceeded!', 'error');
+    if (qty < minSellQty) {
+      errorEl.textContent = `Minimum order is ${minSellQty} ${unitType.toLowerCase()}(s)`;
+      errorEl.style.display = 'block';
       return;
     }
-
-    item.packaging_type = selected;
-    item.quantity = newQty;
-    showToast(`✓ Updated: ${newQty} ${info.label.toLowerCase()}(s) = ${newQty * info.units_per_unit} units`);
+    
+    if (qty > totalAvailableUnits) {
+      errorEl.textContent = `Only ${totalAvailableUnits} units available`;
+      errorEl.style.display = 'block';
+      return;
+    }
+    
+    item.quantity = qty;
     renderCart();
+    updateCartTotals();
     closeModal();
   });
-}
+};
