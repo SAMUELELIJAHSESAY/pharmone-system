@@ -237,8 +237,9 @@ function renderCart() {
         <div style="font-size:0.85rem;color:var(--gray-600);margin-top:0.25rem;font-weight:500">
           ${item.quantity} × <strong>${unitType}</strong>
         </div>
+        ${item.notes ? `<div style="font-size:0.8rem;color:var(--primary);font-style:italic;margin-top:0.25rem">📝 ${item.notes}</div>` : ''}
         <button class="btn btn-ghost btn-sm" onclick="window.editCartItemQty('${item.product_id}')" style="margin-top:0.375rem;font-size:0.75rem">
-          ✏️ Edit Qty
+          ✏️ Edit
         </button>
         ${item.unit_price === 0 && !item.priceSet ? `
           <div style="display:flex;gap:0.5rem;align-items:center;margin-top:0.25rem">
@@ -575,69 +576,186 @@ window.editCartItemQty = function(productId) {
   const unitType = (item.unit_type || 'unit').charAt(0).toUpperCase() + (item.unit_type || 'unit').slice(1);
   const totalAvailableUnits = item.maxStock;
   const minSellQty = item.min_sell_quantity || 1;
+  const unitsPerBox = product.units_per_box || 10;
+  const unitsPerStrip = Math.ceil(unitsPerBox / 10) || 1;
+
+  // Determine packaging options
+  const stripLabel = `Strip (${unitsPerStrip} ${unitType.toLowerCase()}s)`;
+  const boxLabel = `Box (${unitsPerBox} ${unitType.toLowerCase()}s)`;
 
   const { overlay, closeModal } = createModal({
     id: 'qty-modal',
-    title: `Edit Quantity: ${item.product_name}`,
+    title: `Edit: ${item.product_name}`,
+    size: 'modal-lg',
     body: `
       <div style="display:flex;flex-direction:column;gap:1rem">
         <div style="background:var(--info-light);padding:0.75rem;border-radius:var(--radius);font-size:0.875rem;border-left:4px solid var(--info)">
-          <strong>Selling Unit:</strong> ${unitType}<br>
-          <strong>Available Stock:</strong> ${totalAvailableUnits} units<br>
-          <strong>Minimum Order:</strong> ${minSellQty} ${unitType.toLowerCase()}(s)
+          <strong>Product:</strong> ${item.product_name}<br>
+          <strong>Unit Type:</strong> ${unitType}<br>
+          <strong>Stock Available:</strong> ${totalAvailableUnits} units
         </div>
-        
+
+        <!-- Packaging Type Selection -->
         <div class="form-group">
-          <label class="form-label">Quantity (${unitType.toLowerCase()}s)</label>
-          <input type="number" id="qty-input" class="form-input" value="${item.quantity}" min="${minSellQty}" max="999" step="${minSellQty}" style="font-size:1rem;padding:0.75rem" />
+          <label class="form-label">Sell By:</label>
+          <div style="display:grid;grid-template-columns:1fr 1fr ${unitsPerBox > 1 ? '1fr' : ''};gap:0.5rem">
+            <label style="display:flex;align-items:center;gap:0.5rem;padding:0.75rem;border:2px solid var(--border);border-radius:var(--radius);cursor:pointer;transition:all 0.2s" id="label-unit">
+              <input type="radio" name="packaging-type" value="unit" checked />
+              <span style="font-size:0.9rem"><strong>1 ${unitType.toLowerCase()}</strong></span>
+            </label>
+            <label style="display:flex;align-items:center;gap:0.5rem;padding:0.75rem;border:2px solid var(--border);border-radius:var(--radius);cursor:pointer;transition:all 0.2s" id="label-strip">
+              <input type="radio" name="packaging-type" value="strip" />
+              <span style="font-size:0.9rem"><strong>1 ${stripLabel.toLowerCase()}</strong></span>
+            </label>
+            ${unitsPerBox > 1 ? `
+            <label style="display:flex;align-items:center;gap:0.5rem;padding:0.75rem;border:2px solid var(--border);border-radius:var(--radius);cursor:pointer;transition:all 0.2s" id="label-box">
+              <input type="radio" name="packaging-type" value="box" />
+              <span style="font-size:0.9rem"><strong>1 ${boxLabel.toLowerCase()}</strong></span>
+            </label>
+            ` : ''}
+          </div>
+        </div>
+
+        <!-- Quantity Input -->
+        <div class="form-group">
+          <label class="form-label">Quantity</label>
+          <div style="display:flex;gap:0.5rem;align-items:center">
+            <input type="number" id="qty-input" class="form-input" value="1" min="1" max="999" style="font-size:1rem;padding:0.75rem;flex:1" />
+            <span id="qty-unit-label" style="font-weight:600;min-width:100px">${unitType.toLowerCase()}s</span>
+          </div>
           <div style="font-size:0.8rem;color:var(--gray-500);margin-top:0.25rem">
-            Available: ${totalAvailableUnits} units
+            Max available: <span id="max-qty">1</span> (at selected packaging)
           </div>
         </div>
-        
-        <div style="background:var(--gray-50);padding:1rem;border-radius:var(--radius);border:2px solid var(--gray-200)">
-          <div style="text-align:center">
-            <div style="font-size:0.875rem;color:var(--gray-600);margin-bottom:0.5rem">Total Order</div>
-            <div style="font-size:2rem;font-weight:700;color:var(--primary)"><span id="qty-display">${item.quantity}</span> ${unitType.toLowerCase()}s</div>
-            <div style="font-size:0.9rem;color:var(--success);margin-top:0.5rem">@ ${formatCurrency(item.unit_price)} per ${unitType.toLowerCase()} = <strong id="total-price">${formatCurrency(item.quantity * item.unit_price)}</strong></div>
-          </div>
-          <div id="qty-error" style="color:var(--danger);font-weight:600;margin-top:0.75rem;display:none"></div>
+
+        <!-- Unit Price (editable) -->
+        <div class="form-group">
+          <label class="form-label">Price Per Unit</label>
+          <input type="number" id="unit-price" class="form-input" value="${item.unit_price}" min="0" step="0.01" style="font-size:1rem;padding:0.75rem" />
         </div>
+
+        <!-- Notes -->
+        <div class="form-group">
+          <label class="form-label">Notes (Optional)</label>
+          <input type="text" id="item-notes" class="form-input" placeholder="e.g. Bulk discount, special request..." value="${item.notes || ''}" style="padding:0.75rem" />
+        </div>
+
+        <!-- Summary -->
+        <div style="background:var(--success-light);padding:1rem;border-radius:var(--radius);border-left:4px solid var(--success)">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem">
+            <div>
+              <div style="font-size:0.875rem;color:var(--gray-600);margin-bottom:0.25rem">Quantity</div>
+              <div style="font-size:1.5rem;font-weight:700"><span id="qty-display">1</span> <span id="qty-unit-display">${unitType.toLowerCase()}s</span></div>
+            </div>
+            <div style="text-align:right">
+              <div style="font-size:0.875rem;color:var(--gray-600);margin-bottom:0.25rem">Total Price</div>
+              <div style="font-size:1.75rem;font-weight:700;color:var(--primary)"><strong id="total-price">${formatCurrency(item.unit_price)}</strong></div>
+            </div>
+          </div>
+        </div>
+
+        <div id="qty-error" style="color:var(--danger);font-weight:600;padding:0.75rem;background:var(--danger-light);border-radius:var(--radius);display:none"></div>
       </div>
     `,
     footer: `
       <button class="btn btn-ghost" id="qty-cancel">Cancel</button>
-      <button class="btn btn-primary" id="qty-save">Save</button>
+      <button class="btn btn-primary" id="qty-save">Update Item</button>
     `
   });
 
-  // Update display as user types
-  overlay.querySelector('#qty-input').addEventListener('input', (e) => {
-    const qty = parseInt(e.target.value) || minSellQty;
-    overlay.querySelector('#qty-display').textContent = qty;
-    overlay.querySelector('#total-price').textContent = formatCurrency(qty * item.unit_price);
+  // Helper function to update display based on packaging type
+  function updateDisplay() {
+    const packagingType = overlay.querySelector('input[name="packaging-type"]:checked').value;
+    const qtyInput = parseInt(overlay.querySelector('#qty-input').value) || 1;
+    const unitPrice = parseFloat(overlay.querySelector('#unit-price').value) || item.unit_price;
+    
+    let totalUnits = qtyInput;
+    let unitLabel = unitType.toLowerCase();
+    let maxAvailable = totalAvailableUnits;
+
+    if (packagingType === 'strip') {
+      totalUnits = qtyInput * unitsPerStrip;
+      unitLabel = stripLabel.toLowerCase();
+      maxAvailable = Math.floor(totalAvailableUnits / unitsPerStrip);
+    } else if (packagingType === 'box') {
+      totalUnits = qtyInput * unitsPerBox;
+      unitLabel = boxLabel.toLowerCase();
+      maxAvailable = Math.floor(totalAvailableUnits / unitsPerBox);
+    }
+
+    // Update labels
+    overlay.querySelector('#qty-unit-label').textContent = unitLabel;
+    overlay.querySelector('#qty-unit-display').textContent = unitLabel;
+    overlay.querySelector('#max-qty').textContent = maxAvailable;
+
+    // Update display
+    overlay.querySelector('#qty-display').textContent = qtyInput;
+    overlay.querySelector('#total-price').textContent = formatCurrency(totalUnits * unitPrice);
+
+    // Update radio button styling
+    document.querySelectorAll('label[id^="label-"]').forEach(label => {
+      label.style.borderColor = label.querySelector('input').checked ? 'var(--primary)' : 'var(--border)';
+      label.style.backgroundColor = label.querySelector('input').checked ? 'var(--primary-light)' : 'transparent';
+    });
+  }
+
+  // Event listeners
+  overlay.querySelectorAll('input[name="packaging-type"]').forEach(radio => {
+    radio.addEventListener('change', updateDisplay);
   });
+
+  overlay.querySelector('#qty-input').addEventListener('input', updateDisplay);
+  overlay.querySelector('#unit-price').addEventListener('input', updateDisplay);
 
   overlay.querySelector('#qty-cancel').addEventListener('click', closeModal);
   overlay.querySelector('#qty-save').addEventListener('click', () => {
-    const qty = parseInt(overlay.querySelector('#qty-input').value) || minSellQty;
+    const packagingType = overlay.querySelector('input[name="packaging-type"]:checked').value;
+    const qty = parseInt(overlay.querySelector('#qty-input').value) || 1;
+    const newUnitPrice = parseFloat(overlay.querySelector('#unit-price').value) || item.unit_price;
+    const notes = overlay.querySelector('#item-notes').value.trim();
     const errorEl = overlay.querySelector('#qty-error');
-    
-    if (qty < minSellQty) {
-      errorEl.textContent = `Minimum order is ${minSellQty} ${unitType.toLowerCase()}(s)`;
+
+    let totalUnits = qty;
+    let maxAvailable = totalAvailableUnits;
+
+    if (packagingType === 'strip') {
+      totalUnits = qty * unitsPerStrip;
+      maxAvailable = Math.floor(totalAvailableUnits / unitsPerStrip);
+    } else if (packagingType === 'box') {
+      totalUnits = qty * unitsPerBox;
+      maxAvailable = Math.floor(totalAvailableUnits / unitsPerBox);
+    }
+
+    // Validation
+    if (qty < 1) {
+      errorEl.textContent = 'Quantity must be at least 1';
       errorEl.style.display = 'block';
       return;
     }
-    
-    if (qty > totalAvailableUnits) {
-      errorEl.textContent = `Only ${totalAvailableUnits} units available`;
+
+    if (qty > maxAvailable) {
+      errorEl.textContent = `Only ${maxAvailable} ${packagingType}(s) available`;
       errorEl.style.display = 'block';
       return;
     }
-    
+
+    if (newUnitPrice < 0) {
+      errorEl.textContent = 'Price cannot be negative';
+      errorEl.style.display = 'block';
+      return;
+    }
+
+    // Update item
     item.quantity = qty;
+    item.unit_price = newUnitPrice;
+    item.packaging_type = packagingType;
+    item.notes = notes;
+    
     renderCart();
     updateCartTotals();
     closeModal();
   });
+
+  // Initial display update
+  updateDisplay();
 };
