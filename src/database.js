@@ -25,30 +25,50 @@ export async function updatePharmacy(id, payload) {
 export async function getPharmacySettings(pharmacyId) {
   const { data, error } = await supabase
     .from('pharmacies')
-    .select('branding_color, currency_code, currency_symbol, tax_enabled, tax_rate, discount_enabled, discount_rules, logo_url')
+    .select('id, name, branding_color, currency_code, currency_symbol, tax_enabled, tax_rate, discount_enabled, discount_rules, logo_url, updated_at')
     .eq('id', pharmacyId)
     .single();
-  if (error) throw error;
+  if (error) {
+    console.error('Error fetching pharmacy settings:', error);
+    throw error;
+  }
   return data;
 }
 
 export async function updatePharmacySettings(pharmacyId, settings) {
+  // Validate required fields
+  if (!pharmacyId) throw new Error('Pharmacy ID is required');
+  if (!settings) throw new Error('Settings object is required');
+
+  const updatePayload = {
+    branding_color: settings.branding_color || '#1976d2',
+    currency_code: settings.currency_code || 'USD',
+    currency_symbol: settings.currency_symbol || '$',
+    tax_enabled: Boolean(settings.tax_enabled),
+    tax_rate: parseFloat(settings.tax_rate) || 0,
+    discount_enabled: Boolean(settings.discount_enabled),
+    discount_rules: settings.discount_rules || { max_discount: 10, min_cart_amount: 0 },
+    logo_url: settings.logo_url || '',
+    updated_at: new Date().toISOString()
+  };
+
   const { data, error } = await supabase
     .from('pharmacies')
-    .update({
-      branding_color: settings.branding_color,
-      currency_code: settings.currency_code,
-      currency_symbol: settings.currency_symbol,
-      tax_enabled: settings.tax_enabled,
-      tax_rate: settings.tax_rate,
-      discount_enabled: settings.discount_enabled,
-      discount_rules: settings.discount_rules,
-      logo_url: settings.logo_url
-    })
+    .update(updatePayload)
     .eq('id', pharmacyId)
     .select()
     .single();
-  if (error) throw error;
+
+  if (error) {
+    console.error('Error updating pharmacy settings:', {
+      pharmacyId,
+      error: error.message,
+      details: error.details,
+      hint: error.hint
+    });
+    throw new Error(`Failed to update settings: ${error.message}`);
+  }
+
   return data;
 }
 
