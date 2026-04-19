@@ -111,10 +111,19 @@ function renderView(container, products, user, branchList) {
             </div>
           </div>
         </div>
+        <div id="bulk-actions-bar" style="display:none;padding:1rem;background:var(--blue-light);border-bottom:1px solid var(--border);display:flex;gap:1rem;align-items:center">
+          <span id="bulk-count" class="font-semibold"></span>
+          <button class="btn btn-ghost btn-sm" id="bulk-edit-btn">✏️ Bulk Edit</button>
+          <button class="btn btn-ghost btn-sm" id="bulk-deactivate-btn" style="color:var(--amber)">🔒 Deactivate</button>
+          <button class="btn btn-ghost btn-sm" id="bulk-activate-btn" style="color:var(--success)">✓ Activate</button>
+          <button class="btn btn-ghost btn-sm" id="bulk-delete-btn" style="color:var(--danger)">🗑️ Delete</button>
+          <button class="btn btn-ghost btn-sm" id="bulk-cancel-btn">Cancel</button>
+        </div>
         <div class="table-container">
           <table>
             <thead>
               <tr>
+                <th style="width:40px"><input type="checkbox" id="select-all-products" /></th>
                 <th>Product Name</th>
                 <th>Branch</th>
                 <th>Category</th>
@@ -204,11 +213,19 @@ function renderView(container, products, user, branchList) {
     search(document.getElementById('product-search').value.toLowerCase());
   });
 
+  // Bulk select all
+  document.getElementById('select-all-products').addEventListener('change', (e) => {
+    document.querySelectorAll('.product-checkbox').forEach(cb => {
+      cb.checked = e.target.checked;
+    });
+    updateBulkActionsBar();
+  });
+
   bindTableActions(products, user, reload, branchList);
 }
 
 function renderRows(products, branchList) {
-  if (!products.length) return `<tr><td colspan="8"><div class="empty-state"><div class="empty-state-icon">&#128230;</div><div class="empty-state-title">No products found</div><div class="empty-state-desc">Add your first product to this branch to get started</div></div></td></tr>`;
+  if (!products.length) return `<tr><td colspan="9"><div class="empty-state"><div class="empty-state-icon">&#128230;</div><div class="empty-state-title">No products found</div><div class="empty-state-desc">Add your first product to this branch to get started</div></div></td></tr>`;
 
   return products.map(p => {
     const isLow = p.stock_boxes <= p.low_stock_threshold;
@@ -224,6 +241,7 @@ function renderRows(products, branchList) {
 
     return `
       <tr>
+        <td style="width:40px"><input type="checkbox" class="product-checkbox" data-id="${p.id}" /></td>
         <td>
           <div class="font-semibold">${p.name}</div>
           <div class="text-xs text-muted">${p.description || ''}</div>
@@ -255,6 +273,52 @@ function renderRows(products, branchList) {
 
 function bindTableActions(products, user, reload, branchList) {
   const productMap = Object.fromEntries(products.map(p => [p.id, p]));
+
+  // Checkbox selection
+  document.querySelectorAll('.product-checkbox').forEach(cb => {
+    cb.addEventListener('change', updateBulkActionsBar);
+  });
+
+  // Bulk edit
+  document.getElementById('bulk-edit-btn').addEventListener('click', () => {
+    const selected = Array.from(document.querySelectorAll('.product-checkbox:checked')).map(cb => cb.dataset.id);
+    if (selected.length === 0) return;
+    showBulkEditModal(selected, productMap, user, reload);
+  });
+
+  // Bulk deactivate
+  document.getElementById('bulk-deactivate-btn').addEventListener('click', async () => {
+    const selected = Array.from(document.querySelectorAll('.product-checkbox:checked')).map(cb => cb.dataset.id);
+    if (selected.length === 0) return;
+    const confirmed = await showConfirm(`Deactivate ${selected.length} product(s)?`);
+    if (!confirmed) return;
+    await bulkUpdateProducts(selected, { is_active: false }, reload);
+  });
+
+  // Bulk activate
+  document.getElementById('bulk-activate-btn').addEventListener('click', async () => {
+    const selected = Array.from(document.querySelectorAll('.product-checkbox:checked')).map(cb => cb.dataset.id);
+    if (selected.length === 0) return;
+    const confirmed = await showConfirm(`Activate ${selected.length} product(s)?`);
+    if (!confirmed) return;
+    await bulkUpdateProducts(selected, { is_active: true }, reload);
+  });
+
+  // Bulk delete
+  document.getElementById('bulk-delete-btn').addEventListener('click', async () => {
+    const selected = Array.from(document.querySelectorAll('.product-checkbox:checked')).map(cb => cb.dataset.id);
+    if (selected.length === 0) return;
+    const confirmed = await showConfirm(`Delete ${selected.length} product(s)? This cannot be undone.`);
+    if (!confirmed) return;
+    await bulkDeleteProducts(selected, reload);
+  });
+
+  // Cancel bulk selection
+  document.getElementById('bulk-cancel-btn').addEventListener('click', () => {
+    document.querySelectorAll('.product-checkbox').forEach(cb => cb.checked = false);
+    document.getElementById('select-all-products').checked = false;
+    updateBulkActionsBar();
+  });
 
   document.querySelectorAll('.edit-product-btn').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -723,4 +787,184 @@ function parseCSVLine(line) {
   
   values.push(current.replace(/"/g, ''));
   return values;
+}
+
+function updateBulkActionsBar() {
+  const selected = document.querySelectorAll('.product-checkbox:checked');
+  const bar = document.getElementById('bulk-actions-bar');
+  const count = document.getElementById('bulk-count');
+  
+  if (selected.length > 0) {
+    bar.style.display = 'flex';
+    count.textContent = `${selected.length} product(s) selected`;
+  } else {
+    bar.style.display = 'none';
+  }
+}
+
+async function bulkUpdateProducts(productIds, updates, reload) {
+  try {
+    let successCount = 0;
+    let errorCount = 0;
+    
+    for (const productId of productIds) {
+      try {
+        await updateProduct(productId, updates);
+        successCount++;
+      } catch (err) {
+        console.error(`Failed to update product ${productId}:`, err);
+        errorCount++;
+      }
+    }
+    
+    showToast(`Updated ${successCount} product(s). ${errorCount} failed.`, errorCount === 0 ? 'success' : 'warning');
+    document.querySelectorAll('.product-checkbox').forEach(cb => cb.checked = false);
+    document.getElementById('select-all-products').checked = false;
+    updateBulkActionsBar();
+    reload();
+  } catch (err) {
+    showToast(`Bulk update failed: ${err.message}`, 'error');
+  }
+}
+
+async function bulkDeleteProducts(productIds, reload) {
+  try {
+    let successCount = 0;
+    let errorCount = 0;
+    
+    for (const productId of productIds) {
+      try {
+        await deleteProduct(productId);
+        successCount++;
+      } catch (err) {
+        console.error(`Failed to delete product ${productId}:`, err);
+        errorCount++;
+      }
+    }
+    
+    showToast(`Deleted ${successCount} product(s). ${errorCount} failed.`, errorCount === 0 ? 'success' : 'warning');
+    document.querySelectorAll('.product-checkbox').forEach(cb => cb.checked = false);
+    document.getElementById('select-all-products').checked = false;
+    updateBulkActionsBar();
+    reload();
+  } catch (err) {
+    showToast(`Bulk delete failed: ${err.message}`, 'error');
+  }
+}
+
+function showBulkEditModal(productIds, productMap, user, reload) {
+  const { overlay, closeModal } = createModal({
+    id: 'bulk-edit-modal',
+    title: `Bulk Edit (${productIds.length} products)`,
+    size: 'modal-lg',
+    body: `
+      <div class="alert alert-info">
+        <strong>Tip:</strong> Leave a field empty to keep the current values for each product
+      </div>
+      <form id="bulk-edit-form">
+        <div class="form-group">
+          <label class="form-label">Category</label>
+          <input type="text" class="form-input" id="bulk-category" placeholder="Leave empty to skip this field" />
+        </div>
+        <div class="grid-2">
+          <div class="form-group">
+            <label class="form-label">Selling Price</label>
+            <input type="number" class="form-input" id="bulk-price" min="0" step="0.01" placeholder="Leave empty to skip this field" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Cost Price</label>
+            <input type="number" class="form-input" id="bulk-cost" min="0" step="0.01" placeholder="Leave empty to skip this field" />
+          </div>
+        </div>
+        <div class="grid-2">
+          <div class="form-group">
+            <label class="form-label">Low Stock Threshold</label>
+            <input type="number" class="form-input" id="bulk-threshold" min="0" placeholder="Leave empty to skip this field" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Units Per Box</label>
+            <input type="number" class="form-input" id="bulk-upb" min="1" placeholder="Leave empty to skip this field" />
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Status</label>
+          <select class="form-select" id="bulk-status">
+            <option value="">Don't change status</option>
+            <option value="active">Activate</option>
+            <option value="inactive">Deactivate</option>
+          </select>
+        </div>
+        <div id="bulk-edit-err" class="alert alert-danger hidden"></div>
+      </form>
+    `,
+    footer: `
+      <button class="btn btn-ghost" id="cancel-bulk-edit">Cancel</button>
+      <button class="btn btn-primary" id="save-bulk-edit">Update Products</button>
+    `
+  });
+
+  overlay.querySelector('#cancel-bulk-edit').addEventListener('click', closeModal);
+  overlay.querySelector('#save-bulk-edit').addEventListener('click', async () => {
+    const saveBtn = overlay.querySelector('#save-bulk-edit');
+    const errEl = overlay.querySelector('#bulk-edit-err');
+    errEl.classList.add('hidden');
+
+    const updates = {};
+    
+    // Only include fields that have values
+    const category = overlay.querySelector('#bulk-category').value.trim();
+    if (category) updates.category = category;
+    
+    const price = overlay.querySelector('#bulk-price').value;
+    if (price !== '') updates.price = parseFloat(price);
+    
+    const cost = overlay.querySelector('#bulk-cost').value;
+    if (cost !== '') updates.cost_price = parseFloat(cost);
+    
+    const threshold = overlay.querySelector('#bulk-threshold').value;
+    if (threshold !== '') updates.low_stock_threshold = parseInt(threshold);
+    
+    const upb = overlay.querySelector('#bulk-upb').value;
+    if (upb !== '') updates.units_per_box = parseInt(upb);
+    
+    const status = overlay.querySelector('#bulk-status').value;
+    if (status === 'active') updates.is_active = true;
+    else if (status === 'inactive') updates.is_active = false;
+
+    if (Object.keys(updates).length === 0) {
+      errEl.textContent = 'Please fill in at least one field to update.';
+      errEl.classList.remove('hidden');
+      return;
+    }
+
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Updating...';
+
+    try {
+      let successCount = 0;
+      let errorCount = 0;
+      
+      for (const productId of productIds) {
+        try {
+          await updateProduct(productId, updates);
+          successCount++;
+        } catch (err) {
+          console.error(`Failed to update product ${productId}:`, err);
+          errorCount++;
+        }
+      }
+      
+      showToast(`Updated ${successCount} product(s). ${errorCount} failed.`, errorCount === 0 ? 'success' : 'warning');
+      closeModal();
+      document.querySelectorAll('.product-checkbox').forEach(cb => cb.checked = false);
+      document.getElementById('select-all-products').checked = false;
+      updateBulkActionsBar();
+      reload();
+    } catch (err) {
+      errEl.textContent = err.message;
+      errEl.classList.remove('hidden');
+      saveBtn.disabled = false;
+      saveBtn.textContent = 'Update Products';
+    }
+  });
 }
