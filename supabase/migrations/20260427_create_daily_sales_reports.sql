@@ -9,16 +9,17 @@ CREATE TABLE IF NOT EXISTS daily_sales_reports (
   report_date DATE NOT NULL,
   total_sales NUMERIC DEFAULT 0,
   total_items_sold BIGINT DEFAULT 0,
-  payment_breakdown JSONB, -- {cash: 0, mobile_money: 0, card: 0}
-  sales_data JSONB NOT NULL, -- Array of {customer_name, items, amount, payment_method, staff_name}
+  payment_breakdown JSONB DEFAULT '{"cash": 0, "mobile_money": 0, "card": 0, "other": 0}'::JSONB,
+  sales_data JSONB DEFAULT '[]'::JSONB,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(pharmacy_id, branch_id, report_date)
 );
 
 -- Step 2: Create indexes for better query performance
-CREATE INDEX IF NOT EXISTS idx_daily_sales_reports_pharmacy_date ON daily_sales_reports(pharmacy_id, report_date);
-CREATE INDEX IF NOT EXISTS idx_daily_sales_reports_branch_date ON daily_sales_reports(branch_id, report_date);
-CREATE INDEX IF NOT EXISTS idx_daily_sales_reports_date ON daily_sales_reports(report_date);
+CREATE INDEX IF NOT EXISTS idx_daily_sales_reports_pharmacy_date ON daily_sales_reports(pharmacy_id, report_date DESC);
+CREATE INDEX IF NOT EXISTS idx_daily_sales_reports_branch_date ON daily_sales_reports(branch_id, report_date DESC);
+CREATE INDEX IF NOT EXISTS idx_daily_sales_reports_date ON daily_sales_reports(report_date DESC);
 
 -- Step 3: Enable RLS on daily_sales_reports
 ALTER TABLE daily_sales_reports ENABLE ROW LEVEL SECURITY;
@@ -56,102 +57,114 @@ CREATE OR REPLACE FUNCTION generate_daily_sales_report(
 RETURNS UUID AS $$
 DECLARE
   v_report_id UUID;
-  v_sales_data JSONB;
-  v_total_sales NUMERIC := 0;
-  v_total_items BIGINT := 0;
-  v_payment_breakdown JSONB := '{"cash": 0, "mobile_money": 0, "card": 0, "other": 0}'::JSONB;
 BEGIN
-  -- Get all sales for the branch on the given date
-  WITH daily_sales AS (
-    SELECT 
-      s.id,
-      s.invoice_number,
-      s.total_amount,
-      s.payment_method,
-      s.created_at,
-      c.name as customer_name,
-      p.full_name as staff_name,
+  -- Attempt to insert the report - if it exists (unique constraint), update it instead
+  INSERT INTO daily_sales_reports (
+    pharmacy_id,
+    branch_id,
+    report_date,
+    total_sales,
+    total_items_sold,
+    payment_breakdown,
+    sales_data,
+    created_at,
+    updated_at
+  ) SELECT 
+    p_pharmacy_id,
+    p_branch_id,
+    p_report_date,
+    COALESCE(SUM(s.total_amount), 0)::NUMERIC,
+    COALESCE(SUM((SELECT COUNT(*) FROM sale_items WHERE sale_id = s.id)), 0)::BIGINT,
+    COALESCE(
+      jsonb_object_agg(
+        CASE 
+          WHEN s.payment_method = 'cash' THEN 'cash'
+          WHEN s.payment_method = 'mobile_money' THEN 'mobile_money'
+          WHEN s.payment_method = 'card' THEN 'card'
+          ELSE 'other'
+        END,
+        SUM(s.total_amount)
+      ),
+      '{"cash": 0, "mobile_money": 0, "card": 0, "other": 0}'::JSONB
+    ),
+    COALESCE(
       jsonb_agg(
         jsonb_build_object(
-          'product_name', si.product_name,
-          'quantity', si.quantity,
-          'unit_price', si.unit_price,
-          'total_price', si.total_price
-        )
-      ) as items
-    FROM sales s
-    LEFT JOIN customers c ON s.customer_id = c.id
-    LEFT JOIN profiles p ON s.created_by = p.id
-    LEFT JOIN sale_items si ON s.id = si.sale_id
-    WHERE s.pharmacy_id = p_pharmacy_id
-      AND s.branch_id = p_branch_id
-      AND DATE(s.created_at) = p_report_date
-      AND s.status = 'completed'
-    GROUP BY s.id, s.invoice_number, s.total_amount, s.payment_method, s.created_at, c.name, p.full_name
-  )
-  SELECT 
-    jsonb_agg(
-      jsonb_build_object(
-        'invoice_number', invoice_number,
-        'customer_name', COALESCE(customer_name, 'Walk-in'),
-        'items', COALESCE(items, '[]'::JSONB),
-        'amount', total_amount,
-        'payment_method', payment_method,
-        'staff_name', COALESCE(staff_name, 'Unknown'),
-        'created_at', created_at
-      )
+          'invoice_number', s.invoice_number,
+          'customer_name', COALESCE(c.name, 'Walk-in'),
+          'items', COALESCE((
+            SELECT jsonb_agg(
+              jsonb_build_object(
+                'product_name', si.product_name,
+                'quantity', si.quantity,
+                'unit_price', si.unit_price,
+                'total_price', si.total_price
+              ) ORDER BY si.id
+            )
+            FROM sale_items si
+            WHERE si.sale_id = s.id
+          ), '[]'::JSONB),
+          'amount', s.total_amount,
+          'payment_method', s.payment_method,
+          'staff_name', COALESCE(p.full_name, 'Unknown'),
+          'created_at', s.created_at
+        ) ORDER BY s.created_at
+      ),
+      '[]'::JSONB
     ),
-    SUM(total_amount),
-    SUM(CASE WHEN (items IS NOT NULL) THEN jsonb_array_length(items) ELSE 0 END)
-  INTO v_sales_data, v_total_sales, v_total_items
-  FROM daily_sales;
+    CURRENT_TIMESTAMP,
+    CURRENT_TIMESTAMP
+  FROM sales s
+  LEFT JOIN customers c ON s.customer_id = c.id
+  LEFT JOIN profiles p ON s.created_by = p.id
+  WHERE s.pharmacy_id = p_pharmacy_id
+    AND s.branch_id = p_branch_id
+    AND DATE(s.created_at) = p_report_date
+    AND s.status = 'completed'
+  GROUP BY p_pharmacy_id, p_branch_id, p_report_date
+  ON CONFLICT (pharmacy_id, branch_id, report_date) DO UPDATE SET
+    total_sales = EXCLUDED.total_sales,
+    total_items_sold = EXCLUDED.total_items_sold,
+    payment_breakdown = EXCLUDED.payment_breakdown,
+    sales_data = EXCLUDED.sales_data,
+    updated_at = CURRENT_TIMESTAMP
+  RETURNING id INTO v_report_id;
 
-  -- Update payment breakdown
-  UPDATE LATERAL (
-    SELECT 
-      CASE WHEN payment_method = 'cash' THEN 'cash'
-           WHEN payment_method = 'mobile_money' THEN 'mobile_money'
-           WHEN payment_method = 'card' THEN 'card'
-           ELSE 'other' END as method,
-      SUM(total_amount) as amount
-    FROM sales
-    WHERE pharmacy_id = p_pharmacy_id
-      AND branch_id = p_branch_id
-      AND DATE(created_at) = p_report_date
-      AND status = 'completed'
-    GROUP BY payment_method
-  ) payment_summary
-  SET v_payment_breakdown = v_payment_breakdown || 
-    jsonb_build_object(payment_summary.method, payment_summary.amount);
-
-  -- Check if report already exists
-  SELECT id INTO v_report_id 
-  FROM daily_sales_reports 
-  WHERE pharmacy_id = p_pharmacy_id 
-    AND branch_id = p_branch_id 
-    AND report_date = p_report_date;
-
-  -- Insert or update report
+  -- If no rows were affected (no sales), still create a report
   IF v_report_id IS NULL THEN
     INSERT INTO daily_sales_reports (
-      pharmacy_id, branch_id, report_date, total_sales, 
-      total_items_sold, payment_breakdown, sales_data
+      pharmacy_id,
+      branch_id,
+      report_date,
+      total_sales,
+      total_items_sold,
+      payment_breakdown,
+      sales_data,
+      created_at,
+      updated_at
     ) VALUES (
-      p_pharmacy_id, p_branch_id, p_report_date, COALESCE(v_total_sales, 0),
-      COALESCE(v_total_items, 0), v_payment_breakdown, COALESCE(v_sales_data, '[]'::JSONB)
+      p_pharmacy_id,
+      p_branch_id,
+      p_report_date,
+      0,
+      0,
+      '{"cash": 0, "mobile_money": 0, "card": 0, "other": 0}'::JSONB,
+      '[]'::JSONB,
+      CURRENT_TIMESTAMP,
+      CURRENT_TIMESTAMP
     )
+    ON CONFLICT (pharmacy_id, branch_id, report_date) DO UPDATE SET
+      updated_at = CURRENT_TIMESTAMP
     RETURNING id INTO v_report_id;
-  ELSE
-    UPDATE daily_sales_reports
-    SET total_sales = COALESCE(v_total_sales, 0),
-        total_items_sold = COALESCE(v_total_items, 0),
-        payment_breakdown = v_payment_breakdown,
-        sales_data = COALESCE(v_sales_data, '[]'::JSONB),
-        updated_at = CURRENT_TIMESTAMP
-    WHERE id = v_report_id;
   END IF;
 
-  RETURN v_report_id;
+  RETURN COALESCE(v_report_id, (
+    SELECT id FROM daily_sales_reports 
+    WHERE pharmacy_id = p_pharmacy_id 
+      AND branch_id = p_branch_id 
+      AND report_date = p_report_date
+    LIMIT 1
+  ));
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
@@ -209,7 +222,43 @@ BEGIN
   ORDER BY dsr.report_date DESC, dsr.created_at DESC
   LIMIT p_limit OFFSET p_offset;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
 
-COMMENT ON FUNCTION generate_daily_sales_report IS 'Generates or updates a daily sales report for a specific branch and date, aggregating all completed sales with customer and item details';
-COMMENT ON FUNCTION get_daily_reports IS 'Retrieves daily sales reports with optional branch filtering and pagination support';
+-- Step 9: Create function to get detailed report by ID
+CREATE OR REPLACE FUNCTION get_daily_report_detail(p_report_id UUID)
+RETURNS TABLE (
+  id UUID,
+  pharmacy_id UUID,
+  branch_id UUID,
+  report_date DATE,
+  total_sales NUMERIC,
+  total_items_sold BIGINT,
+  payment_breakdown JSONB,
+  sales_data JSONB,
+  created_at TIMESTAMP
+) AS $$
+BEGIN
+  RETURN QUERY
+  SELECT 
+    dsr.id,
+    dsr.pharmacy_id,
+    dsr.branch_id,
+    dsr.report_date,
+    dsr.total_sales,
+    dsr.total_items_sold,
+    dsr.payment_breakdown,
+    dsr.sales_data,
+    dsr.created_at
+  FROM daily_sales_reports dsr
+  WHERE dsr.id = p_report_id;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Step 10: Documentation comments
+COMMENT ON TABLE daily_sales_reports IS 'Stores daily aggregated sales data for each branch, auto-generated with JSONB format for flexible storage of sales items and payment methods';
+
+COMMENT ON FUNCTION generate_daily_sales_report IS 'Generates or updates a daily sales report by aggregating all completed sales for a specific branch and date';
+
+COMMENT ON FUNCTION get_daily_reports IS 'Retrieves paginated daily sales reports with optional branch filtering';
+
+COMMENT ON FUNCTION get_daily_report_detail IS 'Retrieves detailed information for a specific daily report including full sales breakdown and payment details';
