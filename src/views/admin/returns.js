@@ -1,4 +1,4 @@
-import { getSalesReturns, getSales, getCustomers, createSalesReturn, supabase, getBranches } from '../../database.js';
+import { getSalesReturns, getSales, getCustomers, createSalesReturn, getBranches } from '../../database.js';
 import { showToast, formatCurrency } from '../../utils.js';
 
 export async function renderReturns(container, user) {
