@@ -8,6 +8,7 @@ import { renderSales } from './admin/sales.js';
 import { renderCustomers } from './admin/customers.js';
 import { renderReports } from './admin/reports.js';
 import { renderAdminSalesReports } from './admin/sales-reports.js';
+import { renderDailyReports } from './admin/daily-reports.js';
 import { renderStaff } from './admin/staff.js';
 import { renderBranches } from './admin/branches.js';
 import { renderBranchDetailsView } from './admin/branch-details.js';
@@ -211,6 +212,7 @@ export function navigate(view, params = {}) {
     case 'alerts': renderAlerts(content, currentUser); break;
     case 'reports': renderReports(content, currentUser); break;
     case 'sales-reports': renderAdminSalesReports(content, currentUser); break;
+    case 'daily-reports': renderDailyReports(content, currentUser); break;
     case 'staff': renderStaff(content, currentUser); break;
     case 'branches': renderBranches(content, currentUser); break;
     case 'branch-details': 

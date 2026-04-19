@@ -1,4 +1,4 @@
-import { getSales } from '../../database.js';
+import { getSales, getBranches } from '../../database.js';
 import { formatCurrency, formatDateTime, showToast } from '../../utils.js';
 import { createModal } from '../../components/modal.js';
 
@@ -7,7 +7,10 @@ export async function renderSales(container, user) {
   if (!pharmacyId) { container.innerHTML = `<div class="alert alert-warning">No pharmacy linked.</div>`; return; }
 
   try {
-    const sales = await getSales(pharmacyId, 200);
+    const [sales, branches] = await Promise.all([
+      getSales(pharmacyId, 200),
+      getBranches(pharmacyId)
+    ]);
 
     const totalRevenue = sales.filter(s => s.status === 'completed').reduce((sum, s) => sum + parseFloat(s.total_amount), 0);
     const todayRevenue = sales.filter(s => {
@@ -54,6 +57,10 @@ export async function renderSales(container, user) {
           <div class="card-header">
             <span class="card-title">All Sales</span>
             <div style="display:flex;gap:0.75rem;flex-wrap:wrap">
+              <select class="form-select" id="branch-filter" style="width:auto">
+                <option value="">All Branches</option>
+                ${branches.map(b => `<option value="${b.id}">${b.name}</option>`).join('')}
+              </select>
               <div class="search-box" style="min-width:220px">
                 <span style="color:var(--gray-400)">&#128269;</span>
                 <input type="text" id="sales-search" placeholder="Search invoice..." />
@@ -98,6 +105,7 @@ export async function renderSales(container, user) {
     const applyFilters = () => {
       const searchQuery = document.getElementById('sales-search')?.value.toLowerCase() || '';
       const paymentFilter = document.getElementById('payment-filter')?.value || '';
+      const branchFilter = document.getElementById('branch-filter')?.value || '';
       const dateFrom = document.getElementById('date-filter-from')?.value ? new Date(document.getElementById('date-filter-from').value) : null;
       const dateTo = document.getElementById('date-filter-to')?.value ? new Date(document.getElementById('date-filter-to').value) : null;
       
@@ -107,6 +115,9 @@ export async function renderSales(container, user) {
           s.invoice_number.toLowerCase().includes(searchQuery) ||
           (s.customers?.name || '').toLowerCase().includes(searchQuery);
         
+        // Branch filter
+        const matchesBranch = !branchFilter || s.branch_id === branchFilter;
+        
         // Payment method filter
         const matchesPayment = !paymentFilter || s.payment_method === paymentFilter;
         
@@ -114,7 +125,7 @@ export async function renderSales(container, user) {
         const saleDate = new Date(s.created_at);
         const matchesDate = (!dateFrom || saleDate >= dateFrom) && (!dateTo || saleDate <= dateTo);
         
-        return matchesSearch && matchesPayment && matchesDate;
+        return matchesSearch && matchesBranch && matchesPayment && matchesDate;
       });
       
       document.getElementById('sales-tbody').innerHTML = renderRows(filtered);
@@ -122,6 +133,9 @@ export async function renderSales(container, user) {
     };
 
     document.getElementById('sales-search').addEventListener('input', applyFilters);
+    if (document.getElementById('branch-filter')) {
+      document.getElementById('branch-filter').addEventListener('change', applyFilters);
+    }
     if (document.getElementById('payment-filter')) {
       document.getElementById('payment-filter').addEventListener('change', applyFilters);
     }

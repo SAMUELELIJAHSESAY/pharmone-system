@@ -77,6 +77,9 @@ export function renderSidebar(user) {
       <button class="nav-item" data-view="sales-reports">
         <span class="nav-icon">&#128202;</span> Sales Reports
       </button>
+      <button class="nav-item" data-view="daily-reports">
+        <span class="nav-icon">📊</span> Daily Records
+      </button>
     `;
   } else {
     navItems = `
@@ -89,6 +92,9 @@ export function renderSidebar(user) {
       </button>
       <button class="nav-item" data-view="sales-history">
         <span class="nav-icon">&#128202;</span> Sales History
+      </button>
+      <button class="nav-item" data-view="daily-reports">
+        <span class="nav-icon">📊</span> Daily Records
       </button>
       <button class="nav-item" data-view="customers">
         <span class="nav-icon">&#128100;</span> Customers

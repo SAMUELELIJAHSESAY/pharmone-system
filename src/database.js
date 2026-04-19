@@ -1199,6 +1199,53 @@ export async function getTreatmentPaymentsReport(pharmacyId, branchId = null, st
   return { payments: data, totals, grandTotal, count: data.length };
 }
 
+// ===================== DAILY SALES REPORTS =====================
+export async function generateDailySalesReport(pharmacyId, branchId, reportDate) {
+  const { error } = await supabase.rpc('generate_daily_sales_report', {
+    p_pharmacy_id: pharmacyId,
+    p_branch_id: branchId,
+    p_report_date: reportDate
+  });
+  if (error) throw error;
+  return true;
+}
+
+export async function getDailyReports(pharmacyId, branchId = null, limit = 30, offset = 0) {
+  const { data, error } = await supabase.rpc('get_daily_reports', {
+    p_pharmacy_id: pharmacyId,
+    p_branch_id: branchId,
+    p_limit: limit,
+    p_offset: offset
+  });
+  if (error) throw error;
+  return data || [];
+}
+
+export async function getDailyReportsByDateRange(pharmacyId, branchId = null, startDate = null, endDate = null) {
+  let query = supabase
+    .from('daily_sales_reports')
+    .select('*')
+    .eq('pharmacy_id', pharmacyId);
+  
+  if (branchId) query = query.eq('branch_id', branchId);
+  if (startDate) query = query.gte('report_date', startDate);
+  if (endDate) query = query.lte('report_date', endDate);
+  
+  const { data, error } = await query.order('report_date', { ascending: false });
+  if (error) throw error;
+  return data || [];
+}
+
+export async function getDailyReportDetail(reportId) {
+  const { data, error } = await supabase
+    .from('daily_sales_reports')
+    .select('*')
+    .eq('id', reportId)
+    .single();
+  if (error) throw error;
+  return data;
+}
+
 // ===================== PRESCRIPTIONS =====================
 export async function getPrescriptions(pharmacyId, patientId = null, status = 'active') {
   let query = supabase
