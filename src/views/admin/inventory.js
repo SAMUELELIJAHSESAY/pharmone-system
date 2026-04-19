@@ -376,6 +376,28 @@ function showProductModal(product, user, reload, branchList) {
             <label class="form-label">Selling Price *</label>
             <input type="number" class="form-input" id="prod-price" value="${product?.price || ''}" min="0" step="0.01" placeholder="0.00" required />
           </div>
+          <div class="form-group">
+            <label class="form-label">Unit Type *</label>
+            <select class="form-select" id="prod-unit-type" required>
+              <option value="">Select unit type</option>
+              <option value="tablet" ${product?.unit_type === 'tablet' ? 'selected' : ''}>Tablet</option>
+              <option value="capsule" ${product?.unit_type === 'capsule' ? 'selected' : ''}>Capsule</option>
+              <option value="bottle" ${product?.unit_type === 'bottle' ? 'selected' : ''}>Bottle</option>
+              <option value="vial" ${product?.unit_type === 'vial' ? 'selected' : ''}>Vial</option>
+              <option value="injection" ${product?.unit_type === 'injection' ? 'selected' : ''}>Injection</option>
+              <option value="ml" ${product?.unit_type === 'ml' ? 'selected' : ''}>ML (Milliliters)</option>
+              <option value="box" ${product?.unit_type === 'box' || !product?.unit_type ? 'selected' : ''}>Box/Carton</option>
+              <option value="blister" ${product?.unit_type === 'blister' ? 'selected' : ''}>Blister Pack</option>
+              <option value="jar" ${product?.unit_type === 'jar' ? 'selected' : ''}>Jar</option>
+              <option value="tube" ${product?.unit_type === 'tube' ? 'selected' : ''}>Tube</option>
+              <option value="sachet" ${product?.unit_type === 'sachet' ? 'selected' : ''}>Sachet</option>
+              <option value="strip" ${product?.unit_type === 'strip' ? 'selected' : ''}>Strip</option>
+              <option value="bag" ${product?.unit_type === 'bag' ? 'selected' : ''}>Bag</option>
+              <option value="pack" ${product?.unit_type === 'pack' ? 'selected' : ''}>Pack</option>
+              <option value="piece" ${product?.unit_type === 'piece' ? 'selected' : ''}>Piece</option>
+            </select>
+            <div class="text-xs text-muted" style="margin-top: 0.25rem;">How is this product sold to customers?</div>
+          </div>
         </div>
         <div class="grid-2">
           <div class="form-group">
@@ -383,9 +405,16 @@ function showProductModal(product, user, reload, branchList) {
             <input type="number" class="form-input" id="prod-cost" value="${product?.cost_price || ''}" min="0" step="0.01" placeholder="0.00" />
           </div>
           <div class="form-group">
-            <label class="form-label">Units Per Box</label>
-            <input type="number" class="form-input" id="prod-upb" value="${product?.units_per_box || 1}" min="1" />
+            <label class="form-label">Minimum Sell Quantity</label>
+            <input type="number" class="form-input" id="prod-min-sell" value="${product?.min_sell_quantity || 1}" min="1" />
+            <div class="text-xs text-muted" style="margin-top: 0.25rem;">Minimum units allowed per sale</div>
           </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Units Per Box</label>
+          <input type="number" class="form-input" id="prod-upb" value="${product?.units_per_box || 1}" min="1" />
+          <div class="text-xs text-muted" style="margin-top: 0.25rem;">How many units are in 1 box (for bulk tracking)</div>
+        </div>
         </div>
         <div class="grid-2">
           <div class="form-group">
@@ -431,6 +460,8 @@ function showProductModal(product, user, reload, branchList) {
       category: overlay.querySelector('#prod-cat').value.trim() || 'General',
       price: parseFloat(overlay.querySelector('#prod-price').value) || 0,
       cost_price: parseFloat(overlay.querySelector('#prod-cost').value) || 0,
+      unit_type: overlay.querySelector('#prod-unit-type').value,
+      min_sell_quantity: parseInt(overlay.querySelector('#prod-min-sell').value) || 1,
       units_per_box: parseInt(overlay.querySelector('#prod-upb').value) || 1,
       stock_boxes: parseInt(overlay.querySelector('#prod-boxes').value) || 0,
       stock_units: parseInt(overlay.querySelector('#prod-units').value) || 0,
@@ -442,6 +473,7 @@ function showProductModal(product, user, reload, branchList) {
     };
 
     if (!payload.name) { errEl.textContent = 'Product name is required.'; errEl.classList.remove('hidden'); return; }
+    if (!payload.unit_type) { errEl.textContent = 'Please select a unit type.'; errEl.classList.remove('hidden'); return; }
     if (!payload.branch_id) { errEl.textContent = 'Please select a branch.'; errEl.classList.remove('hidden'); return; }
 
     saveBtn.disabled = true;
@@ -1025,6 +1057,8 @@ function showAddMultipleModal(user, reload, branchList) {
       const category = row.querySelector('.row-category').value.trim() || 'General';
       const price = parseFloat(row.querySelector('.row-price').value) || 0;
       const cost = parseFloat(row.querySelector('.row-cost').value) || 0;
+      const unitType = row.querySelector('.row-unit-type').value;
+      const minSell = parseInt(row.querySelector('.row-min-sell').value) || 1;
       const upb = parseInt(row.querySelector('.row-upb').value) || 1;
       const boxes = parseInt(row.querySelector('.row-boxes').value) || 0;
       const units = parseInt(row.querySelector('.row-units').value) || 0;
@@ -1045,11 +1079,19 @@ function showAddMultipleModal(user, reload, branchList) {
         return;
       }
 
+      if (!unitType) {
+        errEl.textContent = `Row ${i + 1}: Please select a unit type`;
+        errEl.classList.remove('hidden');
+        return;
+      }
+
       products.push({
         name,
         category,
         price,
         cost_price: cost,
+        unit_type: unitType,
+        min_sell_quantity: minSell,
         units_per_box: upb,
         stock_boxes: boxes,
         stock_units: units,
