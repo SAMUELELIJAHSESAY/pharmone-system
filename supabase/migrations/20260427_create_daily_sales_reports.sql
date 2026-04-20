@@ -40,11 +40,11 @@ CREATE POLICY "Salesman can view branch reports" ON daily_sales_reports
   FOR SELECT USING (
     EXISTS (
       SELECT 1 FROM profiles p
-      LEFT JOIN staff_branch_assignments sba ON p.id = sba.staff_id AND sba.is_active = true
+      INNER JOIN staff_branch_assignments sba ON p.id = sba.staff_id AND sba.is_active = true
       WHERE p.id = auth.uid()
         AND p.pharmacy_id = daily_sales_reports.pharmacy_id
         AND p.role = 'salesman'
-        AND (sba.branch_id = daily_sales_reports.branch_id OR p.branch_id = daily_sales_reports.branch_id)
+        AND sba.branch_id = daily_sales_reports.branch_id
     )
   );
 
