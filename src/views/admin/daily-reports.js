@@ -182,14 +182,14 @@ function bindReportActions(reports, branches) {
 }
 
 function showGenerateReportModal(pharmacyId, branches) {
-  createModal({
+  const { overlay, closeModal } = createModal({
     id: 'generate-report',
     title: 'Generate Daily Report',
     body: `
       <div style="display:grid;gap:1rem">
         <div>
           <label class="form-label">Select Branch</label>
-          <select id="gen-branch-select" class="form-select">
+          <select id="gen-branch-select" class="form-input">
             <option value="">-- Select a branch --</option>
             ${branches.map(b => `<option value="${b.id}">${b.name}</option>`).join('')}
           </select>
@@ -198,32 +198,46 @@ function showGenerateReportModal(pharmacyId, branches) {
           <label class="form-label">Report Date</label>
           <input type="date" id="gen-report-date" class="form-input" value="${new Date().toISOString().split('T')[0]}" />
         </div>
+        <div id="gen-report-error" class="alert alert-danger hidden"></div>
       </div>
     `,
-    confirmBtn: 'Generate Report',
-    onConfirm: async () => {
-      const branchId = document.getElementById('gen-branch-select')?.value;
-      const reportDate = document.getElementById('gen-report-date')?.value;
+    footer: `
+      <button class="btn btn-ghost" id="gen-report-cancel">Cancel</button>
+      <button class="btn btn-primary" id="gen-report-confirm">Generate Report</button>
+    `
+  });
 
-      if (!branchId) {
-        showToast('Please select a branch', 'error');
-        return false;
-      }
+  overlay.querySelector('#gen-report-cancel').addEventListener('click', closeModal);
+  
+  overlay.querySelector('#gen-report-confirm').addEventListener('click', async () => {
+    const branchId = overlay.querySelector('#gen-branch-select')?.value;
+    const reportDate = overlay.querySelector('#gen-report-date')?.value;
+    const errorEl = overlay.querySelector('#gen-report-error');
+    const confirmBtn = overlay.querySelector('#gen-report-confirm');
 
-      try {
-        await generateDailySalesReport(pharmacyId, branchId, reportDate);
-        showToast('Report generated successfully', 'success');
-        
-        // Close modal and reload
-        document.getElementById('generate-report')?.remove();
-        
-        // Reload the reports
-        import('../app.js').then(m => m.navigate('daily-reports'));
-        return true;
-      } catch (err) {
-        showToast(`Error: ${err.message}`, 'error');
-        return false;
-      }
+    errorEl.classList.add('hidden');
+
+    if (!branchId) {
+      errorEl.textContent = 'Please select a branch';
+      errorEl.classList.remove('hidden');
+      return;
+    }
+
+    confirmBtn.disabled = true;
+    confirmBtn.textContent = 'Generating...';
+
+    try {
+      await generateDailySalesReport(pharmacyId, branchId, reportDate);
+      showToast('Report generated successfully', 'success');
+      closeModal();
+      
+      // Reload the reports
+      import('../app.js').then(m => m.navigate('daily-reports'));
+    } catch (err) {
+      errorEl.textContent = `Error: ${err.message}`;
+      errorEl.classList.remove('hidden');
+      confirmBtn.disabled = false;
+      confirmBtn.textContent = 'Generate Report';
     }
   });
 }
