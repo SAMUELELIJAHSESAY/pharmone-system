@@ -69,28 +69,47 @@ BEGIN
     sales_data,
     created_at,
     updated_at
-  ) SELECT 
+  ) 
+  WITH sale_data AS (
+    SELECT 
+      s.id,
+      s.invoice_number,
+      s.customer_id,
+      s.payment_method,
+      s.total_amount,
+      s.created_by,
+      s.created_at,
+      COUNT(si.id) as item_count
+    FROM sales s
+    LEFT JOIN sale_items si ON s.id = si.sale_id
+    WHERE s.pharmacy_id = p_pharmacy_id
+      AND s.branch_id = p_branch_id
+      AND DATE(s.created_at) = p_report_date
+      AND s.status = 'completed'
+    GROUP BY s.id, s.invoice_number, s.customer_id, s.payment_method, s.total_amount, s.created_by, s.created_at
+  )
+  SELECT 
     p_pharmacy_id,
     p_branch_id,
     p_report_date,
-    COALESCE(SUM(s.total_amount), 0)::NUMERIC,
-    COALESCE(SUM((SELECT COUNT(*) FROM sale_items WHERE sale_id = s.id)), 0)::BIGINT,
+    COALESCE(SUM(sd.total_amount), 0)::NUMERIC,
+    COALESCE(SUM(sd.item_count), 0)::BIGINT,
     COALESCE(
       jsonb_object_agg(
         CASE 
-          WHEN s.payment_method = 'cash' THEN 'cash'
-          WHEN s.payment_method = 'mobile_money' THEN 'mobile_money'
-          WHEN s.payment_method = 'card' THEN 'card'
+          WHEN sd.payment_method = 'cash' THEN 'cash'
+          WHEN sd.payment_method = 'mobile_money' THEN 'mobile_money'
+          WHEN sd.payment_method = 'card' THEN 'card'
           ELSE 'other'
         END,
-        SUM(s.total_amount)
+        SUM(sd.total_amount)
       ),
       '{"cash": 0, "mobile_money": 0, "card": 0, "other": 0}'::JSONB
     ),
     COALESCE(
       jsonb_agg(
         jsonb_build_object(
-          'invoice_number', s.invoice_number,
+          'invoice_number', sd.invoice_number,
           'customer_name', COALESCE(c.name, 'Walk-in'),
           'items', COALESCE((
             SELECT jsonb_agg(
@@ -102,25 +121,36 @@ BEGIN
               ) ORDER BY si.id
             )
             FROM sale_items si
-            WHERE si.sale_id = s.id
+            WHERE si.sale_id = sd.id
           ), '[]'::JSONB),
-          'amount', s.total_amount,
-          'payment_method', s.payment_method,
+          'amount', sd.total_amount,
+          'payment_method', sd.payment_method,
           'staff_name', COALESCE(p.full_name, 'Unknown'),
-          'created_at', s.created_at
-        ) ORDER BY s.created_at
+          'created_at', sd.created_at
+        ) ORDER BY sd.created_at
       ),
       '[]'::JSONB
     ),
     CURRENT_TIMESTAMP,
     CURRENT_TIMESTAMP
-  FROM sales s
-  LEFT JOIN customers c ON s.customer_id = c.id
-  LEFT JOIN profiles p ON s.created_by = p.id
-  WHERE s.pharmacy_id = p_pharmacy_id
-    AND s.branch_id = p_branch_id
-    AND DATE(s.created_at) = p_report_date
-    AND s.status = 'completed'
+  FROM sale_data sd
+  LEFT JOIN customers c ON sd.customer_id = c.id
+  LEFT JOIN profiles p ON sd.created_by = p.id
+            WHERE si.sale_id = sd.id
+          ), '[]'::JSONB),
+          'amount', sd.total_amount,
+          'payment_method', sd.payment_method,
+          'staff_name', COALESCE(p.full_name, 'Unknown'),
+          'created_at', sd.created_at
+        ) ORDER BY sd.created_at
+      ),
+      '[]'::JSONB
+    ),
+    CURRENT_TIMESTAMP,
+    CURRENT_TIMESTAMP
+  FROM sale_data sd
+  LEFT JOIN customers c ON sd.customer_id = c.id
+  LEFT JOIN profiles p ON sd.created_by = p.id
   GROUP BY p_pharmacy_id, p_branch_id, p_report_date
   ON CONFLICT (pharmacy_id, branch_id, report_date) DO UPDATE SET
     total_sales = EXCLUDED.total_sales,
