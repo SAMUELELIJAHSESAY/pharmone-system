@@ -44,7 +44,7 @@ CREATE POLICY "Salesman can view branch reports" ON daily_sales_reports
       WHERE p.id = auth.uid()
         AND p.pharmacy_id = daily_sales_reports.pharmacy_id
         AND p.role = 'salesman'
-        AND sba.branch_id = daily_sales_reports.branch_id
+        AND (sba.branch_id = daily_sales_reports.branch_id OR p.branch_id = daily_sales_reports.branch_id)
     )
   );
 
