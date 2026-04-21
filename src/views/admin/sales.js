@@ -13,10 +13,14 @@ export async function renderSales(container, user) {
     ]);
 
     const totalRevenue = sales.filter(s => s.status === 'completed').reduce((sum, s) => sum + parseFloat(s.total_amount), 0);
+    
+    // Calculate today's revenue with proper timezone-aware handling
+    const now = new Date();
+    const todayDateStr = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())).toISOString().split('T')[0];
+    
     const todayRevenue = sales.filter(s => {
-      const d = new Date(s.created_at);
-      const now = new Date();
-      return d.toDateString() === now.toDateString() && s.status === 'completed';
+      const saleDate = s.created_at.split('T')[0];
+      return saleDate === todayDateStr && s.status === 'completed';
     }).reduce((sum, s) => sum + parseFloat(s.total_amount), 0);
 
     container.innerHTML = `

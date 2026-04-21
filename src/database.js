@@ -197,43 +197,28 @@ export async function deleteCustomer(id) {
 
 // ===================== SALES =====================
 export async function getSales(pharmacyId, limit = 50) {
-  try {
-    const { data, error } = await supabase
-      .from('sales')
-      .select('*, customers(name, phone), sale_items(*, products(name))')
-      .eq('pharmacy_id', pharmacyId)
-      .order('created_at', { ascending: false })
-      .limit(limit);
-    
-    if (error) {
-      console.warn('Error with related data query, trying without relationships:', error);
-      // Fallback to basic query without relationships
-      const { data: basicData, error: basicError } = await supabase
-        .from('sales')
-        .select('*')
-        .eq('pharmacy_id', pharmacyId)
-        .order('created_at', { ascending: false })
-        .limit(limit);
-      
-      if (basicError) throw basicError;
-      return basicData || [];
-    }
-    
-    return data || [];
-  } catch (err) {
-    console.error('Error fetching sales:', err);
-    throw err;
-  }
+  const { data, error } = await supabase
+    .from('sales')
+    .select('*, customers(name, phone), sale_items(*, products(name))')
+    .eq('pharmacy_id', pharmacyId)
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return data;
 }
 
 export async function getSalesToday(pharmacyId, branchId = null) {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  // Use UTC date for proper timezone-aware filtering
+  const now = new Date();
+  const todayUTC = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0, 0));
+  const tomorrowUTC = new Date(todayUTC.getTime() + 24 * 60 * 60 * 1000);
+  
   let query = supabase
     .from('sales')
     .select('*')
     .eq('pharmacy_id', pharmacyId)
-    .gte('created_at', today.toISOString())
+    .gte('created_at', todayUTC.toISOString())
+    .lt('created_at', tomorrowUTC.toISOString())
     .eq('status', 'completed');
   
   if (branchId) query = query.eq('branch_id', branchId);
@@ -389,14 +374,19 @@ export async function addStock(productId, productName, quantity, notes, userId, 
 
 // ===================== ANALYTICS =====================
 export async function getDashboardStats(pharmacyId, branchId = null) {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const weekAgo = new Date(today);
-  weekAgo.setDate(weekAgo.getDate() - 7);
+  // Use UTC dates for proper timezone-aware filtering
+  const now = new Date();
+  const todayUTC = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0, 0));
+  const tomorrowUTC = new Date(todayUTC.getTime() + 24 * 60 * 60 * 1000);
+  const weekAgoUTC = new Date(todayUTC.getTime() - 7 * 24 * 60 * 60 * 1000);
+  
+  const todayDateStr = todayUTC.toISOString();
+  const tomorrowDateStr = tomorrowUTC.toISOString();
+  const weekAgoDateStr = weekAgoUTC.toISOString();
 
   // Build queries based on branchId
-  let salesTodayQuery = supabase.from('sales').select('total_amount').eq('pharmacy_id', pharmacyId).gte('created_at', today.toISOString()).eq('status', 'completed');
-  let salesWeekQuery = supabase.from('sales').select('total_amount, created_at').eq('pharmacy_id', pharmacyId).gte('created_at', weekAgo.toISOString()).eq('status', 'completed');
+  let salesTodayQuery = supabase.from('sales').select('total_amount').eq('pharmacy_id', pharmacyId).gte('created_at', todayDateStr).lt('created_at', tomorrowDateStr).eq('status', 'completed');
+  let salesWeekQuery = supabase.from('sales').select('total_amount, created_at').eq('pharmacy_id', pharmacyId).gte('created_at', weekAgoDateStr).eq('status', 'completed');
   let productsQuery = supabase.from('products').select('id, stock_boxes, low_stock_threshold').eq('pharmacy_id', pharmacyId).eq('is_active', true);
   let lowStockQuery = supabase.from('products').select('*').eq('pharmacy_id', pharmacyId).eq('is_active', true);
   
@@ -1250,29 +1240,14 @@ export async function generateDailySalesReport(pharmacyId, branchId, reportDate)
 }
 
 export async function getDailyReports(pharmacyId, branchId = null, limit = 30, offset = 0) {
-  try {
-    const { data, error } = await supabase.rpc('get_daily_reports', {
-      p_pharmacy_id: pharmacyId,
-      p_branch_id: branchId,
-      p_limit: limit,
-      p_offset: offset
-    });
-    if (error) throw error;
-    return data || [];
-  } catch (rpcError) {
-    // Fallback to direct query if RPC fails
-    console.warn('RPC call failed, using direct query:', rpcError);
-    let query = supabase
-      .from('daily_sales_reports')
-      .select('*')
-      .eq('pharmacy_id', pharmacyId);
-    
-    if (branchId) query = query.eq('branch_id', branchId);
-    
-    const { data, error } = await query.order('report_date', { ascending: false }).limit(limit).offset(offset);
-    if (error) throw error;
-    return data || [];
-  }
+  const { data, error } = await supabase.rpc('get_daily_reports', {
+    p_pharmacy_id: pharmacyId,
+    p_branch_id: branchId,
+    p_limit: limit,
+    p_offset: offset
+  });
+  if (error) throw error;
+  return data || [];
 }
 
 export async function getDailyReportsByDateRange(pharmacyId, branchId = null, startDate = null, endDate = null) {
