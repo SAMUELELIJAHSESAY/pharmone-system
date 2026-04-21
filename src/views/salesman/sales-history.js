@@ -21,52 +21,12 @@ export async function renderSalesHistory(container, user) {
 
     // Get all sales for this salesman (only sales they created in their branch)
     const allSales = await getSales(pharmacyId, 1000);
-    
-    if (!allSales || allSales.length === 0) {
-      container.innerHTML = `
-        <div class="animate-in">
-          <div class="page-header">
-            <div>
-              <div class="page-title">📋 My Sales History</div>
-              <div class="page-subtitle">View receipts you printed and detailed sales information</div>
-            </div>
-          </div>
-          <div class="empty-state">
-            <div class="empty-state-icon">📊</div>
-            <div class="empty-state-title">No sales yet</div>
-            <div class="empty-state-desc">You don't have any sales recorded yet. Go to Point of Sale to make your first sale.</div>
-          </div>
-        </div>
-      `;
-      return;
-    }
-
     const salesmanSales = allSales.filter(s => 
       s.created_by === userId && s.branch_id === branchId
     );
 
-    if (!salesmanSales || salesmanSales.length === 0) {
-      container.innerHTML = `
-        <div class="animate-in">
-          <div class="page-header">
-            <div>
-              <div class="page-title">📋 My Sales History</div>
-              <div class="page-subtitle">View receipts you printed and detailed sales information</div>
-            </div>
-          </div>
-          <div class="empty-state">
-            <div class="empty-state-icon">📊</div>
-            <div class="empty-state-title">No sales found</div>
-            <div class="empty-state-desc">No sales matching your criteria. Go to Point of Sale to make a sale.</div>
-          </div>
-        </div>
-      `;
-      return;
-    }
-
     renderSalesHistoryView(container, salesmanSales, user, pharmacyId, branchId);
   } catch (err) {
-    console.error('Sales history error:', err);
     container.innerHTML = `<div class="alert alert-danger">Failed to load sales history: ${err.message}</div>`;
   }
 }

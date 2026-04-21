@@ -24,7 +24,6 @@ import { renderSalesmanDashboard } from './salesman/dashboard.js';
 import { renderPOS } from './salesman/pos.js';
 import { renderSalesHistory } from './salesman/sales-history.js';
 import { renderSalesmanReturnsRequest } from './salesman/returns-request.js';
-import { renderSalesmanPatients } from './salesman/patients.js';
 import { renderPharmacies } from './super-admin/pharmacies.js';
 import { renderAllUsers } from './super-admin/users.js';
 import { renderSettings } from './super-admin/settings.js';
@@ -203,14 +202,7 @@ export function navigate(view, params = {}) {
     case 'inventory': renderInventory(content, currentUser); break;
     case 'sales': renderSales(content, currentUser); break;
     case 'customers': renderCustomers(content, currentUser); break;
-    case 'patients': 
-      const userRole = currentUser?.profile?.role || 'salesman';
-      if (userRole === 'salesman') {
-        renderSalesmanPatients(content, currentUser);
-      } else {
-        renderPatientManagementView(content, currentUser);
-      }
-      break;
+    case 'patients': renderPatientManagementView(content, currentUser); break;
     case 'expenses': renderExpenseManagement(content, currentUser); break;
     case 'stock-transfers': renderStockTransfers(content, currentUser); break;
     case 'suppliers': renderSuppliers(content, currentUser); break;
