@@ -1,6 +1,6 @@
 // Salesman Sales History View - View receipts printed and detailed sales information
 import { getSales, getPharmacySettings } from '../../database.js';
-import { formatCurrency, formatDate, showToast } from '../../utils.js';
+import { formatCurrency, formatDate, showToast, formatUTCDate, formatUTCTime, formatUTCDateTime } from '../../utils.js';
 
 export async function renderSalesHistory(container, user) {
   const pharmacyId = user?.profile?.pharmacy_id;
@@ -179,8 +179,8 @@ function renderSalesHistoryView(container, sales, user, pharmacyId, branchId) {
                         </div>
                       </td>
                       <td style="font-size:0.9rem">
-                        <div>${new Date(sale.created_at).toLocaleDateString()}</div>
-                        <div style="color:var(--gray-500)">${new Date(sale.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</div>
+                        <div>${formatUTCDate(sale.created_at)}</div>
+                        <div style="color:var(--gray-500)">${formatUTCTime(sale.created_at)}</div>
                       </td>
                       <td style="text-align:center">
                         <button class="btn btn-sm btn-ghost" onclick="window.viewSaleReceipt('${sale.id}')" title="View Receipt Details">
@@ -244,8 +244,8 @@ function renderSalesHistoryView(container, sales, user, pharmacyId, branchId) {
         </div>
 
         <div style="margin-bottom:1rem;font-size:0.85rem">
-          <div><strong>Date:</strong> ${new Date(sale.created_at).toLocaleDateString()}</div>
-          <div><strong>Time:</strong> ${new Date(sale.created_at).toLocaleTimeString()}</div>
+          <div><strong>Date:</strong> ${formatUTCDate(sale.created_at)}</div>
+          <div><strong>Time:</strong> ${formatUTCTime(sale.created_at)}</div>
           <div><strong>Cashier:</strong> ${user.profile?.full_name || 'N/A'}</div>
           <div><strong>Customer:</strong> ${sale.customers?.name || 'Walk-in'}</div>
         </div>
@@ -291,13 +291,13 @@ function renderSalesHistoryView(container, sales, user, pharmacyId, branchId) {
 
         ${sale.receipt_printed_at ? `
           <div style="margin-top:0.75rem;padding:0.5rem;background:var(--blue-50);border-radius:var(--radius-sm);font-size:0.8rem;text-align:center;color:var(--blue-700)">
-            🖨️ Printed: ${new Date(sale.receipt_printed_at).toLocaleString()}
+            🖨️ Printed: ${formatUTCDateTime(sale.receipt_printed_at)}
           </div>
         ` : ''}
 
         ${sale.receipt_saved_at ? `
           <div style="margin-top:0.5rem;padding:0.5rem;background:var(--green-50);border-radius:var(--radius-sm);font-size:0.8rem;text-align:center;color:var(--green-700)">
-            💾 Saved: ${new Date(sale.receipt_saved_at).toLocaleString()}
+            💾 Saved: ${formatUTCDateTime(sale.receipt_saved_at)}
           </div>
         ` : ''}
 

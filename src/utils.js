@@ -20,12 +20,68 @@ export function formatCurrencyWithSettings(amount, currencyCode = 'USD', currenc
 
 export function formatDate(dateStr) {
   if (!dateStr) return '—';
-  return new Date(dateStr).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+  // Parse as UTC and display without timezone conversion
+  const date = new Date(dateStr);
+  return date.toISOString().split('T')[0]; // Returns YYYY-MM-DD in UTC
 }
 
 export function formatDateTime(dateStr) {
   if (!dateStr) return '—';
-  return new Date(dateStr).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  // Parse as UTC and display without timezone conversion
+  // This ensures all users see the same time regardless of browser timezone
+  const date = new Date(dateStr);
+  const isoString = date.toISOString(); // Already in UTC
+  const [datePart, timePart] = isoString.split('T');
+  const [year, month, day] = datePart.split('-');
+  const [hours, minutes] = timePart.split(':');
+  
+  // Format as: Apr 21, 10:30 (UTC)
+  const monthName = new Date(isoString).toLocaleDateString('en-US', { month: 'short' });
+  return `${monthName} ${parseInt(day)}, ${hours}:${minutes}`;
+}
+
+/**
+ * Format date/time consistently in UTC for all users
+ * Use this instead of new Date().toLocaleString() to ensure consistency
+ */
+export function formatUTCDateTime(dateStr) {
+  if (!dateStr) return '—';
+  const date = new Date(dateStr);
+  const iso = date.toISOString();
+  const [datePart, timePart] = iso.split('T');
+  const [year, month, day] = datePart.split('-');
+  const [hours, minutes, seconds] = timePart.split(':');
+  const monthNum = parseInt(month);
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  return `${months[monthNum - 1]} ${parseInt(day)}, ${hours}:${minutes}:${seconds.split('.')[0]}`;
+}
+
+/**
+ * Format just time in UTC
+ * Use this instead of new Date().toLocaleTimeString()
+ */
+export function formatUTCTime(dateStr) {
+  if (!dateStr) return '—';
+  const date = new Date(dateStr);
+  const iso = date.toISOString();
+  const timePart = iso.split('T')[1];
+  const [hours, minutes, seconds] = timePart.split(':');
+  return `${hours}:${minutes}:${seconds.split('.')[0]}`;
+}
+
+/**
+ * Format just date in UTC
+ * Use this instead of new Date().toLocaleDateString()
+ */
+export function formatUTCDate(dateStr) {
+  if (!dateStr) return '—';
+  const date = new Date(dateStr);
+  const iso = date.toISOString();
+  const [datePart] = iso.split('T');
+  const [year, month, day] = datePart.split('-');
+  const monthNum = parseInt(month);
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  return `${months[monthNum - 1]} ${parseInt(day)}, ${year}`;
 }
 
 export function showToast(message, type = 'success') {

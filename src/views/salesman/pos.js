@@ -1,5 +1,5 @@
 import { getProducts, getCustomers, createCustomer, createSale, getStaffBranch, getPharmacySettings } from '../../database.js';
-import { formatCurrency, showToast, debounce } from '../../utils.js';
+import { formatCurrency, showToast, debounce, formatUTCDateTime } from '../../utils.js';
 import { createModal } from '../../components/modal.js';
 
 let cart = [];
@@ -452,7 +452,7 @@ async function processCheckout() {
 }
 
 function showReceiptModal(sale, items, total, discount, paymentMethod) {
-  const saleDate = new Date(sale.created_at).toLocaleString();
+  const saleDate = formatUTCDateTime(sale.created_at);
   const { overlay, closeModal } = createModal({
     id: 'receipt-modal',
     title: 'Sale Complete!',
@@ -514,7 +514,7 @@ function showReceiptModal(sale, items, total, discount, paymentMethod) {
           <div class="receipt">
             <div class="title">Receipt</div>
             <div class="row"><span>Invoice:</span><span><strong>${sale.invoice_number}</strong></span></div>
-            <div class="row"><span>Date:</span><span>${new Date(sale.created_at).toLocaleString()}</span></div>
+            <div class="row"><span>Date:</span><span>${formatUTCDateTime(sale.created_at)}</span></div>
             <div class="divider"></div>
             ${items.map(i => {
               const packagingInfo = getPackagingInfo(i.packaging_type || 'unit', i.units_per_box || 10);

@@ -1,6 +1,6 @@
 // Daily Sales Reports - Records of all sales aggregated by day
 import { getDailyReports, getDailyReportsByDateRange, generateDailySalesReport, getBranches } from '../../database.js';
-import { formatCurrency, formatDateTime, showToast } from '../../utils.js';
+import { formatCurrency, formatDateTime, showToast, formatUTCDate } from '../../utils.js';
 import { createModal } from '../../components/modal.js';
 
 export async function renderDailyReports(container, user) {
@@ -155,7 +155,7 @@ function renderReportsTable(reports, branches) {
 
     return `
       <tr>
-        <td class="font-semibold">${new Date(r.report_date).toLocaleDateString()}</td>
+        <td class="font-semibold">${formatUTCDate(r.report_date)}</td>
         <td>${branchMap[r.branch_id] || 'Unknown'}</td>
         <td class="font-semibold" style="color:var(--success)">${formatCurrency(r.total_sales)}</td>
         <td class="text-center">${r.total_items_sold}</td>
@@ -301,7 +301,7 @@ function showReportDetail(report, branchName) {
         </div>
         <div>
           <div class="text-xs text-muted">Report Date</div>
-          <div class="font-semibold">${new Date(report.report_date).toLocaleDateString()}</div>
+          <div class="font-semibold">${formatUTCDate(report.report_date)}</div>
         </div>
         <div>
           <div class="text-xs text-muted">Total Sales</div>

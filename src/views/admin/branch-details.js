@@ -2,7 +2,7 @@
 import { supabase } from '../../config.js';
 import { getBranchDetails, getBranchDashboard, getBranchAssignments, updateBranchDetails, getPharmacyStaff, assignStaffToBranch } from '../../database.js';
 import { createModal } from '../../components/modal.js';
-import { showToast } from '../../utils.js';
+import { showToast, formatUTCDate, formatUTCDateTime } from '../../utils.js';
 
 export function renderBranchDetailsView(branchId, pharmacyId) {
   const mainContent = document.getElementById('page-content');
@@ -289,7 +289,7 @@ async function loadBranchSales(branchId) {
         <td>$${s.total_amount.toFixed(2)}</td>
         <td>${s.payment_method}</td>
         <td>Staff</td>
-        <td>${new Date(s.created_at).toLocaleDateString()}</td>
+        <td>${formatUTCDate(s.created_at)}</td>
       </tr>
     `).join('');
   } catch (error) {
@@ -346,7 +346,7 @@ async function loadRecentActivity(branchId) {
         <div class="activity-details">
           <div class="activity-title">Sale completed</div>
           <div class="activity-amount">$${s.total_amount.toFixed(2)}</div>
-          <div class="activity-time">${new Date(s.created_at).toLocaleString()}</div>
+          <div class="activity-time">${formatUTCDateTime(s.created_at)}</div>
         </div>
       </div>
     `).join('');

@@ -1,5 +1,5 @@
 import { getAlerts, markAlertAsRead, markAllAlertsAsRead, generateAlerts } from '../../database.js';
-import { showToast } from '../../utils.js';
+import { showToast, formatUTCDate } from '../../utils.js';
 
 export async function renderAlerts(container, user) {
   const pharmacyId = user.profile?.pharmacy_id;
@@ -138,7 +138,7 @@ export async function renderAlerts(container, user) {
                           <span class="badge">${alertTitle(alert.alert_type)}</span>
                         </td>
                         <td class="text-sm">${alertDescription(alert)}</td>
-                        <td>${new Date(alert.created_at).toLocaleDateString()}</td>
+                        <td>${formatUTCDate(alert.created_at)}</td>
                       </tr>
                     `).join('')}
                   </tbody>

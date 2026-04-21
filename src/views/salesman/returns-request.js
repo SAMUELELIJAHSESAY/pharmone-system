@@ -1,6 +1,6 @@
 // Salesman Returns Request - Request returns with admin approval workflow
 import { getSales, getCustomers, supabase } from '../../database.js';
-import { formatCurrency, showToast } from '../../utils.js';
+import { formatCurrency, showToast, formatUTCDate } from '../../utils.js';
 
 export async function renderSalesmanReturnsRequest(container, user) {
   const pharmacyId = user?.profile?.pharmacy_id;
@@ -114,7 +114,7 @@ function renderReturnsRequestView(container, sales, returnRequests, user, pharma
                     <td>
                       <span class="badge ${statusColor}">${request.status?.toUpperCase()}</span>
                     </td>
-                    <td style="font-size:0.9rem">${new Date(request.created_at).toLocaleDateString()}</td>
+                    <td style="font-size:0.9rem">${formatUTCDate(request.created_at)}</td>
                     <td style="text-align:center">
                       <button class="btn btn-sm btn-ghost" onclick="window.viewRequestDetails('${request.id}')" title="View Details">👁️ View</button>
                       ${request.status === 'pending' ? `
@@ -145,7 +145,7 @@ function renderReturnsRequestView(container, sales, returnRequests, user, pharma
                 <option value="">-- Select an invoice from your sales --</option>
                 ${sales.map(s => `
                   <option value="${s.id}" data-invoice="${s.invoice_number}" data-total="${s.total_amount}">
-                    ${s.invoice_number} - ₦${parseFloat(s.total_amount).toFixed(2)} (${new Date(s.created_at).toLocaleDateString()})
+                    ${s.invoice_number} - ₦${parseFloat(s.total_amount).toFixed(2)} (${formatUTCDate(s.created_at)})
                   </option>
                 `).join('')}
               </select>
@@ -379,7 +379,7 @@ function renderReturnsRequestView(container, sales, returnRequests, user, pharma
         </div>
         <div>
           <h4 style="margin:0 0 0.5rem 0;color:var(--gray-600)">Requested Date</h4>
-          <p style="margin:0">${new Date(request.created_at).toLocaleDateString()}</p>
+          <p style="margin:0">${formatUTCDate(request.created_at)}</p>
         </div>
         <div>
           <h4 style="margin:0 0 0.5rem 0;color:var(--gray-600)">Items</h4>
