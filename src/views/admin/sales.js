@@ -1,4 +1,4 @@
-import { getSales, getBranches } from '../../database.js';
+import { getSales, getBranches, getTodayDateRange } from '../../database.js';
 import { formatCurrency, formatDateTime, showToast } from '../../utils.js';
 import { createModal } from '../../components/modal.js';
 
@@ -12,16 +12,15 @@ export async function renderSales(container, user) {
       getBranches(pharmacyId)
     ]);
 
-    const totalRevenue = sales.filter(s => s.status === 'completed').reduce((sum, s) => sum + parseFloat(s.total_amount), 0);
+    const totalRevenue = sales.filter(s => s.status === 'completed').reduce((sum, s) => sum + parseFloat(s.total_amount || 0), 0);
     
-    // Calculate today's revenue with proper timezone-aware handling
-    const now = new Date();
-    const todayDateStr = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())).toISOString().split('T')[0];
+    // Calculate today's revenue using consistent date range
+    const todayRange = getTodayDateRange();
     
     const todayRevenue = sales.filter(s => {
       const saleDate = s.created_at.split('T')[0];
-      return saleDate === todayDateStr && s.status === 'completed';
-    }).reduce((sum, s) => sum + parseFloat(s.total_amount), 0);
+      return saleDate === todayRange.dateStr && s.status === 'completed';
+    }).reduce((sum, s) => sum + parseFloat(s.total_amount || 0), 0);
 
     container.innerHTML = `
       <div class="animate-in">

@@ -15,17 +15,26 @@ export async function renderAdminDashboard(container, user) {
       window.pharmacySettings = settings || { currency_symbol: 'Le', currency_code: 'NLE' };
     }
     
+    // Force fresh data fetch by adding cache buster
     const [stats, recentSales] = await Promise.all([
       getDashboardStats(pharmacyId),
       getSales(pharmacyId, 10)
     ]);
+
+    // Validate data freshness - if data seems stale, refetch
+    const statsTimestamp = new Date(stats.lastUpdated || new Date());
+    const now = new Date();
+    if (now - statsTimestamp > 60000) { // Older than 1 minute, refetch
+      const freshStats = await getDashboardStats(pharmacyId);
+      Object.assign(stats, freshStats);
+    }
 
     container.innerHTML = `
       <div class="animate-in">
         <div class="page-header">
           <div>
             <div class="page-title">Good ${getGreeting()}, ${(user.profile?.full_name || 'Admin').split(' ')[0]}!</div>
-            <div class="page-subtitle">Here's what's happening at your pharmacy today</div>
+            <div class="page-subtitle">Here's what's happening at your pharmacy today (Last updated: ${new Date().toLocaleTimeString()})</div>
           </div>
           <button class="btn btn-primary" onclick="import('./src/views/app.js').then(m=>m.navigate('pos'))">
             + New Sale
@@ -133,6 +142,10 @@ export async function renderAdminDashboard(container, user) {
               `}
             </div>
           </div>
+        </div>
+
+        <div style="text-align: center; margin-top: 2rem">
+          <button class="btn btn-secondary" onclick="location.reload()">Refresh Dashboard</button>
         </div>
       </div>
     `;

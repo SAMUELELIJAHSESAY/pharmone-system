@@ -2,6 +2,41 @@ import { supabase } from './config.js';
 
 export { supabase }; // Export supabase for use in other modules
 
+// ===================== DATE UTILITIES =====================
+/**
+ * Get today's date range in UTC for consistent database queries
+ * This ensures the same day is used regardless of timezone
+ */
+export function getTodayDateRange() {
+  const now = new Date();
+  
+  // Create date at midnight UTC
+  const todayUTC = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0, 0));
+  const tomorrowUTC = new Date(todayUTC.getTime() + 24 * 60 * 60 * 1000);
+  
+  return {
+    start: todayUTC.toISOString(),
+    end: tomorrowUTC.toISOString(),
+    dateStr: todayUTC.toISOString().split('T')[0]
+  };
+}
+
+/**
+ * Get week date range (last 7 days from today)
+ */
+export function getWeekDateRange() {
+  const now = new Date();
+  
+  // Create date at midnight UTC
+  const todayUTC = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0, 0));
+  const weekAgoUTC = new Date(todayUTC.getTime() - 7 * 24 * 60 * 60 * 1000);
+  
+  return {
+    start: weekAgoUTC.toISOString(),
+    end: todayUTC.toISOString()
+  };
+}
+
 // ===================== PHARMACIES =====================
 export async function getPharmacies() {
   const { data, error } = await supabase.from('pharmacies').select('*').order('created_at', { ascending: false });
@@ -208,18 +243,17 @@ export async function getSales(pharmacyId, limit = 50) {
 }
 
 export async function getSalesToday(pharmacyId, branchId = null) {
-  // Use UTC date for proper timezone-aware filtering
-  const now = new Date();
-  const todayUTC = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0, 0));
-  const tomorrowUTC = new Date(todayUTC.getTime() + 24 * 60 * 60 * 1000);
+  // Use consistent date range
+  const todayRange = getTodayDateRange();
   
   let query = supabase
     .from('sales')
     .select('*')
     .eq('pharmacy_id', pharmacyId)
-    .gte('created_at', todayUTC.toISOString())
-    .lt('created_at', tomorrowUTC.toISOString())
-    .eq('status', 'completed');
+    .gte('created_at', todayRange.start)
+    .lt('created_at', todayRange.end)
+    .eq('status', 'completed')
+    .order('created_at', { ascending: false });
   
   if (branchId) query = query.eq('branch_id', branchId);
   
@@ -374,21 +408,38 @@ export async function addStock(productId, productName, quantity, notes, userId, 
 
 // ===================== ANALYTICS =====================
 export async function getDashboardStats(pharmacyId, branchId = null) {
-  // Use UTC dates for proper timezone-aware filtering
-  const now = new Date();
-  const todayUTC = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0, 0));
-  const tomorrowUTC = new Date(todayUTC.getTime() + 24 * 60 * 60 * 1000);
-  const weekAgoUTC = new Date(todayUTC.getTime() - 7 * 24 * 60 * 60 * 1000);
-  
-  const todayDateStr = todayUTC.toISOString();
-  const tomorrowDateStr = tomorrowUTC.toISOString();
-  const weekAgoDateStr = weekAgoUTC.toISOString();
+  // Use consistent date ranges for all queries
+  const todayRange = getTodayDateRange();
+  const weekRange = getWeekDateRange();
 
   // Build queries based on branchId
-  let salesTodayQuery = supabase.from('sales').select('total_amount').eq('pharmacy_id', pharmacyId).gte('created_at', todayDateStr).lt('created_at', tomorrowDateStr).eq('status', 'completed');
-  let salesWeekQuery = supabase.from('sales').select('total_amount, created_at').eq('pharmacy_id', pharmacyId).gte('created_at', weekAgoDateStr).eq('status', 'completed');
-  let productsQuery = supabase.from('products').select('id, stock_boxes, low_stock_threshold').eq('pharmacy_id', pharmacyId).eq('is_active', true);
-  let lowStockQuery = supabase.from('products').select('*').eq('pharmacy_id', pharmacyId).eq('is_active', true);
+  let salesTodayQuery = supabase
+    .from('sales')
+    .select('total_amount, created_at')
+    .eq('pharmacy_id', pharmacyId)
+    .gte('created_at', todayRange.start)
+    .lt('created_at', todayRange.end)
+    .eq('status', 'completed');
+    
+  let salesWeekQuery = supabase
+    .from('sales')
+    .select('total_amount, created_at')
+    .eq('pharmacy_id', pharmacyId)
+    .gte('created_at', weekRange.start)
+    .lte('created_at', weekRange.end)
+    .eq('status', 'completed');
+    
+  let productsQuery = supabase
+    .from('products')
+    .select('id, stock_boxes, low_stock_threshold')
+    .eq('pharmacy_id', pharmacyId)
+    .eq('is_active', true);
+    
+  let lowStockQuery = supabase
+    .from('products')
+    .select('*')
+    .eq('pharmacy_id', pharmacyId)
+    .eq('is_active', true);
   
   if (branchId) {
     salesTodayQuery = salesTodayQuery.eq('branch_id', branchId);
@@ -404,8 +455,13 @@ export async function getDashboardStats(pharmacyId, branchId = null) {
     lowStockQuery
   ]);
 
-  const todayRevenue = (salesToday.data || []).reduce((sum, s) => sum + parseFloat(s.total_amount), 0);
-  const weekRevenue = (salesWeek.data || []).reduce((sum, s) => sum + parseFloat(s.total_amount), 0);
+  if (salesToday.error) throw salesToday.error;
+  if (salesWeek.error) throw salesWeek.error;
+  if (products.error) throw products.error;
+  if (lowStock.error) throw lowStock.error;
+
+  const todayRevenue = (salesToday.data || []).reduce((sum, s) => sum + parseFloat(s.total_amount || 0), 0);
+  const weekRevenue = (salesWeek.data || []).reduce((sum, s) => sum + parseFloat(s.total_amount || 0), 0);
   const allProducts = products.data || [];
   const lowStockItems = (lowStock.data || []).filter(p => p.stock_boxes <= p.low_stock_threshold);
 
@@ -416,7 +472,8 @@ export async function getDashboardStats(pharmacyId, branchId = null) {
     totalProducts: allProducts.length,
     lowStockCount: lowStockItems.length,
     lowStockProducts: lowStockItems,
-    weekSales: salesWeek.data || []
+    weekSales: salesWeek.data || [],
+    lastUpdated: new Date().toISOString() // Add timestamp for cache validation
   };
 }
 

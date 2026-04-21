@@ -25,15 +25,15 @@ export async function renderSalesmanDashboard(container, user) {
     ]);
 
     const myToday = salesToday.filter(s => s.created_by === user.id);
-    const myRevenue = myToday.reduce((sum, s) => sum + parseFloat(s.total_amount), 0);
-    const totalTodayRevenue = salesToday.reduce((sum, s) => sum + parseFloat(s.total_amount), 0);
+    const myRevenue = myToday.reduce((sum, s) => sum + parseFloat(s.total_amount || 0), 0);
+    const totalTodayRevenue = salesToday.reduce((sum, s) => sum + parseFloat(s.total_amount || 0), 0);
 
     container.innerHTML = `
       <div class="animate-in">
         <div class="page-header">
           <div>
             <div class="page-title">Hi, ${(user.profile?.full_name || 'there').split(' ')[0]}!</div>
-            <div class="page-subtitle">Your sales summary for today</div>
+            <div class="page-subtitle">Your sales summary for today (Updated: ${new Date().toLocaleTimeString()})</div>
           </div>
           <button class="btn btn-primary btn-lg" id="go-pos-btn">
             &#128179; Start Selling
@@ -108,6 +108,10 @@ export async function renderSalesmanDashboard(container, user) {
               </tbody>
             </table>
           </div>
+        </div>
+
+        <div style="text-align: center; margin-top: 2rem">
+          <button class="btn btn-secondary" onclick="location.reload()">Refresh Dashboard</button>
         </div>
       </div>
     `;
