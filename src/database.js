@@ -4,38 +4,61 @@ export { supabase }; // Export supabase for use in other modules
 
 // ===================== DATE UTILITIES =====================
 /**
- * Get today's date range in UTC for consistent database queries
- * This ensures the same day is used regardless of timezone
+ * Get today's date range using server-side timezone calculation
+ * Uses Postgres to ensure consistent results regardless of client timezone
+ * 
+ * @param {string} pharmacyId - Optional pharmacy ID for timezone-aware calculation
+ * @returns {Promise<{start: string, end: string, dateStr: string}>}
  */
-export function getTodayDateRange() {
-  const now = new Date();
+export async function getTodayDateRange(pharmacyId = null) {
+  // Use Postgres to calculate today's date range server-side
+  // This ensures accuracy regardless of client timezone
+  let query = supabase.rpc('get_today_date_range', { pharmacy_id: pharmacyId });
   
-  // Create date at midnight UTC
-  const todayUTC = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0, 0));
-  const tomorrowUTC = new Date(todayUTC.getTime() + 24 * 60 * 60 * 1000);
+  const { data, error } = await query;
   
-  return {
-    start: todayUTC.toISOString(),
-    end: tomorrowUTC.toISOString(),
-    dateStr: todayUTC.toISOString().split('T')[0]
-  };
+  if (error) {
+    console.warn('Error getting timezone-aware date range:', error);
+    // Fallback to UTC if timezone lookup fails
+    const now = new Date();
+    const todayUTC = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0, 0));
+    const tomorrowUTC = new Date(todayUTC.getTime() + 24 * 60 * 60 * 1000);
+    return {
+      start: todayUTC.toISOString(),
+      end: tomorrowUTC.toISOString(),
+      dateStr: todayUTC.toISOString().split('T')[0]
+    };
+  }
+  
+  return data;
 }
 
 /**
- * Get week date range (last 7 days from today)
+ * Get week date range using server-side timezone calculation
+ * 
+ * @param {string} pharmacyId - Optional pharmacy ID for timezone-aware calculation
+ * @returns {Promise<{start: string, end: string}>}
  */
-export function getWeekDateRange() {
-  const now = new Date();
+export async function getWeekDateRange(pharmacyId = null) {
+  // Use Postgres to calculate week date range server-side
+  let query = supabase.rpc('get_week_date_range', { pharmacy_id: pharmacyId });
   
-  // Create date at midnight UTC
-  const todayUTC = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0, 0));
-  const weekAgoUTC = new Date(todayUTC.getTime() - 7 * 24 * 60 * 60 * 1000);
-  const tomorrowUTC = new Date(todayUTC.getTime() + 24 * 60 * 60 * 1000);
+  const { data, error } = await query;
   
-  return {
-    start: weekAgoUTC.toISOString(),
-    end: tomorrowUTC.toISOString()
-  };
+  if (error) {
+    console.warn('Error getting week date range:', error);
+    // Fallback to UTC if timezone lookup fails
+    const now = new Date();
+    const todayUTC = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0, 0));
+    const weekAgoUTC = new Date(todayUTC.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const tomorrowUTC = new Date(todayUTC.getTime() + 24 * 60 * 60 * 1000);
+    return {
+      start: weekAgoUTC.toISOString(),
+      end: tomorrowUTC.toISOString()
+    };
+  }
+  
+  return data;
 }
 
 // ===================== PHARMACIES =====================
@@ -244,8 +267,8 @@ export async function getSales(pharmacyId, limit = 50) {
 }
 
 export async function getSalesToday(pharmacyId, branchId = null) {
-  // Use consistent date range
-  const todayRange = getTodayDateRange();
+  // Use timezone-aware date range
+  const todayRange = await getTodayDateRange(pharmacyId);
   
   let query = supabase
     .from('sales')
@@ -409,9 +432,9 @@ export async function addStock(productId, productName, quantity, notes, userId, 
 
 // ===================== ANALYTICS =====================
 export async function getDashboardStats(pharmacyId, branchId = null) {
-  // Use consistent date ranges for all queries
-  const todayRange = getTodayDateRange();
-  const weekRange = getWeekDateRange();
+  // Use timezone-aware date ranges for all queries
+  const todayRange = await getTodayDateRange(pharmacyId);
+  const weekRange = await getWeekDateRange(pharmacyId);
 
   // Build queries based on branchId
   let salesTodayQuery = supabase

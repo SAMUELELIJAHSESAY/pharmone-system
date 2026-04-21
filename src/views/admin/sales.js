@@ -7,16 +7,15 @@ export async function renderSales(container, user) {
   if (!pharmacyId) { container.innerHTML = `<div class="alert alert-warning">No pharmacy linked.</div>`; return; }
 
   try {
-    const [sales, branches] = await Promise.all([
+    const [sales, branches, todayRange] = await Promise.all([
       getSales(pharmacyId, 200),
-      getBranches(pharmacyId)
+      getBranches(pharmacyId),
+      getTodayDateRange(pharmacyId)
     ]);
 
     const totalRevenue = sales.filter(s => s.status === 'completed').reduce((sum, s) => sum + parseFloat(s.total_amount || 0), 0);
     
-    // Calculate today's revenue using consistent date range
-    const todayRange = getTodayDateRange();
-    
+    // Calculate today's revenue using timezone-aware date range
     const todayRevenue = sales.filter(s => {
       const saleDate = s.created_at.split('T')[0];
       return saleDate === todayRange.dateStr && s.status === 'completed';
