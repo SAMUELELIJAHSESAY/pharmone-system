@@ -197,14 +197,33 @@ export async function deleteCustomer(id) {
 
 // ===================== SALES =====================
 export async function getSales(pharmacyId, limit = 50) {
-  const { data, error } = await supabase
-    .from('sales')
-    .select('*, customers(name, phone), sale_items(*, products(name))')
-    .eq('pharmacy_id', pharmacyId)
-    .order('created_at', { ascending: false })
-    .limit(limit);
-  if (error) throw error;
-  return data;
+  try {
+    const { data, error } = await supabase
+      .from('sales')
+      .select('*, customers(name, phone), sale_items(*, products(name))')
+      .eq('pharmacy_id', pharmacyId)
+      .order('created_at', { ascending: false })
+      .limit(limit);
+    
+    if (error) {
+      console.warn('Error with related data query, trying without relationships:', error);
+      // Fallback to basic query without relationships
+      const { data: basicData, error: basicError } = await supabase
+        .from('sales')
+        .select('*')
+        .eq('pharmacy_id', pharmacyId)
+        .order('created_at', { ascending: false })
+        .limit(limit);
+      
+      if (basicError) throw basicError;
+      return basicData || [];
+    }
+    
+    return data || [];
+  } catch (err) {
+    console.error('Error fetching sales:', err);
+    throw err;
+  }
 }
 
 export async function getSalesToday(pharmacyId, branchId = null) {
@@ -1231,14 +1250,29 @@ export async function generateDailySalesReport(pharmacyId, branchId, reportDate)
 }
 
 export async function getDailyReports(pharmacyId, branchId = null, limit = 30, offset = 0) {
-  const { data, error } = await supabase.rpc('get_daily_reports', {
-    p_pharmacy_id: pharmacyId,
-    p_branch_id: branchId,
-    p_limit: limit,
-    p_offset: offset
-  });
-  if (error) throw error;
-  return data || [];
+  try {
+    const { data, error } = await supabase.rpc('get_daily_reports', {
+      p_pharmacy_id: pharmacyId,
+      p_branch_id: branchId,
+      p_limit: limit,
+      p_offset: offset
+    });
+    if (error) throw error;
+    return data || [];
+  } catch (rpcError) {
+    // Fallback to direct query if RPC fails
+    console.warn('RPC call failed, using direct query:', rpcError);
+    let query = supabase
+      .from('daily_sales_reports')
+      .select('*')
+      .eq('pharmacy_id', pharmacyId);
+    
+    if (branchId) query = query.eq('branch_id', branchId);
+    
+    const { data, error } = await query.order('report_date', { ascending: false }).limit(limit).offset(offset);
+    if (error) throw error;
+    return data || [];
+  }
 }
 
 export async function getDailyReportsByDateRange(pharmacyId, branchId = null, startDate = null, endDate = null) {
