@@ -30,10 +30,11 @@ export function getWeekDateRange() {
   // Create date at midnight UTC
   const todayUTC = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0, 0));
   const weekAgoUTC = new Date(todayUTC.getTime() - 7 * 24 * 60 * 60 * 1000);
+  const tomorrowUTC = new Date(todayUTC.getTime() + 24 * 60 * 60 * 1000);
   
   return {
     start: weekAgoUTC.toISOString(),
-    end: todayUTC.toISOString()
+    end: tomorrowUTC.toISOString()
   };
 }
 
@@ -426,7 +427,7 @@ export async function getDashboardStats(pharmacyId, branchId = null) {
     .select('total_amount, created_at')
     .eq('pharmacy_id', pharmacyId)
     .gte('created_at', weekRange.start)
-    .lte('created_at', weekRange.end)
+    .lt('created_at', weekRange.end)
     .eq('status', 'completed');
     
   let productsQuery = supabase
