@@ -199,7 +199,7 @@ export function navigate(view, params = {}) {
     case 'all-users': renderAllUsers(content, currentUser); break;
     case 'settings': renderSettings(content, currentUser); break;
     case 'admin-dashboard': renderAdminDashboard(content, currentUser); break;
-    case 'inventory': renderInventory(content, currentUser); break;
+    case 'inventory': renderInventory(content, currentUser, currentParams.filterType); break;
     case 'sales': renderSales(content, currentUser); break;
     case 'customers': renderCustomers(content, currentUser); break;
     case 'patients': renderPatientManagementView(content, currentUser); break;

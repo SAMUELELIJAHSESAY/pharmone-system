@@ -126,7 +126,7 @@ export async function renderAdminDashboard(container, user) {
           <div class="card">
             <div class="card-header">
               <span class="card-title">Low Stock Alert</span>
-              <button class="btn btn-ghost btn-sm" data-view-link="inventory">Manage</button>
+              <button class="btn btn-ghost btn-sm" data-view-link="inventory" data-filter-type="low-stock">Manage</button>
             </div>
             <div class="card-body" style="padding:0">
               ${stats.lowStockProducts.length === 0 ? `
@@ -160,7 +160,14 @@ export async function renderAdminDashboard(container, user) {
 
     document.querySelectorAll('[data-view-link]').forEach(btn => {
       btn.addEventListener('click', () => {
-        import('../app.js').then(m => m.navigate(btn.dataset.viewLink));
+        const filterType = btn.dataset.filterType;
+        import('../app.js').then(m => {
+          if (filterType) {
+            m.navigate(btn.dataset.viewLink, { filterType });
+          } else {
+            m.navigate(btn.dataset.viewLink);
+          }
+        });
       });
     });
   } catch (err) {

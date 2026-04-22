@@ -5,8 +5,11 @@ import { createModal } from '../../components/modal.js';
 let allProducts = [];
 let branches = [];
 let selectedBranchId = null;
+let currentFilterType = null; // For pre-filtering from dashboard
 
-export async function renderInventory(container, user) {
+export async function renderInventory(container, user, filterType = null) {
+  // Store filter type for use in rendering
+  currentFilterType = filterType;
   if (!user) {
     container.innerHTML = `<div class="alert alert-warning">User not authenticated. Please refresh the page.</div>`;
     return;
@@ -39,6 +42,22 @@ export async function renderInventory(container, user) {
 function renderView(container, products, user, branchList) {
   const lowStockCount = products.filter(p => p.stock_boxes <= p.low_stock_threshold).length;
   const expiredCount = products.filter(p => isExpired(p.expiry_date)).length;
+  
+  // Detect duplicate products by name
+  const productNames = {};
+  const duplicates = new Set();
+  products.forEach(p => {
+    const nameKey = p.name.toLowerCase().trim();
+    if (productNames[nameKey]) {
+      duplicates.add(nameKey);
+      productNames[nameKey].count++;
+      productNames[nameKey].ids.push(p.id);
+    } else {
+      productNames[nameKey] = { count: 1, ids: [p.id], names: [] };
+    }
+  });
+  
+  const duplicateCount = duplicates.size;
   const branchName = selectedBranchId 
     ? branchList.find(b => b.id === selectedBranchId)?.name || 'Branch'
     : 'All Branches';
@@ -96,12 +115,38 @@ function renderView(container, products, user, branchList) {
           </div>
           <div class="stat-card-value">${expiredCount}</div>
         </div>
+        ${duplicateCount > 0 ? `
+        <div class="stat-card" style="border:2px solid var(--warning);background:var(--warning-light)">
+          <div class="stat-card-header">
+            <span class="stat-card-label">Duplicates</span>
+            <div class="stat-card-icon" style="background:var(--warning);color:white">⚠️</div>
+          </div>
+          <div class="stat-card-value" style="color:var(--warning)">${duplicateCount}</div>
+          <div style="font-size:0.75rem;color:var(--warning);margin-top:0.25rem"><button class="btn btn-ghost btn-sm" id="show-duplicates-btn" style="padding:0;text-decoration:underline">Show</button></div>
+        </div>
+        ` : ''}
       </div>
 
       <div class="card">
         <div class="card-header">
           <span class="card-title">Products in ${branchName}</span>
-          <div class="flex gap-2">
+          <div class="flex gap-2" style="flex-wrap:wrap;gap:0.5rem">
+            <select class="form-select" id="filter-type" style="width:auto;padding:0.4rem 0.75rem;font-size:0.8rem">
+              <option value="">All Products</option>
+              <option value="low-stock" ${currentFilterType === 'low-stock' ? 'selected' : ''}>Low Stock</option>
+              <option value="expired">Expired</option>
+              <option value="expiring">Expiring Soon</option>
+              <option value="duplicates">Duplicates</option>
+            </select>
+            <select class="form-select" id="price-sort" style="width:auto;padding:0.4rem 0.75rem;font-size:0.8rem">
+              <option value="">Sort by...</option>
+              <option value="selling-asc">Selling Price (Low to High)</option>
+              <option value="selling-desc">Selling Price (High to Low)</option>
+              <option value="cost-asc">Cost Price (Low to High)</option>
+              <option value="cost-desc">Cost Price (High to Low)</option>
+              <option value="margin-asc">Profit Margin (Low to High)</option>
+              <option value="margin-desc">Profit Margin (High to Low)</option>
+            </select>
             <select class="form-select" id="cat-filter" style="width:auto;padding:0.4rem 0.75rem;font-size:0.8rem">
               <option value="">All Categories</option>
               ${[...new Set(allProducts.map(p => p.category))].map(c => `<option value="${c}">${c}</option>`).join('')}
@@ -202,18 +247,81 @@ function renderView(container, products, user, branchList) {
   });
 
   const search = debounce((q) => {
-    const cat = document.getElementById('cat-filter').value;
-    const filtered = allProducts.filter(p =>
-      (p.name.toLowerCase().includes(q) || p.category.toLowerCase().includes(q)) &&
-      (!cat || p.category === cat)
-    );
+    applyAllFilters(allProducts, branchList, user, reload);
+  });
+  
+  const applyAllFilters = (productsToFilter, branchList, user, reload) => {
+    const searchTerm = document.getElementById('product-search')?.value.toLowerCase() || '';
+    const category = document.getElementById('cat-filter')?.value || '';
+    const filterType = document.getElementById('filter-type')?.value || '';
+    const sortType = document.getElementById('price-sort')?.value || '';
+    
+    let filtered = productsToFilter.filter(p => {
+      // Text search
+      const matchesSearch = !searchTerm || p.name.toLowerCase().includes(searchTerm) || p.category.toLowerCase().includes(searchTerm);
+      
+      // Category filter
+      const matchesCategory = !category || p.category === category;
+      
+      // Type filter
+      let matchesType = true;
+      if (filterType === 'low-stock') {
+        matchesType = p.stock_boxes <= p.low_stock_threshold;
+      } else if (filterType === 'expired') {
+        matchesType = isExpired(p.expiry_date);
+      } else if (filterType === 'expiring') {
+        matchesType = isExpiringSoon(p.expiry_date) && !isExpired(p.expiry_date);
+      } else if (filterType === 'duplicates') {
+        const nameKey = p.name.toLowerCase().trim();
+        const dupCount = productsToFilter.filter(pp => pp.name.toLowerCase().trim() === nameKey).length;
+        matchesType = dupCount > 1;
+      }
+      
+      return matchesSearch && matchesCategory && matchesType;
+    });
+    
+    // Apply sorting
+    if (sortType) {
+      filtered.sort((a, b) => {
+        const costA = parseFloat(a.cost_price || 0);
+        const costB = parseFloat(b.cost_price || 0);
+        const sellA = parseFloat(a.price || 0);
+        const sellB = parseFloat(b.price || 0);
+        const marginA = sellA - costA;
+        const marginB = sellB - costB;
+        
+        if (sortType === 'selling-asc') return sellA - sellB;
+        if (sortType === 'selling-desc') return sellB - sellA;
+        if (sortType === 'cost-asc') return costA - costB;
+        if (sortType === 'cost-desc') return costB - costA;
+        if (sortType === 'margin-asc') return marginA - marginB;
+        if (sortType === 'margin-desc') return marginB - marginA;
+        return 0;
+      });
+    }
+    
     document.getElementById('inventory-tbody').innerHTML = renderRows(filtered, branchList);
     bindTableActions(filtered, user, reload, branchList);
-  });
+  };
 
-  document.getElementById('product-search').addEventListener('input', (e) => search(e.target.value.toLowerCase()));
+  document.getElementById('product-search').addEventListener('input', (e) => {
+    applyAllFilters(allProducts, branchList, user, reload);
+  });
+  
+  if (document.getElementById('filter-type')) {
+    document.getElementById('filter-type').addEventListener('change', () => {
+      applyAllFilters(allProducts, branchList, user, reload);
+    });
+  }
+  
+  if (document.getElementById('price-sort')) {
+    document.getElementById('price-sort').addEventListener('change', () => {
+      applyAllFilters(allProducts, branchList, user, reload);
+    });
+  }
+  
   document.getElementById('cat-filter').addEventListener('change', () => {
-    search(document.getElementById('product-search').value.toLowerCase());
+    applyAllFilters(allProducts, branchList, user, reload);
   });
 
   // Bulk select all
@@ -223,6 +331,20 @@ function renderView(container, products, user, branchList) {
     });
     updateBulkActionsBar();
   });
+  
+  // Show duplicates handler
+  const showDuplicatesBtn = document.getElementById('show-duplicates-btn');
+  if (showDuplicatesBtn) {
+    showDuplicatesBtn.addEventListener('click', () => {
+      document.getElementById('filter-type').value = 'duplicates';
+      applyAllFilters(allProducts, branchList, user, reload);
+    });
+  }
+  
+  // Apply initial filter if provided (e.g., from dashboard)
+  if (currentFilterType) {
+    applyAllFilters(allProducts, branchList, user, reload);
+  }
 
   bindTableActions(products, user, reload, branchList);
 }
