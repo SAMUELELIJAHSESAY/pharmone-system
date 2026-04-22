@@ -2,9 +2,20 @@
 import { getPatients, searchPatients, createPatient, updatePatient, getPatientDetails, getPatientVisits, createPatientVisit, getTreatmentPayments, createTreatmentPayment } from '../../database.js';
 import { supabase } from '../../config.js';
 
+// Global context for patient operations
+let currentPatientUser = null;
+let currentPatientPharmacyId = null;
+let currentPatientBranchId = null;
+let currentPatientList = [];
+
 export async function renderPatientManagementView(container, user) {
   const pharmacyId = user?.profile?.pharmacy_id;
   const branchId = user?.profile?.branch_id;
+  
+  // Store user context globally for onclick handlers
+  currentPatientUser = user;
+  currentPatientPharmacyId = pharmacyId;
+  currentPatientBranchId = branchId;
   
   if (!pharmacyId) {
     container.innerHTML = `<div class="alert alert-warning">No pharmacy linked to your account.</div>`;
@@ -13,6 +24,7 @@ export async function renderPatientManagementView(container, user) {
   
   try {
     const patients = await getPatients(pharmacyId, branchId);
+    currentPatientList = patients;
     renderView(container, patients, user, pharmacyId, branchId);
   } catch (err) {
     container.innerHTML = `<div class="alert alert-danger">Failed to load patients: ${err.message}</div>`;
@@ -21,6 +33,7 @@ export async function renderPatientManagementView(container, user) {
 
 function renderView(container, patients, user, pharmacyId, branchId) {
   const mainContent = container;
+  currentPatientList = patients;
   
   mainContent.innerHTML = `
     <div class="patient-management-container">
@@ -393,20 +406,26 @@ function displayPatients(patients) {
 }
 
 async function searchPatientList() {
-  const pharmacyId = getCurrentPharmacyId(); // TODO: Get from context
   const searchTerm = document.getElementById('patient-search').value;
   
+  if (!currentPatientPharmacyId) {
+    alert('Pharmacy information not available. Please refresh the page.');
+    return;
+  }
+  
   if (!searchTerm) {
-    const patients = await getPatients(pharmacyId);
+    const patients = await getPatients(currentPatientPharmacyId, currentPatientBranchId);
+    currentPatientList = patients;
     displayPatients(patients);
     return;
   }
   
   try {
-    const results = await searchPatients(pharmacyId, searchTerm);
+    const results = await searchPatients(currentPatientPharmacyId, searchTerm);
     displayPatients(results);
   } catch (error) {
     console.error('Error searching patients:', error);
+    alert('Error searching patients: ' + error.message);
   }
 }
 
@@ -427,32 +446,43 @@ async function savePatient(event) {
   event.preventDefault();
   
   try {
-    const { data: userData } = await supabase.auth.getUser();
-    const { data: profileData } = await supabase
-      .from('profiles')
-      .select('pharmacy_id, branch_id')
-      .eq('id', userData.user.id)
-      .single();
+    // Disable submit button to prevent double submission
+    const submitBtn = event.target.querySelector('button[type="submit"]');
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Saving...';
+    
+    if (!currentPatientUser) {
+      throw new Error('User context not available. Please refresh the page.');
+    }
+    
+    if (!currentPatientPharmacyId) {
+      throw new Error('Pharmacy information not found. Please contact your administrator.');
+    }
     
     const patient = {
-      name: document.getElementById('patient-name').value,
-      phone: document.getElementById('patient-phone').value,
-      email: document.getElementById('patient-email').value || null,
-      gender: document.getElementById('patient-gender').value || null,
-      date_of_birth: document.getElementById('patient-dob').value || null,
-      address: document.getElementById('patient-address').value || null,
-      patient_id_number: document.getElementById('patient-id-number').value || null,
-      insurance_provider: document.getElementById('patient-insurance-provider').value || null,
-      insurance_number: document.getElementById('patient-insurance-number').value || null,
-      emergency_contact: document.getElementById('patient-emergency-contact').value || null,
-      emergency_phone: document.getElementById('patient-emergency-phone').value || null,
-      allergies: document.getElementById('patient-allergies').value || null,
-      medical_notes: document.getElementById('patient-medical-notes').value || null,
-      pharmacy_id: profileData.pharmacy_id,
-      branch_id: profileData.branch_id,
+      name: document.getElementById('patient-name')?.value || '',
+      phone: document.getElementById('patient-phone')?.value || '',
+      email: document.getElementById('patient-email')?.value || null,
+      gender: document.getElementById('patient-gender')?.value || null,
+      date_of_birth: document.getElementById('patient-dob')?.value || null,
+      address: document.getElementById('patient-address')?.value || null,
+      patient_id_number: document.getElementById('patient-id-number')?.value || null,
+      insurance_provider: document.getElementById('patient-insurance-provider')?.value || null,
+      insurance_number: document.getElementById('patient-insurance-number')?.value || null,
+      emergency_contact: document.getElementById('patient-emergency-contact')?.value || null,
+      emergency_phone: document.getElementById('patient-emergency-phone')?.value || null,
+      allergies: document.getElementById('patient-allergies')?.value || null,
+      medical_notes: document.getElementById('patient-medical-notes')?.value || null,
+      pharmacy_id: currentPatientPharmacyId,
+      branch_id: currentPatientBranchId,
       is_active: true,
       created_at: new Date().toISOString()
     };
+    
+    // Validate required fields
+    if (!patient.name || !patient.phone) {
+      throw new Error('Name and Phone are required fields');
+    }
     
     const savedPatient = await createPatient(patient);
     
@@ -476,15 +506,23 @@ async function savePatient(event) {
       document.getElementById('patient-medical-notes').value = '';
       
       // Reload patient list
-      const patients = await getPatients(profileData.pharmacy_id, profileData.branch_id);
+      const patients = await getPatients(currentPatientPharmacyId, currentPatientBranchId);
+      currentPatientList = patients;
       displayPatients(patients);
     } else {
-      alert('Failed to register patient');
+      throw new Error('Failed to save patient - no ID returned from database');
     }
     
   } catch (error) {
     console.error('Error saving patient:', error);
-    alert('Error: ' + error.message);
+    alert('Error saving patient: ' + error.message);
+  } finally {
+    // Re-enable submit button
+    const submitBtn = event.target.querySelector('button[type="submit"]');
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Register Patient';
+    }
   }
 }
 
@@ -608,18 +646,23 @@ async function saveTreatmentPayment(event) {
   event.preventDefault();
   
   try {
+    const submitBtn = event.target.querySelector('button[type="submit"]');
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Saving...';
+    
     const patientId = document.getElementById('patient-details-modal').dataset.patientId;
-    const { data: userData } = await supabase.auth.getUser();
-    const { data: profileData } = await supabase
-      .from('profiles')
-      .select('pharmacy_id, branch_id')
-      .eq('id', userData.user.id)
-      .single();
+    
+    if (!patientId) {
+      throw new Error('Patient ID not found');
+    }
     
     const visitId = document.getElementById('payment-visit-id').value;
     if (!visitId) {
-      alert('Please select a visit');
-      return;
+      throw new Error('Please select a visit');
+    }
+    
+    if (!currentPatientUser) {
+      throw new Error('User context not available');
     }
     
     const payment = {
@@ -629,10 +672,10 @@ async function saveTreatmentPayment(event) {
       payment_method: document.getElementById('payment-method').value,
       description: document.getElementById('payment-description').value,
       payment_date: document.getElementById('payment-date').value,
-      recorded_by: userData.user.id,
+      recorded_by: currentPatientUser.id,
       notes: document.getElementById('payment-notes').value || null,
-      pharmacy_id: profileData.pharmacy_id,
-      branch_id: profileData.branch_id
+      pharmacy_id: currentPatientPharmacyId,
+      branch_id: currentPatientBranchId
     };
     
     await createTreatmentPayment(payment);
@@ -645,6 +688,12 @@ async function saveTreatmentPayment(event) {
   } catch (error) {
     console.error('Error saving treatment payment:', error);
     alert('Error: ' + error.message);
+  } finally {
+    const submitBtn = event.target.querySelector('button[type="submit"]');
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Record Payment';
+    }
   }
 }
 
@@ -652,13 +701,19 @@ async function savePatientVisit(event) {
   event.preventDefault();
   
   try {
+    const submitBtn = event.target.querySelector('button[type="submit"]');
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Saving...';
+    
     const patientId = document.getElementById('patient-details-modal').dataset.patientId;
-    const { data: userData } = await supabase.auth.getUser();
-    const { data: profileData } = await supabase
-      .from('profiles')
-      .select('pharmacy_id, branch_id')
-      .eq('id', userData.user.id)
-      .single();
+    
+    if (!patientId) {
+      throw new Error('Patient ID not found');
+    }
+    
+    if (!currentPatientUser) {
+      throw new Error('User context not available');
+    }
     
     const visit = {
       patient_id: patientId,
@@ -668,9 +723,9 @@ async function savePatientVisit(event) {
       symptoms: document.getElementById('visit-symptoms').value,
       diagnosis: document.getElementById('visit-diagnosis').value,
       notes: document.getElementById('visit-notes').value,
-      visited_by: userData.user.id,
-      pharmacy_id: profileData.pharmacy_id,
-      branch_id: profileData.branch_id
+      visited_by: currentPatientUser.id,
+      pharmacy_id: currentPatientPharmacyId,
+      branch_id: currentPatientBranchId
     };
     
     await createPatientVisit(visit);
@@ -683,6 +738,12 @@ async function savePatientVisit(event) {
   } catch (error) {
     console.error('Error saving visit:', error);
     alert('Error: ' + error.message);
+  } finally {
+    const submitBtn = event.target.querySelector('button[type="submit"]');
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Record Visit';
+    }
   }
 }
 
@@ -704,9 +765,24 @@ function editPatientForm(patientId) {
 }
 
 function getCurrentPharmacyId() {
-  // TODO: Get from global context or auth
-  return '';
+  return currentPatientPharmacyId || '';
 }
+
+// Export functions globally for onclick handlers
+window.openAddPatientModal = openAddPatientModal;
+window.closeModal = closeModal;
+window.savePatient = savePatient;
+window.openPatientDetails = openPatientDetails;
+window.openAddVisitModal = openAddVisitModal;
+window.openTreatmentPaymentModal = openTreatmentPaymentModal;
+window.saveTreatmentPayment = saveTreatmentPayment;
+window.savePatientVisit = savePatientVisit;
+window.switchPatientTab = switchPatientTab;
+window.editPatient = editPatient;
+window.editPatientForm = editPatientForm;
+window.searchPatientList = searchPatientList;
+window.clearPatientSearch = clearPatientSearch;
+window.displayPatients = displayPatients;
 
 // Make functions globally accessible for onclick handlers
 window.openAddPatientModal = openAddPatientModal;
