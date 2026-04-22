@@ -128,7 +128,8 @@ function renderView(container, products, user, branchList) {
                 <th>Product Name</th>
                 <th>Branch</th>
                 <th>Category</th>
-                <th>Price</th>
+                <th>Cost Price</th>
+                <th>Selling Price</th>
                 <th>Stock</th>
                 <th>Expiry</th>
                 <th>Status</th>
@@ -251,6 +252,7 @@ function renderRows(products, branchList) {
         </td>
         <td><span class="badge badge-blue">${branchName}</span></td>
         <td><span class="badge badge-gray">${p.category}</span></td>
+        <td class="font-semibold">${p.cost_price ? formatCurrency(p.cost_price) : '-'}</td>
         <td class="font-semibold">${formatCurrency(p.price)}</td>
         <td>
           <div class="font-semibold ${isLow ? 'expiry-soon' : ''}">${p.stock_boxes} boxes</div>

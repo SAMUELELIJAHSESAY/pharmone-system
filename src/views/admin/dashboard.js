@@ -81,6 +81,14 @@ export async function renderAdminDashboard(container, user) {
             <div class="stat-card-value">${stats.lowStockCount}</div>
             <div class="stat-card-change">${stats.lowStockCount > 0 ? 'Needs attention' : 'All good!'}</div>
           </div>
+          <div class="stat-card">
+            <div class="stat-card-header">
+              <span class="stat-card-label">Inventory Worth</span>
+              <div class="stat-card-icon purple">💎</div>
+            </div>
+            <div class="stat-card-value">${formatCurrency(stats.inventoryWorth)}</div>
+            <div class="stat-card-change">Total selling value</div>
+          </div>
         </div>
 
         <div class="grid-2">

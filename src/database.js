@@ -455,7 +455,7 @@ export async function getDashboardStats(pharmacyId, branchId = null) {
     
   let productsQuery = supabase
     .from('products')
-    .select('id, stock_boxes, low_stock_threshold')
+    .select('id, stock_boxes, stock_units, units_per_box, price, low_stock_threshold')
     .eq('pharmacy_id', pharmacyId)
     .eq('is_active', true);
     
@@ -488,6 +488,13 @@ export async function getDashboardStats(pharmacyId, branchId = null) {
   const weekRevenue = (salesWeek.data || []).reduce((sum, s) => sum + parseFloat(s.total_amount || 0), 0);
   const allProducts = products.data || [];
   const lowStockItems = (lowStock.data || []).filter(p => p.stock_boxes <= p.low_stock_threshold);
+  
+  // Calculate total inventory worth (based on selling price)
+  const inventoryWorth = allProducts.reduce((sum, p) => {
+    const totalUnits = (p.stock_boxes * (p.units_per_box || 1)) + (p.stock_units || 0);
+    const productWorth = totalUnits * parseFloat(p.price || 0);
+    return sum + productWorth;
+  }, 0);
 
   return {
     todayRevenue,
@@ -496,6 +503,7 @@ export async function getDashboardStats(pharmacyId, branchId = null) {
     totalProducts: allProducts.length,
     lowStockCount: lowStockItems.length,
     lowStockProducts: lowStockItems,
+    inventoryWorth,
     weekSales: salesWeek.data || [],
     lastUpdated: new Date().toISOString() // Add timestamp for cache validation
   };

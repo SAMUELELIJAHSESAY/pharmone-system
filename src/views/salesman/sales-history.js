@@ -19,10 +19,10 @@ export async function renderSalesHistory(container, user) {
       window.pharmacySettings = settings || { currency_symbol: 'Le', currency_code: 'NLE' };
     }
 
-    // Get all sales for this salesman (only sales they created in their branch)
+    // Get all sales for this salesman (only sales they created)
     const allSales = await getSales(pharmacyId, 1000);
     const salesmanSales = allSales.filter(s => 
-      s.created_by === userId && s.branch_id === branchId
+      s.created_by === userId
     );
 
     renderSalesHistoryView(container, salesmanSales, user, pharmacyId, branchId);
