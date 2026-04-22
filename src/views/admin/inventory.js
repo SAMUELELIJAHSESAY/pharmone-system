@@ -398,6 +398,8 @@ function showProductModal(product, user, reload, branchList) {
               <option value="bag" ${product?.unit_type === 'bag' ? 'selected' : ''}>Bag</option>
               <option value="pack" ${product?.unit_type === 'pack' ? 'selected' : ''}>Pack</option>
               <option value="piece" ${product?.unit_type === 'piece' ? 'selected' : ''}>Piece</option>
+              <option value="cup" ${product?.unit_type === 'cup' ? 'selected' : ''}>Cup</option>
+              <option value="card" ${product?.unit_type === 'card' ? 'selected' : ''}>Card</option>
             </select>
             <div class="text-xs text-muted" style="margin-top: 0.25rem;">How is this product sold to customers?</div>
           </div>
