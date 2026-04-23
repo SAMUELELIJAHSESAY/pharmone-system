@@ -616,6 +616,14 @@ window.editCartItemQty = function(productId) {
   const unitsPerBox = product.units_per_box || 10;
   const unitsPerStrip = Math.ceil(unitsPerBox / 10) || 1;
 
+  // Calculate base unit price (always per individual unit)
+  let baseUnitPrice = item.unit_price;
+  if (item.packaging_type === 'strip' && unitsPerStrip > 0) {
+    baseUnitPrice = item.unit_price / unitsPerStrip;
+  } else if (item.packaging_type === 'box' && unitsPerBox > 0) {
+    baseUnitPrice = item.unit_price / unitsPerBox;
+  }
+
   // Determine packaging options
   const stripLabel = `Strip (${unitsPerStrip} ${unitType.toLowerCase()}s)`;
   const boxLabel = `Box (${unitsPerBox} ${unitType.toLowerCase()}s)`;
@@ -668,7 +676,7 @@ window.editCartItemQty = function(productId) {
         <!-- Unit Price (editable) -->
         <div class="form-group">
           <label class="form-label">Price Per Unit</label>
-          <input type="number" id="unit-price" class="form-input" value="${item.unit_price}" min="0" step="0.01" style="font-size:1rem;padding:0.75rem" />
+          <input type="number" id="unit-price" class="form-input" value="${baseUnitPrice.toFixed(2)}" min="0" step="0.01" style="font-size:1rem;padding:0.75rem" />
         </div>
 
         <!-- Notes -->
@@ -704,7 +712,7 @@ window.editCartItemQty = function(productId) {
   function updateDisplay() {
     const packagingType = overlay.querySelector('input[name="packaging-type"]:checked').value;
     const qtyInput = parseInt(overlay.querySelector('#qty-input').value) || 1;
-    const unitPrice = parseFloat(overlay.querySelector('#unit-price').value) || item.unit_price;
+    const unitPrice = parseFloat(overlay.querySelector('#unit-price').value) || baseUnitPrice;
     
     let totalUnits = qtyInput;
     let unitLabel = unitType.toLowerCase();
@@ -748,7 +756,7 @@ window.editCartItemQty = function(productId) {
   overlay.querySelector('#qty-save').addEventListener('click', () => {
     const packagingType = overlay.querySelector('input[name="packaging-type"]:checked').value;
     const qty = parseInt(overlay.querySelector('#qty-input').value) || 1;
-    const newUnitPrice = parseFloat(overlay.querySelector('#unit-price').value) || item.unit_price;
+    const newUnitPrice = parseFloat(overlay.querySelector('#unit-price').value) || baseUnitPrice;
     const notes = overlay.querySelector('#item-notes').value.trim();
     const errorEl = overlay.querySelector('#qty-error');
 
@@ -782,11 +790,21 @@ window.editCartItemQty = function(productId) {
       return;
     }
 
-    // Update item
+    // Update item with correct unit_price based on packaging
     item.quantity = qty;
-    item.unit_price = newUnitPrice;
     item.packaging_type = packagingType;
     item.notes = notes;
+
+    // Adjust unit_price based on packaging type
+    // newUnitPrice is per individual unit, multiply by packaging multiplier
+    if (packagingType === 'strip') {
+      item.unit_price = newUnitPrice * unitsPerStrip;
+    } else if (packagingType === 'box') {
+      item.unit_price = newUnitPrice * unitsPerBox;
+    } else {
+      // unit packaging - price stays per unit
+      item.unit_price = newUnitPrice;
+    }
     
     renderCart();
     updateCartTotals();
