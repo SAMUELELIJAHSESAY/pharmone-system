@@ -71,6 +71,7 @@ function renderView(container, products, user, branchList) {
         </div>
         <div class="flex gap-2" style="display:flex;gap:0.5rem">
           <button class="btn btn-ghost" id="stock-log-btn">Stock History</button>
+          <button class="btn btn-ghost" id="copy-branch-btn">📋 Copy Inventory</button>
           <button class="btn btn-ghost" id="import-csv-btn">📥 Import CSV/Excel</button>
           <button class="btn btn-ghost" id="add-multiple-btn">➕ Add Multiple</button>
           <button class="btn btn-primary" id="add-product-btn">+ Add Product</button>
@@ -131,6 +132,7 @@ function renderView(container, products, user, branchList) {
         <div class="card-header">
           <span class="card-title">Products in ${branchName}</span>
           <div class="flex gap-2" style="flex-wrap:wrap;gap:0.5rem">
+            ${currentFilterType === 'low-stock' ? `<button class="btn btn-ghost" id="export-low-stock-csv" title="Download low stock items as CSV">📥 Export Low Stock CSV</button>` : ``}
             <select class="form-select" id="filter-type" style="width:auto;padding:0.4rem 0.75rem;font-size:0.8rem">
               <option value="">All Products</option>
               <option value="low-stock" ${currentFilterType === 'low-stock' ? 'selected' : ''}>Low Stock</option>
@@ -206,6 +208,13 @@ function renderView(container, products, user, branchList) {
   document.getElementById('add-product-btn').addEventListener('click', () => showProductModal(null, user, reload, branchList));
   document.getElementById('add-multiple-btn').addEventListener('click', () => showAddMultipleModal(user, reload, branchList));
   document.getElementById('stock-log-btn').addEventListener('click', () => showStockLogs(user));
+  document.getElementById('copy-branch-btn').addEventListener('click', () => showCopyBranchModal(allProducts, user, reload, branchList));
+  
+  // Show export button for low stock filter
+  const exportBtn = document.getElementById('export-low-stock-csv');
+  if (exportBtn) {
+    exportBtn.addEventListener('click', () => exportLowStockToCSV(allProducts, branchList));
+  }
   
   document.getElementById('import-csv-btn').addEventListener('click', () => {
     document.getElementById('csv-import-input').click();
@@ -1360,5 +1369,271 @@ function bindRemoveButtons(overlay, rowCount) {
       const row = btn.closest('.product-row');
       if (row) row.remove();
     });
+  });
+}
+
+// ===================== CSV EXPORT FOR LOW STOCK =====================
+function exportLowStockToCSV(products, branchList) {
+  // Filter for low stock items
+  const lowStockProducts = products.filter(p => p.stock_boxes <= p.low_stock_threshold);
+  
+  if (lowStockProducts.length === 0) {
+    showToast('No low stock items to export', 'warning');
+    return;
+  }
+
+  // Prepare CSV headers
+  const headers = ['Product Name', 'Cost Price', 'Box Remains', 'Category', 'Threshold', 'Branch'];
+  
+  // Prepare CSV rows
+  const rows = lowStockProducts.map(p => [
+    p.name,
+    p.cost_price || 0,
+    p.stock_boxes,
+    p.category || '',
+    p.low_stock_threshold || 0,
+    branchList.find(b => b.id === p.branch_id)?.name || ''
+  ]);
+
+  // Create CSV content
+  const csvContent = [
+    headers.join(','),
+    ...rows.map(row => row.map(cell => {
+      // Escape cells containing commas or quotes
+      const cellStr = String(cell);
+      if (cellStr.includes(',') || cellStr.includes('"') || cellStr.includes('\n')) {
+        return `"${cellStr.replace(/"/g, '""')}"`;
+      }
+      return cellStr;
+    }).join(','))
+  ].join('\n');
+
+  // Create blob and download
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const link = document.createElement('a');
+  const url = URL.createObjectURL(blob);
+  
+  const timestamp = new Date().toISOString().split('T')[0];
+  link.setAttribute('href', url);
+  link.setAttribute('download', `low-stock-${timestamp}.csv`);
+  link.style.visibility = 'hidden';
+  
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  
+  showToast(`✓ Exported ${lowStockProducts.length} low stock items to CSV`, 'success');
+}
+
+// ===================== COPY INVENTORY BETWEEN BRANCHES =====================
+function showCopyBranchModal(allProducts, user, reload, branchList) {
+  if (branchList.length < 2) {
+    showToast('You need at least 2 branches to copy inventory', 'warning');
+    return;
+  }
+
+  // Get all unique branch IDs from products
+  const branchesWithProducts = new Set();
+  allProducts.forEach(p => {
+    if (p.branch_id) branchesWithProducts.add(p.branch_id);
+  });
+
+  const activeBranches = branchList.filter(b => branchesWithProducts.has(b.id));
+  
+  if (activeBranches.length < 2) {
+    showToast('You need products in at least 2 branches to copy inventory', 'warning');
+    return;
+  }
+
+  const { overlay, closeModal } = createModal({
+    id: 'copy-branch-modal',
+    title: 'Copy Inventory Between Branches',
+    size: 'modal-lg',
+    body: `
+      <div class="alert alert-info">
+        <strong>Copy inventory from one branch to another.</strong> Only product names and cost prices will be copied. Existing products with the same name will be skipped.
+      </div>
+      
+      <div class="grid-2">
+        <div class="form-group">
+          <label class="form-label">Source Branch (Copy From) *</label>
+          <select class="form-select" id="copy-from-branch" required>
+            <option value="">-- Select source branch --</option>
+            ${activeBranches.map(b => `<option value="${b.id}">${b.name}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Destination Branch (Copy To) *</label>
+          <select class="form-select" id="copy-to-branch" required>
+            <option value="">-- Select destination branch --</option>
+            ${activeBranches.map(b => `<option value="${b.id}">${b.name}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-checkbox">
+          <input type="checkbox" id="copy-all-products" checked />
+          <span>Copy all products from source branch</span>
+        </label>
+        <div class="text-xs text-muted" style="margin-top: 0.5rem;">Uncheck to select specific products</div>
+      </div>
+
+      <div id="product-list-container" style="display:none;max-height:300px;overflow-y:auto;padding:1rem;background:var(--bg-secondary);border-radius:var(--radius);margin:1rem 0;border:1px solid var(--border);">
+        <div class="text-sm font-semibold" style="margin-bottom:0.75rem;">Select Products to Copy:</div>
+        <div id="product-list"></div>
+      </div>
+
+      <div id="copy-branch-err" class="alert alert-danger hidden"></div>
+    `,
+    footer: `
+      <button class="btn btn-ghost" id="cancel-copy-branch">Cancel</button>
+      <button class="btn btn-primary" id="execute-copy-branch">Copy Inventory</button>
+    `
+  });
+
+  const fromSelect = overlay.querySelector('#copy-from-branch');
+  const toSelect = overlay.querySelector('#copy-to-branch');
+  const copyAllCheckbox = overlay.querySelector('#copy-all-products');
+  const productListContainer = overlay.querySelector('#product-list-container');
+  const productList = overlay.querySelector('#product-list');
+  const errEl = overlay.querySelector('#copy-branch-err');
+
+  // Update product list when source branch changes
+  const updateProductList = () => {
+    const sourceBranchId = fromSelect.value;
+    if (!sourceBranchId) {
+      productListContainer.style.display = 'none';
+      return;
+    }
+
+    const sourceProducts = allProducts.filter(p => p.branch_id === sourceBranchId);
+    
+    if (sourceProducts.length === 0) {
+      productListContainer.style.display = 'none';
+      return;
+    }
+
+    if (!copyAllCheckbox.checked) {
+      productListContainer.style.display = 'block';
+      productList.innerHTML = sourceProducts.map((p, idx) => `
+        <label class="form-checkbox" style="margin-bottom:0.5rem;padding:0.5rem;background:var(--bg-primary);border-radius:var(--radius)">
+          <input type="checkbox" class="product-select-checkbox" value="${p.id}" checked />
+          <span class="text-sm"><strong>${p.name}</strong> - ${formatCurrency(p.cost_price || 0)}</span>
+        </label>
+      `).join('');
+    } else {
+      productListContainer.style.display = 'none';
+    }
+  };
+
+  copyAllCheckbox.addEventListener('change', updateProductList);
+  fromSelect.addEventListener('change', updateProductList);
+
+  overlay.querySelector('#cancel-copy-branch').addEventListener('click', closeModal);
+  overlay.querySelector('#execute-copy-branch').addEventListener('click', async () => {
+    const executeBtn = overlay.querySelector('#execute-copy-branch');
+    errEl.classList.add('hidden');
+
+    const sourceBranchId = fromSelect.value;
+    const destBranchId = toSelect.value;
+
+    if (!sourceBranchId) {
+      errEl.textContent = 'Please select a source branch';
+      errEl.classList.remove('hidden');
+      return;
+    }
+
+    if (!destBranchId) {
+      errEl.textContent = 'Please select a destination branch';
+      errEl.classList.remove('hidden');
+      return;
+    }
+
+    if (sourceBranchId === destBranchId) {
+      errEl.textContent = 'Source and destination branches must be different';
+      errEl.classList.remove('hidden');
+      return;
+    }
+
+    executeBtn.disabled = true;
+    executeBtn.textContent = 'Copying...';
+
+    try {
+      const { createProduct } = await import('../../database.js');
+      
+      // Get products to copy
+      let productsToClone = allProducts.filter(p => p.branch_id === sourceBranchId);
+      
+      // Filter if not copying all
+      if (!copyAllCheckbox.checked) {
+        const selectedIds = Array.from(overlay.querySelectorAll('.product-select-checkbox:checked')).map(cb => cb.value);
+        productsToClone = productsToClone.filter(p => selectedIds.includes(p.id));
+      }
+
+      if (productsToClone.length === 0) {
+        errEl.textContent = 'Please select at least one product to copy';
+        errEl.classList.remove('hidden');
+        executeBtn.disabled = false;
+        executeBtn.textContent = 'Copy Inventory';
+        return;
+      }
+
+      // Get existing products in destination branch
+      const destProducts = allProducts.filter(p => p.branch_id === destBranchId);
+      const destProductNames = new Set(destProducts.map(p => p.name.toLowerCase().trim()));
+
+      let successCount = 0;
+      let skippedCount = 0;
+      let errorCount = 0;
+
+      for (const product of productsToClone) {
+        try {
+          // Skip if product with same name already exists
+          if (destProductNames.has(product.name.toLowerCase().trim())) {
+            skippedCount++;
+            continue;
+          }
+
+          // Create new product in destination branch with only name and cost price
+          const newProduct = {
+            name: product.name,
+            category: product.category || 'General',
+            description: product.description || '',
+            cost_price: product.cost_price || 0,
+            price: product.price || 0, // Keep selling price too
+            unit_type: product.unit_type || 'box',
+            units_per_box: product.units_per_box || 1,
+            low_stock_threshold: product.low_stock_threshold || 5,
+            stock_boxes: 0, // Start with 0 stock
+            stock_units: 0,
+            min_sell_quantity: product.min_sell_quantity || 1,
+            expiry_date: null,
+            pharmacy_id: user.profile.pharmacy_id,
+            branch_id: destBranchId,
+            is_active: true
+          };
+
+          await createProduct(newProduct);
+          successCount++;
+        } catch (err) {
+          console.error(`Error copying product ${product.name}:`, err);
+          errorCount++;
+        }
+      }
+
+      let message = `✓ Copied ${successCount} product(s)`;
+      if (skippedCount > 0) message += `. Skipped ${skippedCount} (duplicates)`;
+      if (errorCount > 0) message += `. ${errorCount} errors`;
+
+      showToast(message, errorCount === 0 ? 'success' : 'warning');
+      closeModal();
+      reload();
+    } catch (err) {
+      errEl.textContent = `Error: ${err.message}`;
+      errEl.classList.remove('hidden');
+      executeBtn.disabled = false;
+      executeBtn.textContent = 'Copy Inventory';
+    }
   });
 }
