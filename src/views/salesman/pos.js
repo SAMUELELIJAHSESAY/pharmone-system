@@ -187,6 +187,7 @@ function bindProductClicks() {
       } else {
         const unitType = product.unit_type || 'box';
         const minSell = product.min_sell_quantity || 1;
+        const unitsPerBox = product.units_per_box || 10; // Ensure consistent default
         cart.push({
           product_id: productId,
           product_name: product.name,
@@ -196,7 +197,7 @@ function bindProductClicks() {
           maxStock: stock,
           priceSet: product.price > 0,
           packaging_type: 'unit',
-          units_per_box: product.units_per_box || 1,
+          units_per_box: unitsPerBox,
           min_sell_quantity: minSell,
           notes: ''
         });
@@ -636,16 +637,16 @@ window.editCartItemQty = function(productId) {
           <label class="form-label">Sell By:</label>
           <div style="display:grid;grid-template-columns:1fr 1fr ${unitsPerBox > 1 ? '1fr' : ''};gap:0.5rem">
             <label style="display:flex;align-items:center;gap:0.5rem;padding:0.75rem;border:2px solid var(--border);border-radius:var(--radius);cursor:pointer;transition:all 0.2s" id="label-unit">
-              <input type="radio" name="packaging-type" value="unit" checked />
+              <input type="radio" name="packaging-type" value="unit" ${item.packaging_type === 'unit' || !item.packaging_type ? 'checked' : ''} />
               <span style="font-size:0.9rem"><strong>1 ${unitType.toLowerCase()}</strong></span>
             </label>
             <label style="display:flex;align-items:center;gap:0.5rem;padding:0.75rem;border:2px solid var(--border);border-radius:var(--radius);cursor:pointer;transition:all 0.2s" id="label-strip">
-              <input type="radio" name="packaging-type" value="strip" />
+              <input type="radio" name="packaging-type" value="strip" ${item.packaging_type === 'strip' ? 'checked' : ''} />
               <span style="font-size:0.9rem"><strong>1 ${stripLabel.toLowerCase()}</strong></span>
             </label>
             ${unitsPerBox > 1 ? `
             <label style="display:flex;align-items:center;gap:0.5rem;padding:0.75rem;border:2px solid var(--border);border-radius:var(--radius);cursor:pointer;transition:all 0.2s" id="label-box">
-              <input type="radio" name="packaging-type" value="box" />
+              <input type="radio" name="packaging-type" value="box" ${item.packaging_type === 'box' ? 'checked' : ''} />
               <span style="font-size:0.9rem"><strong>1 ${boxLabel.toLowerCase()}</strong></span>
             </label>
             ` : ''}
@@ -656,7 +657,7 @@ window.editCartItemQty = function(productId) {
         <div class="form-group">
           <label class="form-label">Quantity</label>
           <div style="display:flex;gap:0.5rem;align-items:center">
-            <input type="number" id="qty-input" class="form-input" value="1" min="1" max="999" style="font-size:1rem;padding:0.75rem;flex:1" />
+            <input type="number" id="qty-input" class="form-input" value="${item.quantity}" min="1" max="999" style="font-size:1rem;padding:0.75rem;flex:1" />
             <span id="qty-unit-label" style="font-weight:600;min-width:100px">${unitType.toLowerCase()}s</span>
           </div>
           <div style="font-size:0.8rem;color:var(--gray-500);margin-top:0.25rem">
