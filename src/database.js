@@ -727,7 +727,7 @@ export async function getReturnAuditLog(pharmacyId, returnId = null, limit = 50)
 export async function getReturnsByStatus(pharmacyId, status, branchId = null) {
   let query = supabase
     .from('sales_returns')
-    .select('*, customers(name), profiles(full_name)')
+    .select('*, customers(name)')
     .eq('pharmacy_id', pharmacyId)
     .eq('status', status);
   
@@ -741,7 +741,7 @@ export async function getReturnsByStatus(pharmacyId, status, branchId = null) {
 export async function getReturnsByType(pharmacyId, type, branchId = null) {
   let query = supabase
     .from('sales_returns')
-    .select('*, customers(name), profiles(full_name)')
+    .select('*, customers(name)')
     .eq('pharmacy_id', pharmacyId)
     .eq('return_type', type);
   
@@ -1295,7 +1295,7 @@ export async function getTreatmentPaymentsReport(pharmacyId, branchId = null, st
   // Get aggregated treatment payment data for reporting
   let query = supabase
     .from('treatment_payments')
-    .select('*, profiles(full_name)')
+    .select('*')
     .eq('pharmacy_id', pharmacyId);
   
   if (branchId) query = query.eq('branch_id', branchId);
