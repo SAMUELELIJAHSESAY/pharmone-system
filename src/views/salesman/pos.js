@@ -93,7 +93,7 @@ function renderPOSView(container) {
         <div class="pos-cart-footer">
           <div class="cart-summary-row">
             <span>Subtotal</span>
-            <span id="cart-subtotal">$0.00</span>
+            <span id="cart-subtotal">Le0.00</span>
           </div>
           <div class="cart-summary-row">
             <span>Discount</span>
@@ -102,7 +102,7 @@ function renderPOSView(container) {
           </div>
           <div class="cart-summary-total">
             <span>Total</span>
-            <span id="cart-total" style="color:var(--primary)">$0.00</span>
+            <span id="cart-total" style="color:var(--primary)">Le0.00</span>
           </div>
           <div class="form-group" style="margin-bottom:0.75rem">
             <label class="form-label" style="margin-bottom:0.25rem">Payment Method</label>

@@ -34,12 +34,12 @@ export function renderBranchDetailsView(branchId, pharmacyId) {
           <!-- Key Metrics -->
           <div class="metric-card">
             <div class="metric-label">Daily Sales</div>
-            <div class="metric-value" id="daily-sales">$0</div>
+            <div class="metric-value" id="daily-sales">Le0</div>
           </div>
           
           <div class="metric-card">
             <div class="metric-label">Monthly Revenue</div>
-            <div class="metric-value" id="monthly-revenue">$0</div>
+            <div class="metric-value" id="monthly-revenue">Le0</div>
           </div>
           
           <div class="metric-card alert">
@@ -218,8 +218,9 @@ async function loadBranchData(branchId, pharmacyId) {
     
     // Get dashboard stats
     const dashboard = await getBranchDashboard(branchId, pharmacyId);
-    document.getElementById('daily-sales').textContent = `$${dashboard.dailySales.toFixed(2)}`;
-    document.getElementById('monthly-revenue').textContent = `$${dashboard.monthlyRevenue.toFixed(2)}`;
+    const currencySymbol = window.pharmacySettings?.currency_symbol || 'Le';
+    document.getElementById('daily-sales').textContent = `${currencySymbol}${dashboard.dailySales.toFixed(2)}`;
+    document.getElementById('monthly-revenue').textContent = `${currencySymbol}${dashboard.monthlyRevenue.toFixed(2)}`;
     document.getElementById('low-stock-count').textContent = dashboard.lowStockCount;
     document.getElementById('alert-count').textContent = dashboard.alertCount;
     
@@ -307,17 +308,42 @@ async function loadBranchStaff(branchId) {
       return;
     }
     
-    tbody.innerHTML = assignments.map(a => `
+    // Fetch sales data for each staff member
+    const { data: allSales } = await supabase
+      .from('sales')
+      .select('created_by, total_amount')
+      .eq('branch_id', branchId);
+    
+    // Calculate sales per staff member
+    const staffSalesMap = {};
+    if (allSales) {
+      allSales.forEach(sale => {
+        if (sale.created_by) {
+          if (!staffSalesMap[sale.created_by]) {
+            staffSalesMap[sale.created_by] = { total: 0, count: 0 };
+          }
+          staffSalesMap[sale.created_by].total += sale.total_amount || 0;
+          staffSalesMap[sale.created_by].count += 1;
+        }
+      });
+    }
+    
+    const currencySymbol = window.pharmacySettings?.currency_symbol || 'Le';
+    tbody.innerHTML = assignments.map(a => {
+      const staffId = a.staff_id;
+      const salesData = staffSalesMap[staffId] || { total: 0, count: 0 };
+      return `
       <tr>
         <td>${a.profiles.full_name}</td>
         <td>${a.role_in_branch}</td>
-        <td>$0</td>
-        <td>0</td>
+        <td>${currencySymbol}${salesData.total.toFixed(2)}</td>
+        <td>${salesData.count}</td>
         <td>
           <button class="btn btn-small btn-danger" onclick="removeStaffFromBranch('${a.id}')">Remove</button>
         </td>
       </tr>
-    `).join('');
+    `;
+    }).join('');
   } catch (error) {
     console.error('Error loading staff:', error);
   }
@@ -345,7 +371,7 @@ async function loadRecentActivity(branchId) {
         <div class="activity-icon">💳</div>
         <div class="activity-details">
           <div class="activity-title">Sale completed</div>
-          <div class="activity-amount">$${s.total_amount.toFixed(2)}</div>
+          <div class="activity-amount">Le${s.total_amount.toFixed(2)}</div>
           <div class="activity-time">${formatUTCDateTime(s.created_at)}</div>
         </div>
       </div>

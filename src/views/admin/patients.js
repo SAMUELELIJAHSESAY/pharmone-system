@@ -579,7 +579,7 @@ async function openPatientDetails(patientId) {
           <div class="treatment-details">
             <strong>Payment #:</strong> ${p.payment_number}<br>
             <strong>Description:</strong> ${p.description}<br>
-            <strong>Amount:</strong> ₦${parseFloat(p.amount).toFixed(2)}<br>
+            <strong>Amount:</strong> Le${parseFloat(p.amount).toFixed(2)}<br>
             <strong>Method:</strong> ${p.payment_method.replace('_', ' ').toUpperCase()}<br>
             ${p.notes ? '<strong>Notes:</strong> ' + p.notes + '<br>' : ''}
           </div>
