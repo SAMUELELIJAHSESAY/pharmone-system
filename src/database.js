@@ -1217,7 +1217,7 @@ export async function getPatientDetails(patientId) {
 export async function getPatientVisits(patientId) {
   const { data, error } = await supabase
     .from('patient_visits')
-    .select('*, profiles(full_name)')
+    .select('*')
     .eq('patient_id', patientId)
     .order('visit_date', { ascending: false });
   if (error) throw error;
