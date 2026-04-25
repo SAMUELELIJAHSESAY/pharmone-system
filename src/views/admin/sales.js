@@ -178,7 +178,7 @@ function renderRows(sales) {
       <td class="text-sm text-muted">${(s.sale_items || []).length} item(s)</td>
       <td class="font-semibold" style="color:var(--success)">${formatCurrency(s.total_amount)}</td>
       <td><span class="badge ${paymentColors[s.payment_method] || 'badge-gray'}">${s.payment_method?.replace('_', ' ')}</span></td>
-      <td class="text-sm text-muted">${s.profiles?.full_name || '—'}</td>
+      <td class="text-sm text-muted">—</td>
       <td class="text-xs text-muted">${formatDateTime(s.created_at)}</td>
       <td>
         <button class="btn btn-ghost btn-sm view-sale-btn" data-id="${s.id}">View</button>
@@ -226,7 +226,7 @@ function showSaleDetail(sale) {
         </div>
         <div>
           <div class="text-xs text-muted">Staff</div>
-          <div class="font-semibold">${sale.profiles?.full_name || '—'}</div>
+          <div class="font-semibold">—</div>
         </div>
       </div>
       <div class="table-container">
