@@ -258,7 +258,7 @@ export async function deleteCustomer(id) {
 export async function getSales(pharmacyId, limit = 50) {
   const { data, error } = await supabase
     .from('sales')
-    .select('*, customers(name, phone), sale_items(*, products(name))')
+    .select('*, customers(name, phone), sale_items(*, products(name)), profiles(full_name)')
     .eq('pharmacy_id', pharmacyId)
     .order('created_at', { ascending: false })
     .limit(limit);

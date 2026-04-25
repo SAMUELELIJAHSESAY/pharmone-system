@@ -13,12 +13,14 @@ export async function renderSales(container, user) {
       getTodayDateRange(pharmacyId)
     ]);
 
-    const totalRevenue = sales.filter(s => s.status === 'completed').reduce((sum, s) => sum + parseFloat(s.total_amount || 0), 0);
+    // Filter only completed sales for revenue calculations
+    const completedSales = sales.filter(s => s.status === 'completed');
+    const totalRevenue = completedSales.reduce((sum, s) => sum + parseFloat(s.total_amount || 0), 0);
     
     // Calculate today's revenue using timezone-aware date range
-    const todayRevenue = sales.filter(s => {
+    const todayRevenue = completedSales.filter(s => {
       const saleDate = s.created_at.split('T')[0];
-      return saleDate === todayRange.dateStr && s.status === 'completed';
+      return saleDate === todayRange.dateStr;
     }).reduce((sum, s) => sum + parseFloat(s.total_amount || 0), 0);
 
     container.innerHTML = `
@@ -51,7 +53,7 @@ export async function renderSales(container, user) {
               <span class="stat-card-label">Total Revenue</span>
               <div class="stat-card-icon green">&#128200;</div>
             </div>
-            <div class="stat-card-value">${formatCurrency(totalRevenue)}</div>
+            <div class="stat-card-value" data-stat="total-revenue">${formatCurrency(totalRevenue)}</div>
           </div>
         </div>
 
@@ -129,6 +131,16 @@ export async function renderSales(container, user) {
         
         return matchesSearch && matchesBranch && matchesPayment && matchesDate;
       });
+      
+      // Recalculate displayed totals based on filtered sales
+      const filteredCompletedSales = filtered.filter(s => s.status === 'completed');
+      const filteredRevenue = filteredCompletedSales.reduce((sum, s) => sum + parseFloat(s.total_amount || 0), 0);
+      
+      // Update the revenue display
+      const revenueCard = document.querySelector('[data-stat="total-revenue"]');
+      if (revenueCard) {
+        revenueCard.textContent = formatCurrency(filteredRevenue);
+      }
       
       document.getElementById('sales-tbody').innerHTML = renderRows(filtered);
       bindViewActions(filtered);

@@ -232,10 +232,17 @@ function renderSalesHistoryView(container, sales, user, pharmacyId, branchId) {
 
     window.viewSaleReceipt = (saleId) => {
       const sale = sales.find(s => s.id === saleId);
-      if (!sale) return;
+      if (!sale) {
+        showToast('Receipt not found', 'error');
+        return;
+      }
 
       const items = sale.sale_items || [];
       const currencySymbol = window.pharmacySettings?.currency_symbol || 'Le';
+      
+      if (!items.length) {
+        showToast('No items found in this sale', 'warning');
+      }
 
       let receiptHTML = `
         <div style="text-align:center;margin-bottom:1rem;border-bottom:1px dashed;padding-bottom:1rem">
@@ -306,13 +313,38 @@ function renderSalesHistoryView(container, sales, user, pharmacyId, branchId) {
         </div>
       `;
 
+      const modal = document.getElementById('receiptModal');
+      if (!modal) {
+        showToast('Receipt modal not found', 'error');
+        return;
+      }
       document.getElementById('receipt-content').innerHTML = receiptHTML;
-      document.getElementById('receiptModal').style.display = 'flex';
+      modal.style.display = 'flex';
+      modal.style.position = 'fixed';
+      modal.style.top = '0';
+      modal.style.left = '0';
+      modal.style.right = '0';
+      modal.style.bottom = '0';
+      modal.style.backgroundColor = 'rgba(0,0,0,0.5)';
+      modal.style.zIndex = '9999';
+      modal.style.alignItems = 'center';
+      modal.style.justifyContent = 'center';
     };
 
     window.closeReceiptModal = () => {
-      document.getElementById('receiptModal').style.display = 'none';
+      const modal = document.getElementById('receiptModal');
+      if (modal) {
+        modal.style.display = 'none';
+      }
     };
+    
+    // Close modal when clicking outside
+    document.addEventListener('click', (e) => {
+      const modal = document.getElementById('receiptModal');
+      if (modal && e.target === modal) {
+        window.closeReceiptModal();
+      }
+    });
 
     window.printReceipt = () => {
       const content = document.getElementById('receipt-content').innerHTML;
