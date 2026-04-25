@@ -566,6 +566,107 @@ export async function getDashboardStats(pharmacyId, branchId = null) {
   };
 }
 
+/**
+ * Get sales statistics using server-side timezone-aware date range queries
+ * This ensures consistent calculations across all time periods
+ * 
+ * @param {string} pharmacyId - The pharmacy ID
+ * @param {string} branchId - Optional branch ID for filtering
+ * @returns {Promise<{todayRevenue, weekRevenue, monthRevenue, yearRevenue, totalRevenue, sales}>}
+ */
+export async function getSalesStats(pharmacyId, branchId = null) {
+  // Get all date ranges from server for consistency
+  const [todayRange, weekRange, monthRange, yearRange] = await Promise.all([
+    getTodayDateRange(pharmacyId),
+    getWeekDateRange(pharmacyId),
+    getMonthDateRange(pharmacyId),
+    getYearDateRange(pharmacyId)
+  ]);
+
+  // Build base query
+  let baseQuery = supabase
+    .from('sales')
+    .select('id, total_amount, created_at, invoice_number, payment_method, status')
+    .eq('pharmacy_id', pharmacyId)
+    .eq('status', 'completed');
+
+  if (branchId) {
+    baseQuery = baseQuery.eq('branch_id', branchId);
+  }
+
+  // Fetch all completed sales for the queries
+  const { data: allSales, error: allSalesError } = await baseQuery;
+  if (allSalesError) throw allSalesError;
+
+  // Now do server-side queries for each period using proper date ranges
+  let salesTodayQuery = supabase
+    .from('sales')
+    .select('total_amount')
+    .eq('pharmacy_id', pharmacyId)
+    .gte('created_at', todayRange.start)
+    .lt('created_at', todayRange.end)
+    .eq('status', 'completed');
+
+  let salesWeekQuery = supabase
+    .from('sales')
+    .select('total_amount')
+    .eq('pharmacy_id', pharmacyId)
+    .gte('created_at', weekRange.start)
+    .lt('created_at', weekRange.end)
+    .eq('status', 'completed');
+
+  let salesMonthQuery = supabase
+    .from('sales')
+    .select('total_amount')
+    .eq('pharmacy_id', pharmacyId)
+    .gte('created_at', monthRange.start)
+    .lt('created_at', monthRange.end)
+    .eq('status', 'completed');
+
+  let salesYearQuery = supabase
+    .from('sales')
+    .select('total_amount')
+    .eq('pharmacy_id', pharmacyId)
+    .gte('created_at', yearRange.start)
+    .lt('created_at', yearRange.end)
+    .eq('status', 'completed');
+
+  if (branchId) {
+    salesTodayQuery = salesTodayQuery.eq('branch_id', branchId);
+    salesWeekQuery = salesWeekQuery.eq('branch_id', branchId);
+    salesMonthQuery = salesMonthQuery.eq('branch_id', branchId);
+    salesYearQuery = salesYearQuery.eq('branch_id', branchId);
+  }
+
+  const [salesToday, salesWeek, salesMonth, salesYear] = await Promise.all([
+    salesTodayQuery,
+    salesWeekQuery,
+    salesMonthQuery,
+    salesYearQuery
+  ]);
+
+  if (salesToday.error) throw salesToday.error;
+  if (salesWeek.error) throw salesWeek.error;
+  if (salesMonth.error) throw salesMonth.error;
+  if (salesYear.error) throw salesYear.error;
+
+  // Calculate totals
+  const todayRevenue = (salesToday.data || []).reduce((sum, s) => sum + parseFloat(s.total_amount || 0), 0);
+  const weekRevenue = (salesWeek.data || []).reduce((sum, s) => sum + parseFloat(s.total_amount || 0), 0);
+  const monthRevenue = (salesMonth.data || []).reduce((sum, s) => sum + parseFloat(s.total_amount || 0), 0);
+  const yearRevenue = (salesYear.data || []).reduce((sum, s) => sum + parseFloat(s.total_amount || 0), 0);
+  const totalRevenue = (allSales || []).reduce((sum, s) => sum + parseFloat(s.total_amount || 0), 0);
+
+  return {
+    todayRevenue,
+    weekRevenue,
+    monthRevenue,
+    yearRevenue,
+    totalRevenue,
+    sales: allSales || []
+  };
+}
+
 export async function getSuperAdminStats() {
   const [pharmacies, users, sales] = await Promise.all([
     supabase.from('pharmacies').select('id, name, is_active, created_at'),

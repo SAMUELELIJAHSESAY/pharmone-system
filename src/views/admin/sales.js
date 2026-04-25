@@ -1,4 +1,4 @@
-import { getSales, getBranches, getTodayDateRange, getWeekDateRange, getMonthDateRange, getYearDateRange, supabase } from '../../database.js';
+import { getSales, getBranches, getSalesStats } from '../../database.js';
 import { formatCurrency, formatDateTime, showToast } from '../../utils.js';
 import { createModal } from '../../components/modal.js';
 
@@ -7,35 +7,18 @@ export async function renderSales(container, user) {
   if (!pharmacyId) { container.innerHTML = `<div class="alert alert-warning">No pharmacy linked.</div>`; return; }
 
   try {
-    const [sales, branches, todayRange, weekRange, monthRange, yearRange] = await Promise.all([
+    const [sales, branches, stats] = await Promise.all([
       getSales(pharmacyId, 200),
       getBranches(pharmacyId),
-      getTodayDateRange(pharmacyId),
-      getWeekDateRange(pharmacyId),
-      getMonthDateRange(pharmacyId),
-      getYearDateRange(pharmacyId)
+      getSalesStats(pharmacyId)
     ]);
 
-    // Filter only completed sales for revenue calculations
-    const completedSales = sales.filter(s => s.status === 'completed');
-    
-    // Calculate revenue for different periods using server-side date ranges
-    const totalRevenue = completedSales.reduce((sum, s) => sum + parseFloat(s.total_amount || 0), 0);
-    
-    // Helper to sum revenue between dates
-    const calculateRevenue = (salesData, startDate, endDate) => {
-      return (salesData || [])
-        .filter(s => {
-          const saleDate = new Date(s.created_at);
-          return saleDate >= new Date(startDate) && saleDate < new Date(endDate);
-        })
-        .reduce((sum, s) => sum + parseFloat(s.total_amount || 0), 0);
-    };
-    
-    const todayRevenue = calculateRevenue(completedSales, todayRange.start, todayRange.end);
-    const weekRevenue = calculateRevenue(completedSales, weekRange.start, weekRange.end);
-    const monthRevenue = calculateRevenue(completedSales, monthRange.start, monthRange.end);
-    const yearRevenue = calculateRevenue(completedSales, yearRange.start, yearRange.end);
+    // Extract calculated values from server-side stats
+    const todayRevenue = stats.todayRevenue;
+    const weekRevenue = stats.weekRevenue;
+    const monthRevenue = stats.monthRevenue;
+    const yearRevenue = stats.yearRevenue;
+    const totalRevenue = stats.totalRevenue;
 
     container.innerHTML = `
       <div class="animate-in">
