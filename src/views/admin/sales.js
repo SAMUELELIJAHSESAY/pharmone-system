@@ -15,12 +15,43 @@ export async function renderSales(container, user) {
 
     // Filter only completed sales for revenue calculations
     const completedSales = sales.filter(s => s.status === 'completed');
+    
+    // Get current date in pharmacy timezone
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth();
+    const currentDate = now.getDate();
+    
+    // Calculate date ranges
+    const todayDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const weekAgoDate = new Date(todayDate.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const monthStartDate = new Date(currentYear, currentMonth, 1);
+    const yearStartDate = new Date(currentYear, 0, 1);
+    
+    // Helper to compare dates (ignoring time)
+    const isBetweenDates = (dateStr, startDate, endDate) => {
+      const saleDate = new Date(dateStr.split('T')[0]);
+      return saleDate >= startDate && saleDate <= todayDate;
+    };
+    
+    // Calculate revenue for different periods
     const totalRevenue = completedSales.reduce((sum, s) => sum + parseFloat(s.total_amount || 0), 0);
     
-    // Calculate today's revenue using timezone-aware date range
     const todayRevenue = completedSales.filter(s => {
       const saleDate = s.created_at.split('T')[0];
       return saleDate === todayRange.dateStr;
+    }).reduce((sum, s) => sum + parseFloat(s.total_amount || 0), 0);
+    
+    const weekRevenue = completedSales.filter(s => {
+      return isBetweenDates(s.created_at, weekAgoDate, todayDate);
+    }).reduce((sum, s) => sum + parseFloat(s.total_amount || 0), 0);
+    
+    const monthRevenue = completedSales.filter(s => {
+      return isBetweenDates(s.created_at, monthStartDate, todayDate);
+    }).reduce((sum, s) => sum + parseFloat(s.total_amount || 0), 0);
+    
+    const yearRevenue = completedSales.filter(s => {
+      return isBetweenDates(s.created_at, yearStartDate, todayDate);
     }).reduce((sum, s) => sum + parseFloat(s.total_amount || 0), 0);
 
     container.innerHTML = `
@@ -43,17 +74,42 @@ export async function renderSales(container, user) {
           </div>
           <div class="stat-card">
             <div class="stat-card-header">
+              <span class="stat-card-label">Weekly Revenue</span>
+              <div class="stat-card-icon blue">&#128200;</div>
+            </div>
+            <div class="stat-card-value" data-stat="week-revenue">${formatCurrency(weekRevenue)}</div>
+            <div class="stat-card-change">Last 7 days</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-card-header">
+              <span class="stat-card-label">Monthly Revenue</span>
+              <div class="stat-card-icon purple">&#128181;</div>
+            </div>
+            <div class="stat-card-value" data-stat="month-revenue">${formatCurrency(monthRevenue)}</div>
+            <div class="stat-card-change">This month</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-card-header">
+              <span class="stat-card-label">Yearly Revenue</span>
+              <div class="stat-card-icon green">&#128202;</div>
+            </div>
+            <div class="stat-card-value" data-stat="year-revenue">${formatCurrency(yearRevenue)}</div>
+            <div class="stat-card-change">This year</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-card-header">
               <span class="stat-card-label">Total Transactions</span>
-              <div class="stat-card-icon blue">&#128179;</div>
+              <div class="stat-card-icon orange">&#128179;</div>
             </div>
             <div class="stat-card-value">${sales.length}</div>
           </div>
           <div class="stat-card">
             <div class="stat-card-header">
               <span class="stat-card-label">Total Revenue</span>
-              <div class="stat-card-icon green">&#128200;</div>
+              <div class="stat-card-icon darkgreen">&#128200;</div>
             </div>
             <div class="stat-card-value" data-stat="total-revenue">${formatCurrency(totalRevenue)}</div>
+            <div class="stat-card-change">All time</div>
           </div>
         </div>
 
@@ -136,7 +192,37 @@ export async function renderSales(container, user) {
       const filteredCompletedSales = filtered.filter(s => s.status === 'completed');
       const filteredRevenue = filteredCompletedSales.reduce((sum, s) => sum + parseFloat(s.total_amount || 0), 0);
       
-      // Update the revenue display
+      // Recalculate period-based revenues for filtered data
+      const todayDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const weekAgoDate = new Date(todayDate.getTime() - 7 * 24 * 60 * 60 * 1000);
+      const monthStartDate = new Date(now.getFullYear(), now.getMonth(), 1);
+      const yearStartDate = new Date(now.getFullYear(), 0, 1);
+      
+      const isBetweenDatesForFilter = (dateStr, startDate, endDate) => {
+        const saleDate = new Date(dateStr.split('T')[0]);
+        return saleDate >= startDate && saleDate <= todayDate;
+      };
+      
+      const filteredWeekRevenue = filteredCompletedSales.filter(s => isBetweenDatesForFilter(s.created_at, weekAgoDate, todayDate))
+        .reduce((sum, s) => sum + parseFloat(s.total_amount || 0), 0);
+      const filteredMonthRevenue = filteredCompletedSales.filter(s => isBetweenDatesForFilter(s.created_at, monthStartDate, todayDate))
+        .reduce((sum, s) => sum + parseFloat(s.total_amount || 0), 0);
+      const filteredYearRevenue = filteredCompletedSales.filter(s => isBetweenDatesForFilter(s.created_at, yearStartDate, todayDate))
+        .reduce((sum, s) => sum + parseFloat(s.total_amount || 0), 0);
+      
+      // Update the revenue displays
+      const weekCard = document.querySelector('[data-stat="week-revenue"]');
+      if (weekCard) {
+        weekCard.textContent = formatCurrency(filteredWeekRevenue);
+      }
+      const monthCard = document.querySelector('[data-stat="month-revenue"]');
+      if (monthCard) {
+        monthCard.textContent = formatCurrency(filteredMonthRevenue);
+      }
+      const yearCard = document.querySelector('[data-stat="year-revenue"]');
+      if (yearCard) {
+        yearCard.textContent = formatCurrency(filteredYearRevenue);
+      }
       const revenueCard = document.querySelector('[data-stat="total-revenue"]');
       if (revenueCard) {
         revenueCard.textContent = formatCurrency(filteredRevenue);
