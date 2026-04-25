@@ -31,7 +31,7 @@ export async function renderSales(container, user) {
     // Helper to compare dates (ignoring time)
     const isBetweenDates = (dateStr, startDate, endDate) => {
       const saleDate = new Date(dateStr.split('T')[0]);
-      return saleDate >= startDate && saleDate <= todayDate;
+      return saleDate >= startDate && saleDate <= endDate;
     };
     
     // Calculate revenue for different periods
@@ -200,7 +200,7 @@ export async function renderSales(container, user) {
       
       const isBetweenDatesForFilter = (dateStr, startDate, endDate) => {
         const saleDate = new Date(dateStr.split('T')[0]);
-        return saleDate >= startDate && saleDate <= todayDate;
+        return saleDate >= startDate && saleDate <= endDate;
       };
       
       const filteredWeekRevenue = filteredCompletedSales.filter(s => isBetweenDatesForFilter(s.created_at, weekAgoDate, todayDate))
