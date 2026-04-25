@@ -61,6 +61,63 @@ export async function getWeekDateRange(pharmacyId = null) {
   return data;
 }
 
+/**
+ * Get month date range using server-side timezone calculation
+ * 
+ * @param {string} pharmacyId - Optional pharmacy ID for timezone-aware calculation
+ * @returns {Promise<{start: string, end: string}>}
+ */
+export async function getMonthDateRange(pharmacyId = null) {
+  // Use Postgres to calculate month date range server-side
+  let query = supabase.rpc('get_month_date_range', { pharmacy_id: pharmacyId });
+  
+  const { data, error } = await query;
+  
+  if (error) {
+    console.warn('Error getting month date range:', error);
+    // Fallback to UTC if timezone lookup fails
+    const now = new Date();
+    const year = now.getUTCFullYear();
+    const month = now.getUTCMonth();
+    const monthStartUTC = new Date(Date.UTC(year, month, 1, 0, 0, 0, 0));
+    const tomorrowUTC = new Date(Date.UTC(year, month, new Date(Date.UTC(year, month + 1, 0)).getUTCDate() + 1, 0, 0, 0, 0));
+    return {
+      start: monthStartUTC.toISOString(),
+      end: tomorrowUTC.toISOString()
+    };
+  }
+  
+  return data;
+}
+
+/**
+ * Get year date range using server-side timezone calculation
+ * 
+ * @param {string} pharmacyId - Optional pharmacy ID for timezone-aware calculation
+ * @returns {Promise<{start: string, end: string}>}
+ */
+export async function getYearDateRange(pharmacyId = null) {
+  // Use Postgres to calculate year date range server-side
+  let query = supabase.rpc('get_year_date_range', { pharmacy_id: pharmacyId });
+  
+  const { data, error } = await query;
+  
+  if (error) {
+    console.warn('Error getting year date range:', error);
+    // Fallback to UTC if timezone lookup fails
+    const now = new Date();
+    const year = now.getUTCFullYear();
+    const yearStartUTC = new Date(Date.UTC(year, 0, 1, 0, 0, 0, 0));
+    const yearEndUTC = new Date(Date.UTC(year, 11, 31, 23, 59, 59, 999));
+    return {
+      start: yearStartUTC.toISOString(),
+      end: yearEndUTC.toISOString()
+    };
+  }
+  
+  return data;
+}
+
 // ===================== PHARMACIES =====================
 export async function getPharmacies() {
   const { data, error } = await supabase.from('pharmacies').select('*').order('created_at', { ascending: false });
