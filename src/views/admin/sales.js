@@ -1,4 +1,4 @@
-import { getSales, getBranches, getTodayDateRange } from '../../database.js';
+import { getSales, getBranches, getTodayDateRange, getWeekDateRange } from '../../database.js';
 import { formatCurrency, formatDateTime, showToast } from '../../utils.js';
 import { createModal } from '../../components/modal.js';
 
@@ -7,24 +7,23 @@ export async function renderSales(container, user) {
   if (!pharmacyId) { container.innerHTML = `<div class="alert alert-warning">No pharmacy linked.</div>`; return; }
 
   try {
-    const [sales, branches, todayRange] = await Promise.all([
+    const [sales, branches, todayRange, weekRange] = await Promise.all([
       getSales(pharmacyId, 200),
       getBranches(pharmacyId),
-      getTodayDateRange(pharmacyId)
+      getTodayDateRange(pharmacyId),
+      getWeekDateRange(pharmacyId)
     ]);
 
     // Filter only completed sales for revenue calculations
     const completedSales = sales.filter(s => s.status === 'completed');
     
-    // Get current date in pharmacy timezone
+    // Get current date
     const now = new Date();
     const currentYear = now.getFullYear();
     const currentMonth = now.getMonth();
-    const currentDate = now.getDate();
     
-    // Calculate date ranges
-    const todayDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const weekAgoDate = new Date(todayDate.getTime() - 7 * 24 * 60 * 60 * 1000);
+    // Use server-side date ranges for accuracy
+    const todayDate = new Date(todayRange.dateStr); // Parse the date string from server
     const monthStartDate = new Date(currentYear, currentMonth, 1);
     const yearStartDate = new Date(currentYear, 0, 1);
     
@@ -42,8 +41,9 @@ export async function renderSales(container, user) {
       return saleDate === todayRange.dateStr;
     }).reduce((sum, s) => sum + parseFloat(s.total_amount || 0), 0);
     
+    // Use the server-side week range for accurate calculation
     const weekRevenue = completedSales.filter(s => {
-      return isBetweenDates(s.created_at, weekAgoDate, todayDate);
+      return isBetweenDates(s.created_at, new Date(weekRange.start), new Date(weekRange.end));
     }).reduce((sum, s) => sum + parseFloat(s.total_amount || 0), 0);
     
     const monthRevenue = completedSales.filter(s => {
@@ -192,9 +192,8 @@ export async function renderSales(container, user) {
       const filteredCompletedSales = filtered.filter(s => s.status === 'completed');
       const filteredRevenue = filteredCompletedSales.reduce((sum, s) => sum + parseFloat(s.total_amount || 0), 0);
       
-      // Recalculate period-based revenues for filtered data
-      const todayDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-      const weekAgoDate = new Date(todayDate.getTime() - 7 * 24 * 60 * 60 * 1000);
+      // Recalculate period-based revenues for filtered data using server-side date ranges
+      const todayDate = new Date(todayRange.dateStr);
       const monthStartDate = new Date(now.getFullYear(), now.getMonth(), 1);
       const yearStartDate = new Date(now.getFullYear(), 0, 1);
       
@@ -203,7 +202,8 @@ export async function renderSales(container, user) {
         return saleDate >= startDate && saleDate <= endDate;
       };
       
-      const filteredWeekRevenue = filteredCompletedSales.filter(s => isBetweenDatesForFilter(s.created_at, weekAgoDate, todayDate))
+      // Use server-side week range for accuracy
+      const filteredWeekRevenue = filteredCompletedSales.filter(s => isBetweenDatesForFilter(s.created_at, new Date(weekRange.start), new Date(weekRange.end)))
         .reduce((sum, s) => sum + parseFloat(s.total_amount || 0), 0);
       const filteredMonthRevenue = filteredCompletedSales.filter(s => isBetweenDatesForFilter(s.created_at, monthStartDate, todayDate))
         .reduce((sum, s) => sum + parseFloat(s.total_amount || 0), 0);
