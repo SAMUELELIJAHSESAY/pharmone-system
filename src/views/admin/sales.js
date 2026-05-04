@@ -2,6 +2,82 @@ import { getSales, getBranches, getSalesStats } from '../../database.js';
 import { formatCurrency, formatDateTime, showToast } from '../../utils.js';
 import { createModal } from '../../components/modal.js';
 
+// Helper function to get the next period reset time
+function getNextPeriodResets() {
+  const now = new Date();
+  
+  // Next daily reset: tomorrow at 00:00
+  const nextDaily = new Date(now);
+  nextDaily.setDate(nextDaily.getDate() + 1);
+  nextDaily.setHours(0, 0, 0, 0);
+  
+  // Next weekly reset: next Monday at 00:00
+  const nextWeekly = new Date(now);
+  const day = nextWeekly.getDay();
+  const daysUntilMonday = day === 0 ? 1 : (8 - day);
+  nextWeekly.setDate(nextWeekly.getDate() + daysUntilMonday);
+  nextWeekly.setHours(0, 0, 0, 0);
+  
+  // Next monthly reset: 1st of next month at 00:00
+  const nextMonthly = new Date(now.getFullYear(), now.getMonth() + 1, 1, 0, 0, 0, 0);
+  
+  // Next yearly reset: January 1st of next year at 00:00
+  const nextYearly = new Date(now.getFullYear() + 1, 0, 1, 0, 0, 0, 0);
+  
+  return { nextDaily, nextWeekly, nextMonthly, nextYearly };
+}
+
+// Helper function to format time remaining until reset
+function getTimeUntilReset(resetDate) {
+  const now = new Date();
+  const diff = resetDate - now;
+  
+  if (diff <= 0) return 'Resetting now...';
+  
+  const hours = Math.floor(diff / (1000 * 60 * 60));
+  const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+  
+  if (hours > 24) {
+    const days = Math.floor(hours / 24);
+    return `Resets in ${days}d`;
+  } else if (hours > 0) {
+    return `Resets in ${hours}h ${minutes}m`;
+  } else {
+    return `Resets in ${minutes}m`;
+  }
+}
+
+// Helper function to get current period info
+function getPeriodInfo() {
+  const now = new Date();
+  const day = now.getDay();
+  
+  // Weekly info
+  const weekStart = new Date(now);
+  const daysToMonday = day === 0 ? 6 : (day - 1);
+  weekStart.setDate(weekStart.getDate() - daysToMonday);
+  weekStart.setHours(0, 0, 0, 0);
+  const weekEnd = new Date(weekStart);
+  weekEnd.setDate(weekEnd.getDate() + 7);
+  
+  // Monthly info
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+  
+  // Yearly info
+  const yearStart = new Date(now.getFullYear(), 0, 1);
+  const yearEnd = new Date(now.getFullYear(), 11, 31);
+  
+  return {
+    weekStart: weekStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+    weekEnd: weekEnd.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+    monthStart: monthStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+    monthEnd: monthEnd.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+    yearStart: yearStart.toLocaleDateString('en-US', { year: 'numeric' }),
+    yearEnd: yearEnd.toLocaleDateString('en-US', { year: 'numeric' })
+  };
+}
+
 export async function renderSales(container, user) {
   const pharmacyId = user.profile?.pharmacy_id;
   if (!pharmacyId) { container.innerHTML = `<div class="alert alert-warning">No pharmacy linked.</div>`; return; }
@@ -19,6 +95,14 @@ export async function renderSales(container, user) {
     const monthRevenue = stats.monthRevenue;
     const yearRevenue = stats.yearRevenue;
     const totalRevenue = stats.totalRevenue;
+    
+    // Get period information
+    const resets = getNextPeriodResets();
+    const periods = getPeriodInfo();
+    const todayReset = getTimeUntilReset(resets.nextDaily);
+    const weekReset = getTimeUntilReset(resets.nextWeekly);
+    const monthReset = getTimeUntilReset(resets.nextMonthly);
+    const yearReset = getTimeUntilReset(resets.nextYearly);
 
     container.innerHTML = `
       <div class="animate-in">
@@ -37,6 +121,7 @@ export async function renderSales(container, user) {
               <div class="stat-card-icon teal">&#128176;</div>
             </div>
             <div class="stat-card-value">${formatCurrency(todayRevenue)}</div>
+            <div class="stat-card-change" title="Resets daily at midnight">${todayReset}</div>
           </div>
           <div class="stat-card">
             <div class="stat-card-header">
@@ -44,7 +129,7 @@ export async function renderSales(container, user) {
               <div class="stat-card-icon blue">&#128200;</div>
             </div>
             <div class="stat-card-value" data-stat="week-revenue">${formatCurrency(weekRevenue)}</div>
-            <div class="stat-card-change">Last 7 days</div>
+            <div class="stat-card-change" title="${periods.weekStart} - ${periods.weekEnd} | Resets every Monday">${periods.weekStart} - ${periods.weekEnd} | ${weekReset}</div>
           </div>
           <div class="stat-card">
             <div class="stat-card-header">
@@ -52,7 +137,7 @@ export async function renderSales(container, user) {
               <div class="stat-card-icon purple">&#128181;</div>
             </div>
             <div class="stat-card-value" data-stat="month-revenue">${formatCurrency(monthRevenue)}</div>
-            <div class="stat-card-change">This month</div>
+            <div class="stat-card-change" title="${periods.monthStart} - ${periods.monthEnd} | Resets on the 1st">${periods.monthStart} - ${periods.monthEnd} | ${monthReset}</div>
           </div>
           <div class="stat-card">
             <div class="stat-card-header">
@@ -60,7 +145,7 @@ export async function renderSales(container, user) {
               <div class="stat-card-icon green">&#128202;</div>
             </div>
             <div class="stat-card-value" data-stat="year-revenue">${formatCurrency(yearRevenue)}</div>
-            <div class="stat-card-change">This year</div>
+            <div class="stat-card-change" title="${periods.yearStart} - ${periods.yearEnd} | Resets on Jan 1st">${periods.yearStart} - ${periods.yearEnd} | ${yearReset}</div>
           </div>
           <div class="stat-card">
             <div class="stat-card-header">

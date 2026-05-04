@@ -71,6 +71,7 @@ function renderView(container, products, user, branchList) {
         </div>
         <div class="flex gap-2" style="display:flex;gap:0.5rem">
           <button class="btn btn-ghost" id="stock-log-btn">Stock History</button>
+          <button class="btn btn-ghost" id="download-template-btn">⬇️ Download Template</button>
           <button class="btn btn-ghost" id="import-csv-btn">📥 Import CSV/Excel</button>
           <button class="btn btn-ghost" id="add-multiple-btn">➕ Add Multiple</button>
           <button class="btn btn-primary" id="add-product-btn">+ Add Product</button>
@@ -206,6 +207,7 @@ function renderView(container, products, user, branchList) {
   document.getElementById('add-product-btn').addEventListener('click', () => showProductModal(null, user, reload, branchList));
   document.getElementById('add-multiple-btn').addEventListener('click', () => showAddMultipleModal(user, reload, branchList));
   document.getElementById('stock-log-btn').addEventListener('click', () => showStockLogs(user));
+  document.getElementById('download-template-btn').addEventListener('click', () => downloadInventoryTemplate());
   
   document.getElementById('import-csv-btn').addEventListener('click', () => {
     document.getElementById('csv-import-input').click();
@@ -948,6 +950,42 @@ function parseCSVLine(line) {
   
   values.push(current.replace(/"/g, ''));
   return values;
+}
+
+function downloadInventoryTemplate() {
+  // Define CSV headers based on import function requirements
+  const headers = ['Product Name', 'Category', 'Description', 'Cost Price', 'Selling Price', 'Low Stock Threshold', 'Stock Boxes', 'Units Per Box'];
+  
+  // Create sample data rows to guide users
+  const sampleData = [
+    ['Paracetamol 500mg', 'Analgesic', 'Pain relief and fever reducer', '50', '150', '20', '100', '10'],
+    ['Amoxicillin 500mg', 'Antibiotic', 'Broad spectrum antibiotic', '200', '500', '15', '50', '12'],
+    ['Multivitamin', 'Supplements', 'Daily vitamin supplement', '100', '200', '10', '75', '1'],
+    ['Ibuprofen 400mg', 'Analgesic', 'Anti-inflammatory pain reliever', '40', '120', '25', '80', '1'],
+  ];
+  
+  // Combine headers and sample data
+  let csvContent = headers.map(h => `"${h}"`).join(',') + '\n';
+  csvContent += sampleData.map(row => row.map(cell => `"${cell}"`).join(',')).join('\n');
+  
+  // Create blob and download
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const link = document.createElement('a');
+  const url = URL.createObjectURL(blob);
+  
+  link.setAttribute('href', url);
+  link.setAttribute('download', `inventory-template-${new Date().toISOString().split('T')[0]}.csv`);
+  link.style.visibility = 'hidden';
+  
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  
+  // Show success message
+  const { showToast } = window;
+  if (showToast) {
+    showToast('Template downloaded successfully! Edit in Excel and import using the Import button.', 'success');
+  }
 }
 
 function updateBulkActionsBar() {
