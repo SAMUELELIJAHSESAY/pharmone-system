@@ -69,12 +69,18 @@ function renderReportsView(container, allSales, branches, user, pharmacyId) {
       };
     } else if (reportType === 'weekly') {
       const targetDate = new Date(selectedDate);
+      // Calculate Monday of the current week
+      const dayOfWeek = targetDate.getDay();
       const weekStart = new Date(targetDate);
-      weekStart.setDate(weekStart.getDate() - weekStart.getDay());
-      const weekEnd = new Date(weekStart);
-      weekEnd.setDate(weekEnd.getDate() + 6);
+      const daysToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1; // 0=Sunday, so go back 6 days; 1=Monday, so go back 0 days
+      weekStart.setDate(weekStart.getDate() - daysToMonday);
+      weekStart.setHours(0, 0, 0, 0); // Start of Monday
       
-      reportTitle = `Weekly Sales Report - Week of ${weekStart.toLocaleDateString()}`;
+      const weekEnd = new Date(weekStart);
+      weekEnd.setDate(weekStart.getDate() + 6); // Sunday is 6 days after Monday
+      weekEnd.setHours(23, 59, 59, 999); // End of Sunday
+      
+      reportTitle = `Weekly Sales Report - Week of ${weekStart.toLocaleDateString()} to ${weekEnd.toLocaleDateString()}`;
 
       const weekSales = filteredSales.filter(s => {
         const saleDate = new Date(s.created_at);
@@ -109,7 +115,10 @@ function renderReportsView(container, allSales, branches, user, pharmacyId) {
     } else if (reportType === 'monthly') {
       const targetDate = new Date(selectedDate);
       const monthStart = new Date(targetDate.getFullYear(), targetDate.getMonth(), 1);
+      monthStart.setHours(0, 0, 0, 0); // Start of 1st
+      
       const monthEnd = new Date(targetDate.getFullYear(), targetDate.getMonth() + 1, 0);
+      monthEnd.setHours(23, 59, 59, 999); // End of last day
 
       reportTitle = `Monthly Sales Report - ${monthStart.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}`;
 

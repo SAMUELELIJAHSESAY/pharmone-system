@@ -52,13 +52,13 @@ function getPeriodInfo() {
   const now = new Date();
   const day = now.getDay();
   
-  // Weekly info
+  // Weekly info (Monday to Sunday, 7 days total)
   const weekStart = new Date(now);
   const daysToMonday = day === 0 ? 6 : (day - 1);
   weekStart.setDate(weekStart.getDate() - daysToMonday);
   weekStart.setHours(0, 0, 0, 0);
   const weekEnd = new Date(weekStart);
-  weekEnd.setDate(weekEnd.getDate() + 7);
+  weekEnd.setDate(weekEnd.getDate() + 6); // 6 days after Monday = Sunday
   
   // Monthly info
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -243,22 +243,41 @@ export async function renderSales(container, user) {
       const filteredCompletedSales = filtered.filter(s => s.status === 'completed');
       const filteredRevenue = filteredCompletedSales.reduce((sum, s) => sum + parseFloat(s.total_amount || 0), 0);
       
-      // Recalculate period-based revenues for filtered data using server-side date ranges
-      const todayDate = new Date(todayRange.dateStr);
-      const monthStartDate = new Date(now.getFullYear(), now.getMonth(), 1);
-      const yearStartDate = new Date(now.getFullYear(), 0, 1);
-      
-      const isBetweenDatesForFilter = (dateStr, startDate, endDate) => {
-        const saleDate = new Date(dateStr.split('T')[0]);
+      // Helper to properly compare dates with timestamps
+      const isBetweenDates = (dateStr, startDate, endDate) => {
+        const saleDate = new Date(dateStr);
         return saleDate >= startDate && saleDate <= endDate;
       };
       
-      // Use server-side week range for accuracy
-      const filteredWeekRevenue = filteredCompletedSales.filter(s => isBetweenDatesForFilter(s.created_at, new Date(weekRange.start), new Date(weekRange.end)))
+      // Calculate week range for current week (Monday to Sunday)
+      const now = new Date();
+      const currentDay = now.getDay();
+      const daysToMondayOffset = currentDay === 0 ? 6 : (currentDay - 1);
+      const currentWeekStart = new Date(now);
+      currentWeekStart.setDate(currentWeekStart.getDate() - daysToMondayOffset);
+      currentWeekStart.setHours(0, 0, 0, 0);
+      const currentWeekEnd = new Date(currentWeekStart);
+      currentWeekEnd.setDate(currentWeekStart.getDate() + 6);
+      currentWeekEnd.setHours(23, 59, 59, 999);
+      
+      // Calculate month range
+      const monthStartDate = new Date(now.getFullYear(), now.getMonth(), 1);
+      monthStartDate.setHours(0, 0, 0, 0);
+      const monthEndDate = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+      monthEndDate.setHours(23, 59, 59, 999);
+      
+      // Calculate year range
+      const yearStartDate = new Date(now.getFullYear(), 0, 1);
+      yearStartDate.setHours(0, 0, 0, 0);
+      const yearEndDate = new Date(now.getFullYear(), 11, 31);
+      yearEndDate.setHours(23, 59, 59, 999);
+      
+      // Recalculate period-based revenues using corrected date ranges
+      const filteredWeekRevenue = filteredCompletedSales.filter(s => isBetweenDates(s.created_at, currentWeekStart, currentWeekEnd))
         .reduce((sum, s) => sum + parseFloat(s.total_amount || 0), 0);
-      const filteredMonthRevenue = filteredCompletedSales.filter(s => isBetweenDatesForFilter(s.created_at, monthStartDate, todayDate))
+      const filteredMonthRevenue = filteredCompletedSales.filter(s => isBetweenDates(s.created_at, monthStartDate, monthEndDate))
         .reduce((sum, s) => sum + parseFloat(s.total_amount || 0), 0);
-      const filteredYearRevenue = filteredCompletedSales.filter(s => isBetweenDatesForFilter(s.created_at, yearStartDate, todayDate))
+      const filteredYearRevenue = filteredCompletedSales.filter(s => isBetweenDates(s.created_at, yearStartDate, yearEndDate))
         .reduce((sum, s) => sum + parseFloat(s.total_amount || 0), 0);
       
       // Update the revenue displays
