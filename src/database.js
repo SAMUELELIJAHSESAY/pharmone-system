@@ -190,7 +190,7 @@ export async function updatePharmacySettings(pharmacyId, settings) {
 
 // ===================== PROFILES =====================
 export async function getProfiles(pharmacyId = null) {
-  let query = supabase.from('profiles').select('*, pharmacies(name)').order('created_at', { ascending: false });
+  let query = supabase.from('profiles').select('*').order('created_at', { ascending: false });
   if (pharmacyId) query = query.eq('pharmacy_id', pharmacyId);
   const { data, error } = await query;
   if (error) throw error;
@@ -318,7 +318,7 @@ export async function deleteCustomer(id) {
 export async function getSales(pharmacyId, limit = 50) {
   const { data, error } = await supabase
     .from('sales')
-    .select('*, customers(name, phone), sale_items(id, product_id, product_name, quantity, unit_price, total_price)')
+    .select('*')
     .eq('pharmacy_id', pharmacyId)
     .order('created_at', { ascending: false })
     .limit(limit);
@@ -719,7 +719,7 @@ export async function deleteSupplier(id) {
 export async function getSupplierPurchaseHistory(supplierId) {
   const { data, error } = await supabase
     .from('purchases')
-    .select('*, purchase_items(*)')
+    .select('*')
     .eq('supplier_id', supplierId)
     .order('created_at', { ascending: false });
   if (error) throw error;
@@ -873,7 +873,7 @@ export async function getBranchReturnStats(pharmacyId, branchId) {
 export async function getReturnAuditLog(pharmacyId, returnId = null, limit = 50) {
   let query = supabase
     .from('return_audit_log')
-    .select('*, profiles(full_name, email)')
+    .select('*')
     .eq('pharmacy_id', pharmacyId)
     .order('created_at', { ascending: false })
     .limit(limit);
@@ -888,7 +888,7 @@ export async function getReturnAuditLog(pharmacyId, returnId = null, limit = 50)
 export async function getReturnsByStatus(pharmacyId, status, branchId = null) {
   let query = supabase
     .from('sales_returns')
-    .select('*, customers(name)')
+    .select('*')
     .eq('pharmacy_id', pharmacyId)
     .eq('status', status);
   
@@ -902,7 +902,7 @@ export async function getReturnsByStatus(pharmacyId, status, branchId = null) {
 export async function getReturnsByType(pharmacyId, type, branchId = null) {
   let query = supabase
     .from('sales_returns')
-    .select('*, customers(name)')
+    .select('*')
     .eq('pharmacy_id', pharmacyId)
     .eq('return_type', type);
   
