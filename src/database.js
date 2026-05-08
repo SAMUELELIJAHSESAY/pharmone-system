@@ -315,7 +315,7 @@ export async function deleteCustomer(id) {
 export async function getSales(pharmacyId, limit = 50) {
   const { data, error } = await supabase
     .from('sales')
-    .select('*, customers(name, phone), sale_items(*, products(name))')
+    .select('*, customers(name, phone), sale_items(id, product_id, product_name, quantity, unit_price, total_price)')
     .eq('pharmacy_id', pharmacyId)
     .order('created_at', { ascending: false })
     .limit(limit);
@@ -727,7 +727,7 @@ export async function getSupplierPurchaseHistory(supplierId) {
 export async function getPurchases(pharmacyId) {
   const { data, error } = await supabase
     .from('purchases')
-    .select('*, suppliers(name), purchase_items(*)')
+    .select('*')
     .eq('pharmacy_id', pharmacyId)
     .order('created_at', { ascending: false });
   if (error) throw error;
@@ -754,7 +754,7 @@ export async function updatePurchase(id, payload) {
 export async function getPurchaseDetails(purchaseId) {
   const { data, error } = await supabase
     .from('purchases')
-    .select('*, suppliers(name), purchase_items(*)')
+    .select('*')
     .eq('id', purchaseId)
     .single();
   if (error) throw error;
@@ -782,7 +782,7 @@ export async function processPurchase(purchaseId) {
 export async function getSalesReturns(pharmacyId) {
   const { data, error } = await supabase
     .from('sales_returns')
-    .select('*, customers(name), return_items(*), sales(invoice_number)')
+    .select('*')
     .eq('pharmacy_id', pharmacyId)
     .order('created_at', { ascending: false });
   if (error) throw error;
