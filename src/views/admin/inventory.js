@@ -774,7 +774,7 @@ async function importProductsFromCSV(csvText, user, reload, progressDiv) {
           category: getValue(categoryIdx) || 'Other',
           description: getValue(descIdx),
           cost_price: parseFloat(getValue(costPriceIdx)) || 0,
-          selling_price: parseFloat(getValue(sellingPriceIdx)) || 0,
+          price: parseFloat(getValue(sellingPriceIdx)) || 0,
           low_stock_threshold: parseFloat(getValue(lowStockIdx)) || 10,
           stock_boxes: parseFloat(getValue(stockBoxesIdx)) || 0,
           pharmacy_id: user.profile.pharmacy_id,
@@ -791,8 +791,8 @@ async function importProductsFromCSV(csvText, user, reload, progressDiv) {
           continue;
         }
         
-        if (!product.selling_price || product.selling_price === 0) {
-          console.warn(`Row ${i}: Invalid selling price. Raw value: "${getValue(sellingPriceIdx)}", Parsed: ${product.selling_price}`);
+        if (!product.price || product.price === 0) {
+          console.warn(`Row ${i}: Invalid selling price. Raw value: "${getValue(sellingPriceIdx)}", Parsed: ${product.price}`);
           errorCount++;
           continue;
         }
@@ -907,7 +907,7 @@ async function importProductsFromExcel(arrayBuffer, fileName, user, reload, prog
           category: getValue(['Category']) || 'Other',
           description: getValue(['Description']),
           cost_price: parseFloat(getValue(['Cost', 'Price'])) || 0,
-          selling_price: parseFloat(getValue(['Selling', 'Price'])) || 0,
+          price: parseFloat(getValue(['Selling', 'Price'])) || 0,
           low_stock_threshold: parseFloat(getValue(['Low', 'Stock'])) || 10,
           stock_boxes: parseFloat(getValue(['Stock', 'Boxes'])) || 0,
           pharmacy_id: user.profile.pharmacy_id,
@@ -924,13 +924,13 @@ async function importProductsFromExcel(arrayBuffer, fileName, user, reload, prog
           continue;
         }
         
-        if (!product.selling_price || product.selling_price === 0) {
+        if (!product.price || product.price === 0) {
           console.warn(`Row ${i + 1}: Missing or invalid selling price (got: ${getValue(['Selling', 'Price'])})`);
           errorCount++;
           continue;
         }
         
-        console.log(`Creating product: ${product.name} - Price: ${product.selling_price}`);
+        console.log(`Creating product: ${product.name} - Price: ${product.price}`);
         const result = await createProduct(product);
         console.log(`Product created successfully:`, result);
         successCount++;
