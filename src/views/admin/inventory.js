@@ -705,6 +705,13 @@ async function importProductsFromCSV(csvText, user, reload, progressDiv) {
   const { showToast } = await import('../../utils.js');
   
   try {
+    // Check if a branch is selected
+    if (!selectedBranchId) {
+      showToast('Please select a branch before importing products', 'error');
+      if (progressDiv) progressDiv.style.display = 'none';
+      return;
+    }
+    
     const lines = csvText.split('\n').map(line => line.trim()).filter(line => line.length > 0);
     if (lines.length < 2) {
       showToast('CSV file must have header row and at least one product', 'error');
@@ -790,12 +797,21 @@ async function importProductsFromCSV(csvText, user, reload, progressDiv) {
           continue;
         }
         
+        if (!product.branch_id) {
+          console.warn(`Row ${i}: Missing branch assignment. Please select a branch before importing.`);
+          errorCount++;
+          continue;
+        }
+        
         console.log(`Creating CSV product: ${product.name}`);
         const result = await createProduct(product);
         console.log('CSV product created:', result);
         successCount++;
       } catch (err) {
         console.error('Error importing CSV row', i, ':', err);
+        if (err.message && err.message.includes('branch_id')) {
+          console.warn(`Row ${i}: Product requires a branch. Make sure a branch is selected.`);
+        }
         errorCount++;
       }
     }
@@ -816,6 +832,14 @@ async function importProductsFromCSV(csvText, user, reload, progressDiv) {
 
 async function importProductsFromExcel(arrayBuffer, fileName, user, reload, progressDiv) {
   try {
+    // Check if a branch is selected
+    if (!selectedBranchId) {
+      const { showToast } = await import('../../utils.js');
+      showToast('Please select a branch before importing products', 'error');
+      if (progressDiv) progressDiv.style.display = 'none';
+      return;
+    }
+    
     // Dynamically import xlsx library
     const XLSX = await import('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/+esm');
     const { createProduct } = await import('../../database.js');

@@ -235,8 +235,11 @@ export async function getLowStockProducts(pharmacyId) {
 }
 
 export async function createProduct(payload) {
+  if (!payload.pharmacy_id) {
+    throw new Error('pharmacy_id is required when creating a product');
+  }
   if (!payload.branch_id) {
-    throw new Error('branch_id is required when creating a product');
+    throw new Error('branch_id is required when creating a product. Please select a branch before importing.');
   }
   const { data, error } = await supabase.from('products').insert(payload).select().single();
   if (error) throw error;
