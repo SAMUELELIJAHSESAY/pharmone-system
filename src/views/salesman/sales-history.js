@@ -1,5 +1,5 @@
 // Salesman Sales History View - View receipts printed and detailed sales information
-import { getSales, getPharmacySettings } from '../../database.js';
+import { getSales, getPharmacySettings, getBranchDetails } from '../../database.js';
 import { formatCurrency, formatDate, showToast, formatUTCDate, formatUTCTime, formatUTCDateTime } from '../../utils.js';
 
 export async function renderSalesHistory(container, user) {
@@ -230,7 +230,7 @@ function renderSalesHistoryView(container, sales, user, pharmacyId, branchId) {
       renderView();
     };
 
-    window.viewSaleReceipt = (saleId) => {
+    window.viewSaleReceipt = async (saleId) => {
       const sale = sales.find(s => s.id === saleId);
       if (!sale) {
         showToast('Receipt not found', 'error');
@@ -244,9 +244,26 @@ function renderSalesHistoryView(container, sales, user, pharmacyId, branchId) {
         showToast('No items found in this sale', 'warning');
       }
 
+      // Fetch branch details for receipt header
+      let branchDetails = {};
+      if (sale.branch_id) {
+        try {
+          branchDetails = await getBranchDetails(sale.branch_id);
+        } catch (err) {
+          console.error('Failed to load branch details:', err);
+        }
+      }
+      
+      const branchName = branchDetails?.name || 'Pharmacy';
+      const branchAddress = branchDetails?.address || '';
+      const branchEmail = branchDetails?.email || '';
+
       let receiptHTML = `
         <div style="text-align:center;margin-bottom:1rem;border-bottom:1px dashed;padding-bottom:1rem">
-          <div style="font-weight:bold;font-size:1.1rem">RECEIPT</div>
+          <div style="font-weight:bold;font-size:1rem">${branchName}</div>
+          ${branchAddress ? `<div style="font-size:0.8rem;margin-bottom:0.25rem">${branchAddress}</div>` : ''}
+          ${branchEmail ? `<div style="font-size:0.8rem;margin-bottom:0.5rem">${branchEmail}</div>` : ''}
+          <div style="font-weight:bold;font-size:1.1rem;margin-top:0.5rem">RECEIPT</div>
           <div style="font-size:0.9rem;color:var(--gray-600)">${sale.invoice_number}</div>
         </div>
 
@@ -309,7 +326,7 @@ function renderSalesHistoryView(container, sales, user, pharmacyId, branchId) {
         ` : ''}
 
         <div style="margin-top:1rem;text-align:center;border-top:1px dashed;padding-top:1rem;font-size:0.75rem;color:var(--gray-500)">
-          Thank you for your purchase!
+          Thank you for visiting, ${branchName}!
         </div>
       `;
 

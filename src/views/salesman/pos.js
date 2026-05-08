@@ -1,4 +1,4 @@
-import { getProducts, getCustomers, createCustomer, createSale, getStaffBranch, getPharmacySettings } from '../../database.js';
+import { getProducts, getCustomers, createCustomer, createSale, getStaffBranch, getPharmacySettings, getBranchDetails } from '../../database.js';
 import { formatCurrency, showToast, debounce, formatUTCDateTime } from '../../utils.js';
 import { createModal } from '../../components/modal.js';
 
@@ -422,7 +422,9 @@ async function processCheckout() {
   try {
     const sale = await createSale(salePayload, cartItemsForSale);
     showToast(`Sale completed! Invoice: ${sale.invoice_number}`);
-    showReceiptModal(sale, cart.slice(), total, discount, paymentMethod);
+    // Fetch branch details for receipt header
+    const branchDetails = await getBranchDetails(staffBranchId);
+    showReceiptModal(sale, cart.slice(), total, discount, paymentMethod, branchDetails);
     cart = [];
     selectedCustomer = null;
     renderPOS(document.getElementById('page-content'), currentUser);
@@ -452,8 +454,11 @@ async function processCheckout() {
   }
 }
 
-function showReceiptModal(sale, items, total, discount, paymentMethod) {
+function showReceiptModal(sale, items, total, discount, paymentMethod, branchDetails = {}) {
   const saleDate = formatUTCDateTime(sale.created_at);
+  const branchName = branchDetails?.name || 'Pharmacy';
+  const branchAddress = branchDetails?.address || '';
+  const branchEmail = branchDetails?.email || '';
   const { overlay, closeModal } = createModal({
     id: 'receipt-modal',
     title: 'Sale Complete!',
@@ -513,6 +518,11 @@ function showReceiptModal(sale, items, total, discount, paymentMethod) {
         </head>
         <body>
           <div class="receipt">
+            <div style="text-align: center; margin-bottom: 10px; border-bottom: 1px dashed #000; padding-bottom: 10px;">
+              <div class="title" style="font-size: 14px; font-weight: bold; margin-bottom: 5px;">${branchName}</div>
+              ${branchAddress ? `<div style="font-size: 10px; margin-bottom: 3px;">${branchAddress}</div>` : ''}
+              ${branchEmail ? `<div style="font-size: 10px; margin-bottom: 3px;">${branchEmail}</div>` : ''}
+            </div>
             <div class="title">Receipt</div>
             <div class="row"><span>Invoice:</span><span><strong>${sale.invoice_number}</strong></span></div>
             <div class="row"><span>Date:</span><span>${formatUTCDateTime(sale.created_at)}</span></div>
@@ -527,7 +537,7 @@ function showReceiptModal(sale, items, total, discount, paymentMethod) {
             <div class="row total success"><span>TOTAL:</span><span>${window.pharmacySettings?.currency_symbol || 'Le'}${total.toFixed(2)}</span></div>
             <div class="row"><span>Payment:</span><span>${paymentMethod.replace('_', ' ')}</span></div>
             <div class="divider"></div>
-            <div style="text-align: center; font-size: 10px; margin-top: 10px;">Thank you for your purchase!</div>
+            <div style="text-align: center; font-size: 10px; margin-top: 10px;">Thank you for visiting, ${branchName}!</div>
           </div>
           <script>window.print(); window.close();</script>
         </body>
