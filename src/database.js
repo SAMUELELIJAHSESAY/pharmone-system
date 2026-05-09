@@ -331,7 +331,10 @@ export async function getSaleItems(saleId) {
     .from('sale_items')
     .select('*')
     .eq('sale_id', saleId);
-  if (error) throw error;
+  if (error) {
+    console.error(`Error fetching sale_items for ${saleId}:`, error);
+    throw error;
+  }
   return data || [];
 }
 
@@ -339,31 +342,33 @@ export async function enrichSalesWithItems(sales) {
   if (!sales || sales.length === 0) return sales;
   
   try {
-    const saleIds = sales.map(s => s.id);
-    const { data: allItems, error } = await supabase
-      .from('sale_items')
-      .select('*')
-      .in('sale_id', saleIds);
+    console.log(`[enrichSalesWithItems] Enriching ${sales.length} sales with items`);
     
-    if (error) throw error;
+    // Fetch items for each sale individually (more reliable)
+    const enrichedSales = [];
+    for (const sale of sales) {
+      const items = await getSaleItems(sale.id);
+      enrichedSales.push({
+        ...sale,
+        sale_items: items
+      });
+    }
     
-    // Group items by sale_id
-    const itemsMap = {};
-    (allItems || []).forEach(item => {
-      if (!itemsMap[item.sale_id]) {
-        itemsMap[item.sale_id] = [];
-      }
-      itemsMap[item.sale_id].push(item);
+    const totalItems = enrichedSales.reduce((sum, s) => sum + (s.sale_items?.length || 0), 0);
+    console.log(`[enrichSalesWithItems] Success - ${totalItems} total items across ${enrichedSales.length} sales`);
+    
+    return enrichedSales;
+  } catch (err) {
+    console.error('[enrichSalesWithItems] Error enriching sales:', {
+      error: err,
+      message: err.message,
+      salesCount: sales?.length
     });
-    
-    // Attach items to sales
+    // Return sales with empty items array if enrichment fails
     return sales.map(sale => ({
       ...sale,
-      sale_items: itemsMap[sale.id] || []
+      sale_items: sale.sale_items || []
     }));
-  } catch (err) {
-    console.error('Error enriching sales with items:', err);
-    return sales;
   }
 }
 
