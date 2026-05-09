@@ -127,13 +127,14 @@ export function renderBranchDetailsView(branchId, pharmacyId) {
               <tr>
                 <th>Name</th>
                 <th>Role</th>
+                <th>Daily Sales</th>
                 <th>Total Sales</th>
                 <th>Transactions</th>
                 <th>Actions</th>
               </tr>
             </thead>
             <tbody id="staff-table">
-              <tr><td colspan="5">Loading...</td></tr>
+              <tr><td colspan="6">Loading...</td></tr>
             </tbody>
           </table>
         </div>
@@ -304,26 +305,41 @@ async function loadBranchStaff(branchId) {
     
     const tbody = document.getElementById('staff-table');
     if (assignments.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="5">No staff assigned to this branch</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="6">No staff assigned to this branch</td></tr>';
       return;
     }
     
-    // Fetch sales data for each staff member
+    // Fetch sales data for each staff member (both today and all-time)
     const { data: allSales } = await supabase
       .from('sales')
-      .select('created_by, total_amount')
+      .select('created_by, total_amount, created_at')
       .eq('branch_id', branchId);
     
-    // Calculate sales per staff member
+    // Get today's date in the pharmacy timezone
+    const now = new Date();
+    const todayDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const nextDate = new Date(todayDate);
+    nextDate.setDate(nextDate.getDate() + 1);
+    
+    // Calculate sales per staff member (daily and total)
     const staffSalesMap = {};
     if (allSales) {
       allSales.forEach(sale => {
         if (sale.created_by) {
           if (!staffSalesMap[sale.created_by]) {
-            staffSalesMap[sale.created_by] = { total: 0, count: 0 };
+            staffSalesMap[sale.created_by] = { daily_total: 0, daily_count: 0, total: 0, count: 0 };
           }
+          
+          // Add to total
           staffSalesMap[sale.created_by].total += sale.total_amount || 0;
           staffSalesMap[sale.created_by].count += 1;
+          
+          // Check if sale is from today
+          const saleDate = new Date(sale.created_at);
+          if (saleDate >= todayDate && saleDate < nextDate) {
+            staffSalesMap[sale.created_by].daily_total += sale.total_amount || 0;
+            staffSalesMap[sale.created_by].daily_count += 1;
+          }
         }
       });
     }
@@ -331,11 +347,12 @@ async function loadBranchStaff(branchId) {
     const currencySymbol = window.pharmacySettings?.currency_symbol || 'Le';
     tbody.innerHTML = assignments.map(a => {
       const staffId = a.staff_id;
-      const salesData = staffSalesMap[staffId] || { total: 0, count: 0 };
+      const salesData = staffSalesMap[staffId] || { daily_total: 0, daily_count: 0, total: 0, count: 0 };
       return `
       <tr>
         <td>${a.profiles.full_name}</td>
         <td>${a.role_in_branch}</td>
+        <td>${currencySymbol}${salesData.daily_total.toFixed(2)}</td>
         <td>${currencySymbol}${salesData.total.toFixed(2)}</td>
         <td>${salesData.count}</td>
         <td>
