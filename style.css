@@ -45,6 +45,61 @@
   --transition: 150ms ease;
 }
 
+/* ======== DARK THEME ======== */
+:root.theme-dark {
+  --primary: #14b8a6;
+  --primary-dark: #0d9488;
+  --primary-light: #2dd4bf;
+  --primary-50: #f0fdfa;
+  --primary-100: #ccfbf1;
+
+  --secondary: #38bdf8;
+  --secondary-dark: #0284c7;
+
+  --gray-50: #0f172a;
+  --gray-100: #1e293b;
+  --gray-200: #334155;
+  --gray-300: #475569;
+  --gray-400: #64748b;
+  --gray-500: #94a3b8;
+  --gray-600: #cbd5e1;
+  --gray-700: #e2e8f0;
+  --gray-800: #f1f5f9;
+  --gray-900: #f8fafc;
+}
+
+/* ======== PHARMACY THEME (Vibrant Teal) ======== */
+:root.theme-pharmacy {
+  --primary: #0d9488;
+  --primary-dark: #0a5f57;
+  --primary-light: #2dd4bf;
+  --primary-50: #f0fdfa;
+  --primary-100: #ccfbf1;
+
+  --secondary: #06b6d4;
+  --secondary-dark: #0891b2;
+
+  --success: #10b981;
+  --success-light: #d1fae5;
+  --warning: #f59e0b;
+  --warning-light: #fef3c7;
+  --danger: #ef4444;
+  --danger-light: #fee2e2;
+  --info: #06b6d4;
+  --info-light: #cffafe;
+
+  --gray-50: #f8fafc;
+  --gray-100: #f1f5f9;
+  --gray-200: #e2e8f0;
+  --gray-300: #cbd5e1;
+  --gray-400: #94a3b8;
+  --gray-500: #64748b;
+  --gray-600: #475569;
+  --gray-700: #334155;
+  --gray-800: #1e293b;
+  --gray-900: #0f172a;
+}
+
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 html { font-size: 16px; scroll-behavior: smooth; }
 

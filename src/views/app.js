@@ -1,6 +1,7 @@
 import { signOut } from '../auth.js';
 import { renderSidebar } from '../components/sidebar.js';
 import { getPharmacySettings } from '../database.js';
+import { createThemeToggle, initThemeToggle } from '../components/theme-toggle.js';
 import { renderSuperAdminDashboard } from './super-admin/dashboard.js';
 import { renderAdminDashboard } from './admin/dashboard.js';
 import { renderInventory } from './admin/inventory.js';
@@ -65,6 +66,7 @@ export function renderApp(user) {
               <span style="color:var(--gray-400);font-size:0.9rem">&#128269;</span>
               <input type="text" id="global-search" placeholder="Search..." />
             </div>
+            ${createThemeToggle()}
             <button class="btn btn-ghost btn-sm" id="profile-btn" style="display:flex;align-items:center;gap:0.5rem">
               <span>👤</span>
               <span>My Account</span>
@@ -86,6 +88,9 @@ export function renderApp(user) {
   document.getElementById('profile-btn').addEventListener('click', async () => {
     await showProfileModal(currentUser);
   });
+
+  // Initialize theme toggle
+  initThemeToggle();
 
   document.getElementById('mobile-menu-btn').addEventListener('click', () => {
     document.getElementById('sidebar').classList.toggle('open');
