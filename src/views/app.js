@@ -85,8 +85,16 @@ export function renderApp(user) {
     await signOut();
   });
 
-  document.getElementById('profile-btn').addEventListener('click', async () => {
-    await showProfileModal(currentUser);
+  document.getElementById('profile-btn').addEventListener('click', async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    console.log('Profile button clicked, currentUser:', currentUser);
+    try {
+      await showProfileModal(currentUser);
+      console.log('Profile modal shown');
+    } catch (err) {
+      console.error('Error showing profile modal:', err);
+    }
   });
 
   // Initialize theme toggle

@@ -1,45 +1,16 @@
 import { supabase } from '../config.js';
 import { updateProfile } from '../database.js';
 import { showToast } from '../utils.js';
+import { createModal } from './modal.js';
 
-// Helper function - MUST be defined before showProfileModal
-function createProfileModal({ id, title, size = 'modal-md', body, actions = [] }) {
-  const overlay = document.createElement('div');
-  overlay.className = 'modal-overlay';
-  overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:1000';
-
-  const modal = document.createElement('div');
-  modal.className = `modal ${size}`;
-  modal.style.cssText = 'background:white;border-radius:var(--radius);box-shadow:0 20px 60px rgba(0,0,0,0.3);max-width:90vw;max-height:90vh;overflow-y:auto';
-
-  modal.innerHTML = `
-    <div style="padding:2rem">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1.5rem">
-        <h2 style="margin:0;font-size:1.5rem">${title}</h2>
-        <button onclick="this.closest('.modal-overlay').remove()" style="background:none;border:none;font-size:1.5rem;cursor:pointer;color:var(--gray-400)">&times;</button>
-      </div>
-      <div class="modal-body">${body}</div>
-      ${actions.length > 0 ? `
-        <div style="display:flex;gap:0.75rem;margin-top:2rem;justify-content:flex-end">
-          ${actions.map(a => `<button class="${a.class || 'btn btn-primary'}" onclick="window.closeProfileModal()">${a.label}</button>`).join('')}
-        </div>
-      ` : ''}
-    </div>
-  `;
-
-  overlay.appendChild(modal);
-  overlay.addEventListener('click', (e) => {
-    if (e.target === overlay) overlay.remove();
-  });
-
-  document.body.appendChild(overlay);
-  return { overlay, modal };
-}
 
 // Expose close function globally
 window.closeProfileModal = function() {
   const overlay = document.querySelector('.modal-overlay');
-  if (overlay) overlay.remove();
+  if (overlay) {
+    overlay.classList.remove('show');
+    setTimeout(() => overlay.remove(), 200);
+  }
 };
 
 // Main export function
@@ -59,7 +30,7 @@ export async function showProfileModal(user) {
     salesman: 'Salesman'
   }[role] || role;
 
-  const { overlay } = createProfileModal({
+  const { overlay } = createModal({
     id: 'user-profile-modal',
     title: '👤 My Account',
     size: 'modal-lg',
@@ -121,10 +92,7 @@ export async function showProfileModal(user) {
           </div>
         </div>
       </div>
-    `,
-    actions: [
-      { label: 'Close', class: 'btn btn-secondary' }
-    ]
+    `
   });
 
   // Set up event handlers with proper scope
