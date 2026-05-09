@@ -1,4 +1,4 @@
-import { getCustomers, createCustomer, updateCustomer, deleteCustomer, getSales, getPharmacySettings } from '../../database.js';
+import { getCustomers, createCustomer, updateCustomer, deleteCustomer, getSales, enrichSalesWithItems, getPharmacySettings } from '../../database.js';
 import { formatDate, formatDateTime, formatCurrency, showToast, showConfirm, debounce } from '../../utils.js';
 import { createModal } from '../../components/modal.js';
 
@@ -199,8 +199,9 @@ function showCustomerModal(customer, user, reload) {
 }
 
 async function showPurchaseHistory(customerId, customerName, user) {
-  const sales = await getSales(user.profile.pharmacy_id, 200);
-  const customerSales = sales.filter(s => s.customer_id === customerId);
+  const salesData = await getSales(user.profile.pharmacy_id, 200);
+  const customerSalesData = salesData.filter(s => s.customer_id === customerId);
+  const customerSales = await enrichSalesWithItems(customerSalesData);
   const totalSpent = customerSales.reduce((sum, s) => sum + parseFloat(s.total_amount), 0);
 
   createModal({

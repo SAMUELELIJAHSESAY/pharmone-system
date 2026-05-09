@@ -1,4 +1,4 @@
-import { getSales, getBranches, getSalesStats } from '../../database.js';
+import { getSales, enrichSalesWithItems, getBranches, getSalesStats } from '../../database.js';
 import { formatCurrency, formatDateTime, showToast } from '../../utils.js';
 import { createModal } from '../../components/modal.js';
 
@@ -83,8 +83,9 @@ export async function renderSales(container, user) {
   if (!pharmacyId) { container.innerHTML = `<div class="alert alert-warning">No pharmacy linked.</div>`; return; }
 
   try {
-    const [sales, branches, stats] = await Promise.all([
-      getSales(pharmacyId, 200),
+    const salesData = await getSales(pharmacyId, 200);
+    const sales = await enrichSalesWithItems(salesData);
+    const [branches, stats] = await Promise.all([
       getBranches(pharmacyId),
       getSalesStats(pharmacyId)
     ]);

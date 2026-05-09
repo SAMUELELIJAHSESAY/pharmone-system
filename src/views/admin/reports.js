@@ -1,4 +1,4 @@
-import { getSales, getProducts, getPharmacySettings } from '../../database.js';
+import { getSales, enrichSalesWithItems, getProducts, getPharmacySettings } from '../../database.js';
 import { formatCurrency, formatDate } from '../../utils.js';
 
 export async function renderReports(container, user) {
@@ -12,12 +12,13 @@ export async function renderReports(container, user) {
       window.pharmacySettings = settings || { currency_symbol: 'Le', currency_code: 'NLE' };
     }
     
-    const [sales, products] = await Promise.all([
+    const [salesData, products] = await Promise.all([
       getSales(pharmacyId, 500),
       getProducts(pharmacyId)
     ]);
-
-    const completedSales = sales.filter(s => s.status === 'completed');
+    
+    const completedSalesData = salesData.filter(s => s.status === 'completed');
+    const completedSales = await enrichSalesWithItems(completedSalesData);
 
     const totalRevenue = completedSales.reduce((sum, s) => sum + parseFloat(s.total_amount), 0);
 

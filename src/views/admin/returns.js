@@ -13,7 +13,7 @@ export async function renderReturns(container, user) {
     // Get all required data
     const [returnsData, salesData, customersData, branchesData] = await Promise.all([
       getSalesReturns(pharmacyId),
-      getSales(pharmacyId, 500),
+      getSales(pharmacyId, 500).then(sales => enrichSalesWithItems(sales)),
       getCustomers(pharmacyId),
       getBranches(pharmacyId)
     ]);

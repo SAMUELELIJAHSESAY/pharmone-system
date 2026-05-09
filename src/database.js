@@ -326,6 +326,47 @@ export async function getSales(pharmacyId, limit = 50) {
   return data;
 }
 
+export async function getSaleItems(saleId) {
+  const { data, error } = await supabase
+    .from('sale_items')
+    .select('*')
+    .eq('sale_id', saleId);
+  if (error) throw error;
+  return data || [];
+}
+
+export async function enrichSalesWithItems(sales) {
+  if (!sales || sales.length === 0) return sales;
+  
+  try {
+    const saleIds = sales.map(s => s.id);
+    const { data: allItems, error } = await supabase
+      .from('sale_items')
+      .select('*')
+      .in('sale_id', saleIds);
+    
+    if (error) throw error;
+    
+    // Group items by sale_id
+    const itemsMap = {};
+    (allItems || []).forEach(item => {
+      if (!itemsMap[item.sale_id]) {
+        itemsMap[item.sale_id] = [];
+      }
+      itemsMap[item.sale_id].push(item);
+    });
+    
+    // Attach items to sales
+    return sales.map(sale => ({
+      ...sale,
+      sale_items: itemsMap[sale.id] || []
+    }));
+  } catch (err) {
+    console.error('Error enriching sales with items:', err);
+    return sales;
+  }
+}
+
 export async function getSalesToday(pharmacyId, branchId = null) {
   // Use timezone-aware date range
   const todayRange = await getTodayDateRange(pharmacyId);

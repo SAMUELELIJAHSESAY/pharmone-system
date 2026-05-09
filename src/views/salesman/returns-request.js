@@ -1,5 +1,5 @@
 // Salesman Returns Request - Request returns with admin approval workflow
-import { getSales, getCustomers, supabase } from '../../database.js';
+import { getSales, enrichSalesWithItems, getCustomers, supabase } from '../../database.js';
 import { formatCurrency, showToast, formatUTCDate } from '../../utils.js';
 
 export async function renderSalesmanReturnsRequest(container, user) {
@@ -14,7 +14,8 @@ export async function renderSalesmanReturnsRequest(container, user) {
 
   try {
     // Get sales for this salesman in their branch
-    const allSales = await getSales(pharmacyId, 500);
+    const salesData = await getSales(pharmacyId, 500);
+    const allSales = await enrichSalesWithItems(salesData);
     const salesmanSales = allSales.filter(s =>
       s.created_by === userId && s.branch_id === branchId
     );

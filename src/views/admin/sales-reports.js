@@ -18,7 +18,7 @@ export async function renderAdminSalesReports(container, user) {
     }
 
     const [allSales, branches] = await Promise.all([
-      getSales(pharmacyId, 1000),
+      getSales(pharmacyId, 1000).then(sales => enrichSalesWithItems(sales)),
       getBranches(pharmacyId)
     ]);
 

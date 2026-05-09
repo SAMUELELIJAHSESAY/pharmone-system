@@ -1,5 +1,5 @@
 // Salesman Sales History View - View receipts printed and detailed sales information
-import { getSales, getPharmacySettings, getBranchDetails } from '../../database.js';
+import { getSales, enrichSalesWithItems, getPharmacySettings, getBranchDetails } from '../../database.js';
 import { formatCurrency, formatDate, showToast, formatUTCDate, formatUTCTime, formatUTCDateTime } from '../../utils.js';
 
 export async function renderSalesHistory(container, user) {
@@ -20,10 +20,13 @@ export async function renderSalesHistory(container, user) {
     }
 
     // Get all sales for this salesman (only sales they created)
-    const allSales = await getSales(pharmacyId, 1000);
-    const salesmanSales = allSales.filter(s => 
+    const allSalesData = await getSales(pharmacyId, 1000);
+    const salesmanSalesData = allSalesData.filter(s => 
       s.created_by === userId
     );
+    
+    // Enrich with sale items
+    const salesmanSales = await enrichSalesWithItems(salesmanSalesData);
 
     renderSalesHistoryView(container, salesmanSales, user, pharmacyId, branchId);
   } catch (err) {
