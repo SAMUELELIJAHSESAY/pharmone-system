@@ -11,26 +11,15 @@ export { supabase }; // Export supabase for use in other modules
  * @returns {Promise<{start: string, end: string, dateStr: string}>}
  */
 export async function getTodayDateRange(pharmacyId = null) {
-  // Use Postgres to calculate today's date range server-side
-  // This ensures accuracy regardless of client timezone
-  let query = supabase.rpc('get_today_date_range', { pharmacy_id: pharmacyId });
-  
-  const { data, error } = await query;
-  
-  if (error) {
-    console.warn('Error getting timezone-aware date range:', error);
-    // Fallback to UTC if timezone lookup fails
-    const now = new Date();
-    const todayUTC = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0, 0));
-    const tomorrowUTC = new Date(todayUTC.getTime() + 24 * 60 * 60 * 1000);
-    return {
-      start: todayUTC.toISOString(),
-      end: tomorrowUTC.toISOString(),
-      dateStr: todayUTC.toISOString().split('T')[0]
-    };
-  }
-  
-  return data;
+  // Client-side date calculation (avoid RPC issues)
+  const now = new Date();
+  const todayUTC = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0, 0));
+  const tomorrowUTC = new Date(todayUTC.getTime() + 24 * 60 * 60 * 1000);
+  return {
+    start: todayUTC.toISOString(),
+    end: tomorrowUTC.toISOString(),
+    dateStr: todayUTC.toISOString().split('T')[0]
+  };
 }
 
 /**
@@ -40,25 +29,15 @@ export async function getTodayDateRange(pharmacyId = null) {
  * @returns {Promise<{start: string, end: string}>}
  */
 export async function getWeekDateRange(pharmacyId = null) {
-  // Use Postgres to calculate week date range server-side
-  let query = supabase.rpc('get_week_date_range', { pharmacy_id: pharmacyId });
-  
-  const { data, error } = await query;
-  
-  if (error) {
-    console.warn('Error getting week date range:', error);
-    // Fallback to UTC if timezone lookup fails
-    const now = new Date();
-    const todayUTC = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0, 0));
-    const weekAgoUTC = new Date(todayUTC.getTime() - 7 * 24 * 60 * 60 * 1000);
-    const tomorrowUTC = new Date(todayUTC.getTime() + 24 * 60 * 60 * 1000);
-    return {
-      start: weekAgoUTC.toISOString(),
-      end: tomorrowUTC.toISOString()
-    };
-  }
-  
-  return data;
+  // Client-side: Get last 7 days (avoid RPC 404/400 errors)
+  const now = new Date();
+  const todayUTC = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0, 0));
+  const weekAgoUTC = new Date(todayUTC.getTime() - 7 * 24 * 60 * 60 * 1000);
+  const tomorrowUTC = new Date(todayUTC.getTime() + 24 * 60 * 60 * 1000);
+  return {
+    start: weekAgoUTC.toISOString(),
+    end: tomorrowUTC.toISOString()
+  };
 }
 
 /**
@@ -68,26 +47,16 @@ export async function getWeekDateRange(pharmacyId = null) {
  * @returns {Promise<{start: string, end: string}>}
  */
 export async function getMonthDateRange(pharmacyId = null) {
-  // Use Postgres to calculate month date range server-side
-  let query = supabase.rpc('get_month_date_range', { pharmacy_id: pharmacyId });
-  
-  const { data, error } = await query;
-  
-  if (error) {
-    console.warn('Error getting month date range:', error);
-    // Fallback to UTC if timezone lookup fails
-    const now = new Date();
-    const year = now.getUTCFullYear();
-    const month = now.getUTCMonth();
-    const monthStartUTC = new Date(Date.UTC(year, month, 1, 0, 0, 0, 0));
-    const tomorrowUTC = new Date(Date.UTC(year, month, new Date(Date.UTC(year, month + 1, 0)).getUTCDate() + 1, 0, 0, 0, 0));
-    return {
-      start: monthStartUTC.toISOString(),
-      end: tomorrowUTC.toISOString()
-    };
-  }
-  
-  return data;
+  // Client-side: Get current month (avoid RPC 400 error)
+  const now = new Date();
+  const year = now.getUTCFullYear();
+  const month = now.getUTCMonth();
+  const monthStartUTC = new Date(Date.UTC(year, month, 1, 0, 0, 0, 0));
+  const tomorrowUTC = new Date(Date.UTC(year, month, new Date(Date.UTC(year, month + 1, 0)).getUTCDate() + 1, 0, 0, 0, 0));
+  return {
+    start: monthStartUTC.toISOString(),
+    end: tomorrowUTC.toISOString()
+  };
 }
 
 /**
@@ -97,25 +66,15 @@ export async function getMonthDateRange(pharmacyId = null) {
  * @returns {Promise<{start: string, end: string}>}
  */
 export async function getYearDateRange(pharmacyId = null) {
-  // Use Postgres to calculate year date range server-side
-  let query = supabase.rpc('get_year_date_range', { pharmacy_id: pharmacyId });
-  
-  const { data, error } = await query;
-  
-  if (error) {
-    console.warn('Error getting year date range:', error);
-    // Fallback to UTC if timezone lookup fails
-    const now = new Date();
-    const year = now.getUTCFullYear();
-    const yearStartUTC = new Date(Date.UTC(year, 0, 1, 0, 0, 0, 0));
-    const yearEndUTC = new Date(Date.UTC(year, 11, 31, 23, 59, 59, 999));
-    return {
-      start: yearStartUTC.toISOString(),
-      end: yearEndUTC.toISOString()
-    };
-  }
-  
-  return data;
+  // Client-side: Get current year (avoid RPC 400 error)
+  const now = new Date();
+  const year = now.getUTCFullYear();
+  const yearStartUTC = new Date(Date.UTC(year, 0, 1, 0, 0, 0, 0));
+  const yearEndUTC = new Date(Date.UTC(year, 11, 31, 23, 59, 59, 999));
+  return {
+    start: yearStartUTC.toISOString(),
+    end: yearEndUTC.toISOString()
+  };
 }
 
 // ===================== PHARMACIES =====================
