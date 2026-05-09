@@ -303,18 +303,32 @@ export async function enrichSalesWithItems(sales) {
   try {
     console.log(`[enrichSalesWithItems] Enriching ${sales.length} sales with items`);
     
-    // Fetch items for each sale individually (more reliable)
-    const enrichedSales = [];
-    for (const sale of sales) {
-      const items = await getSaleItems(sale.id);
-      enrichedSales.push({
-        ...sale,
-        sale_items: items
-      });
-    }
+    // Fetch all items for all sales in one query using 'in' operator (much faster!)
+    const saleIds = sales.map(s => s.id);
+    const { data: allItems, error: itemsError } = await supabase
+      .from('sale_items')
+      .select('*')
+      .in('sale_id', saleIds);
+    
+    if (itemsError) throw itemsError;
+    
+    // Map items by sale_id for efficient lookup
+    const itemsBySaleId = {};
+    (allItems || []).forEach(item => {
+      if (!itemsBySaleId[item.sale_id]) {
+        itemsBySaleId[item.sale_id] = [];
+      }
+      itemsBySaleId[item.sale_id].push(item);
+    });
+    
+    // Attach items to sales
+    const enrichedSales = sales.map(sale => ({
+      ...sale,
+      sale_items: itemsBySaleId[sale.id] || []
+    }));
     
     const totalItems = enrichedSales.reduce((sum, s) => sum + (s.sale_items?.length || 0), 0);
-    console.log(`[enrichSalesWithItems] Success - ${totalItems} total items across ${enrichedSales.length} sales`);
+    console.log(`[enrichSalesWithItems] Success - ${totalItems} total items across ${enrichedSales.length} sales (1 query instead of ${enrichedSales.length})`);
     
     return enrichedSales;
   } catch (err) {
