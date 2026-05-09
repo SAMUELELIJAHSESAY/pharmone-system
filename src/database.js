@@ -303,23 +303,30 @@ export async function enrichSalesWithItems(sales) {
   try {
     console.log(`[enrichSalesWithItems] Enriching ${sales.length} sales with items`);
     
-    // Fetch all items for all sales in one query using 'in' operator (much faster!)
+    // Batch fetch items to avoid URL length limits (batch size: 50 sales per query)
     const saleIds = sales.map(s => s.id);
-    const { data: allItems, error: itemsError } = await supabase
-      .from('sale_items')
-      .select('*')
-      .in('sale_id', saleIds);
-    
-    if (itemsError) throw itemsError;
-    
-    // Map items by sale_id for efficient lookup
+    const batchSize = 50;
     const itemsBySaleId = {};
-    (allItems || []).forEach(item => {
-      if (!itemsBySaleId[item.sale_id]) {
-        itemsBySaleId[item.sale_id] = [];
-      }
-      itemsBySaleId[item.sale_id].push(item);
-    });
+    let totalItems = 0;
+    
+    for (let i = 0; i < saleIds.length; i += batchSize) {
+      const batch = saleIds.slice(i, i + batchSize);
+      const { data: batchItems, error: itemsError } = await supabase
+        .from('sale_items')
+        .select('*')
+        .in('sale_id', batch);
+      
+      if (itemsError) throw itemsError;
+      
+      // Map batch items by sale_id
+      (batchItems || []).forEach(item => {
+        if (!itemsBySaleId[item.sale_id]) {
+          itemsBySaleId[item.sale_id] = [];
+        }
+        itemsBySaleId[item.sale_id].push(item);
+        totalItems++;
+      });
+    }
     
     // Attach items to sales
     const enrichedSales = sales.map(sale => ({
@@ -327,8 +334,8 @@ export async function enrichSalesWithItems(sales) {
       sale_items: itemsBySaleId[sale.id] || []
     }));
     
-    const totalItems = enrichedSales.reduce((sum, s) => sum + (s.sale_items?.length || 0), 0);
-    console.log(`[enrichSalesWithItems] Success - ${totalItems} total items across ${enrichedSales.length} sales (1 query instead of ${enrichedSales.length})`);
+    const numBatches = Math.ceil(saleIds.length / batchSize);
+    console.log(`[enrichSalesWithItems] Success - ${totalItems} total items across ${enrichedSales.length} sales (${numBatches} batches instead of ${enrichedSales.length} individual queries)`);
     
     return enrichedSales;
   } catch (err) {
