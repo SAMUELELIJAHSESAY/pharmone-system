@@ -67,7 +67,7 @@ export function renderApp(user) {
               <input type="text" id="global-search" placeholder="Search..." />
             </div>
             ${createThemeToggle()}
-            <button class="btn btn-ghost btn-sm" id="profile-btn" style="display:flex;align-items:center;gap:0.5rem">
+            <button class="btn btn-ghost btn-sm" id="profile-btn" style="display:inline-flex;align-items:center;gap:0.5rem;cursor:pointer;padding:0.5rem 0.75rem">
               <span>👤</span>
               <span>My Account</span>
             </button>

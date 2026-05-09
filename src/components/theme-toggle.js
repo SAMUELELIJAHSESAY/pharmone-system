@@ -3,26 +3,26 @@ import { createModal } from './modal.js';
 
 export function createThemeToggle() {
   const currentTheme = getCurrentTheme();
-  const themes = getAvailableThemes();
   
   return `
     <button 
-      class="theme-toggle-btn" 
-      title="Toggle theme (${getThemeDisplayName(currentTheme)})"
       id="theme-toggle-btn"
+      class="theme-toggle-btn"
+      title="Toggle theme"
       style="
-        background: none;
+        padding: 0;
+        background: var(--gray-100);
         border: 1.5px solid var(--gray-300);
         border-radius: var(--radius-sm);
-        width: 36px;
-        height: 36px;
-        display: flex;
+        width: 40px;
+        height: 40px;
+        display: inline-flex;
         align-items: center;
         justify-content: center;
         cursor: pointer;
-        font-size: 1.1rem;
+        font-size: 1.2rem;
         transition: all var(--transition);
-        color: var(--gray-700);
+        color: var(--gray-800);
       "
     >
       ${getThemeIcon(currentTheme)}
@@ -41,19 +41,33 @@ function getThemeIcon(theme) {
 
 export function initThemeToggle() {
   const btn = document.getElementById('theme-toggle-btn');
-  if (!btn) return;
+  if (!btn) {
+    console.warn('Theme toggle button not found');
+    return;
+  }
 
-  btn.addEventListener('click', () => {
+  btn.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
     const nextTheme = toggleTheme();
     btn.innerHTML = getThemeIcon(nextTheme);
-    btn.title = `Toggle theme (${getThemeDisplayName(nextTheme)})`;
+    btn.title = `Theme: ${getThemeDisplayName(nextTheme)} (click to cycle)`;
+    
+    // Add hover effect
+    btn.style.backgroundColor = 'var(--primary-light)';
+    setTimeout(() => {
+      btn.style.backgroundColor = 'var(--gray-100)';
+    }, 200);
   });
 
-  // Show theme menu on right-click or long press
+  // Show theme menu on right-click
   btn.addEventListener('contextmenu', (e) => {
     e.preventDefault();
     showThemeMenu();
   });
+
+  // Initial tooltip
+  btn.title = `Theme: ${getThemeDisplayName(getCurrentTheme())} (click to cycle, right-click to select)`;
 }
 
 function showThemeMenu() {
