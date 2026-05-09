@@ -279,10 +279,10 @@ function renderSalesHistoryView(container, sales, user, pharmacyId, branchId) {
 
         <div style="border-top:1px dashed;border-bottom:1px dashed;padding:0.75rem 0;margin:1rem 0;font-size:0.85rem">
           <div style="display:flex;justify-content:space-between;font-weight:bold">
-            <span>ITEM</span>
-            <span>QTY</span>
-            <span>Price (${currencySymbol})</span>
-            <span>Amount (${currencySymbol})</span>
+            <span style="flex:1">ITEM</span>
+            <span style="width:50px;text-align:center">QTY</span>
+            <span style="width:70px;text-align:right">Price</span>
+            <span style="width:70px;text-align:right">Amount</span>
           </div>
           ${items.map(item => `
             <div style="display:flex;justify-content:space-between;margin-top:0.5rem">
