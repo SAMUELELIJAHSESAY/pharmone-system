@@ -24,19 +24,32 @@ export async function getTodayDateRange(pharmacyId = null) {
 
 /**
  * Get week date range using server-side timezone calculation
+ * Calculates Monday to Sunday of the current week
  * 
  * @param {string} pharmacyId - Optional pharmacy ID for timezone-aware calculation
  * @returns {Promise<{start: string, end: string}>}
  */
 export async function getWeekDateRange(pharmacyId = null) {
-  // Client-side: Get last 7 days (avoid RPC 404/400 errors)
+  // Client-side: Get Monday to Sunday of current week (resets on Monday)
   const now = new Date();
   const todayUTC = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0, 0));
-  const weekAgoUTC = new Date(todayUTC.getTime() - 7 * 24 * 60 * 60 * 1000);
-  const tomorrowUTC = new Date(todayUTC.getTime() + 24 * 60 * 60 * 1000);
+  
+  // Calculate Monday of the current week
+  const dayOfWeek = todayUTC.getUTCDay(); // 0=Sunday, 1=Monday, etc.
+  const daysToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1; // 0=Sunday go back 6, 1=Monday go back 0
+  
+  const weekStartUTC = new Date(todayUTC);
+  weekStartUTC.setUTCDate(todayUTC.getUTCDate() - daysToMonday);
+  weekStartUTC.setUTCHours(0, 0, 0, 0);
+  
+  // Calculate Sunday of the current week (6 days after Monday)
+  const weekEndUTC = new Date(weekStartUTC);
+  weekEndUTC.setUTCDate(weekStartUTC.getUTCDate() + 7); // End at start of next Monday
+  weekEndUTC.setUTCHours(0, 0, 0, 0);
+  
   return {
-    start: weekAgoUTC.toISOString(),
-    end: tomorrowUTC.toISOString()
+    start: weekStartUTC.toISOString(),
+    end: weekEndUTC.toISOString()
   };
 }
 

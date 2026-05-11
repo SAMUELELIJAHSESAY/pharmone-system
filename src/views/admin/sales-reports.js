@@ -1,5 +1,5 @@
 // Advanced Admin Sales Reports - Daily, Weekly, Monthly with Branch Filtering
-import { getSales, getBranches, getPharmacySettings } from '../../database.js';
+import { getSales, getBranches, getPharmacySettings, enrichSalesWithItems } from '../../database.js';
 import { formatCurrency, formatDate, showToast } from '../../utils.js';
 
 export async function renderAdminSalesReports(container, user) {

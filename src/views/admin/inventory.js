@@ -477,6 +477,8 @@ function bindTableActions(products, user, reload, branchList) {
 
 function showProductModal(product, user, reload, branchList) {
   const isEdit = !!product;
+  // Pre-select the currently viewed branch when adding a new product
+  const preSelectedBranchId = isEdit ? product?.branch_id : selectedBranchId;
   const { overlay, closeModal } = createModal({
     id: 'product-modal',
     title: isEdit ? 'Edit Product' : 'Add New Product',
@@ -486,7 +488,7 @@ function showProductModal(product, user, reload, branchList) {
         <div class="form-group">
           <label class="form-label">Branch *</label>
           <select class="form-select" id="prod-branch" required>
-            ${branchList.map(b => `<option value="${b.id}" ${product?.branch_id === b.id ? 'selected' : ''}>${b.name}</option>`).join('')}
+            ${branchList.map(b => `<option value="${b.id}" ${b.id === preSelectedBranchId ? 'selected' : ''}>${b.name}</option>`).join('')}
           </select>
           <div class="text-xs text-muted" style="margin-top: 0.25rem;">Product will be assigned to this branch only</div>
         </div>
