@@ -1793,3 +1793,73 @@ export async function calculateNetProfit(pharmacyId, branchId = null, startDate,
     profitMargin
   };
 }
+
+// ===================== SALESMAN FEATURES =====================
+/**
+ * Get salesman feature visibility settings for a pharmacy
+ * Returns which features salesman should see (dashboard, sales_history, daily_records, etc.)
+ */
+export async function getSalesmanFeatures(pharmacyId) {
+  try {
+    const { data, error } = await supabase
+      .from('pharmacies')
+      .select('salesman_features')
+      .eq('id', pharmacyId)
+      .single();
+    
+    if (error) throw error;
+    
+    // Return with defaults for any missing features
+    const defaults = {
+      pos: true,
+      customers: true,
+      patients: true,
+      expenses: true,
+      returns_request: true,
+      dashboard: true,
+      sales_history: true,
+      daily_records: true
+    };
+    
+    return { ...defaults, ...data?.salesman_features };
+  } catch (err) {
+    console.error('Error fetching salesman features:', err);
+    throw err;
+  }
+}
+
+/**
+ * Update salesman feature visibility settings for a pharmacy
+ * Only admin can call this (enforced by RLS)
+ */
+export async function updateSalesmanFeatures(pharmacyId, features) {
+  try {
+    if (!pharmacyId) throw new Error('Pharmacy ID is required');
+    if (!features || typeof features !== 'object') throw new Error('Features object is required');
+    
+    // Validate that all required features are present
+    const requiredFeatures = ['pos', 'customers', 'patients', 'expenses', 'returns_request', 'dashboard', 'sales_history', 'daily_records'];
+    const validatedFeatures = {};
+    
+    requiredFeatures.forEach(feat => {
+      validatedFeatures[feat] = Boolean(features[feat]);
+    });
+    
+    const { data, error } = await supabase
+      .from('pharmacies')
+      .update({
+        salesman_features: validatedFeatures,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', pharmacyId)
+      .select('salesman_features')
+      .single();
+    
+    if (error) throw error;
+    
+    return data;
+  } catch (err) {
+    console.error('Error updating salesman features:', err);
+    throw err;
+  }
+}

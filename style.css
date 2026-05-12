@@ -1304,6 +1304,24 @@ tr:hover td { background: var(--gray-50); }
 .feature-label { font-size: 0.875rem; font-weight: 500; color: var(--gray-700); }
 .feature-desc { font-size: 0.75rem; color: var(--gray-400); margin-top: 2px; }
 
+/* ======== FEATURE TOGGLE ITEMS (for salesman features panel) ======== */
+.feature-toggle-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--gray-200);
+  margin-bottom: 0.75rem;
+  background: var(--gray-50);
+  transition: all var(--transition);
+}
+
+.feature-toggle-item:hover { background: var(--gray-100); border-color: var(--gray-300); }
+.feature-toggle-item div:first-child { flex: 1; }
+.feature-toggle-item .feature-name { font-size: 0.875rem; font-weight: 500; color: var(--gray-800); margin-bottom: 0.25rem; }
+.feature-toggle-item .feature-desc { font-size: 0.8rem; color: var(--gray-500); }
+
 /* ======== COMPREHENSIVE RESPONSIVE DESIGN ======== */
 
 /* ======== SMALL PHONES (< 360px) ======== */

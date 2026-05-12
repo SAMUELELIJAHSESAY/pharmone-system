@@ -1,4 +1,4 @@
-export function renderSidebar(user) {
+export function renderSidebar(user, features = null) {
   const role = user.profile?.role || 'salesman';
   const name = user.profile?.full_name || user.email || 'User';
   const initials = name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
@@ -80,37 +80,96 @@ export function renderSidebar(user) {
       <button class="nav-item" data-view="daily-reports">
         <span class="nav-icon">📊</span> Daily Records
       </button>
+      <div class="sidebar-section-label">Configuration</div>
+      <button class="nav-item" data-view="salesman-features">
+        <span class="nav-icon">⚙️</span> Salesman Features
+      </button>
     `;
   } else {
-    navItems = `
-      <div class="sidebar-section-label">Sales</div>
-      <button class="nav-item" data-view="salesman-dashboard">
-        <span class="nav-icon">&#128200;</span> Dashboard
-      </button>
-      <button class="nav-item" data-view="pos">
-        <span class="nav-icon">&#128179;</span> Point of Sale
-      </button>
-      <button class="nav-item" data-view="sales-history">
-        <span class="nav-icon">&#128202;</span> Sales History
-      </button>
-      <button class="nav-item" data-view="daily-reports">
-        <span class="nav-icon">📊</span> Daily Records
-      </button>
-      <button class="nav-item" data-view="customers">
-        <span class="nav-icon">&#128100;</span> Customers
-      </button>
-      <div class="sidebar-section-label">Clinic</div>
-      <button class="nav-item" data-view="patients">
-        <span class="nav-icon">&#128104;</span> Patients
-      </button>
-      <div class="sidebar-section-label">Operations</div>
-      <button class="nav-item" data-view="returns-request">
-        <span class="nav-icon">&#x21A9;</span> Return Requests
-      </button>
-      <button class="nav-item" data-view="expenses">
-        <span class="nav-icon">&#128181;</span> Expenses
-      </button>
-    `;
+    // Salesman navigation with feature filtering
+    // Default to all features enabled for backward compatibility if features not provided
+    const feat = features || {
+      pos: true,
+      customers: true,
+      patients: true,
+      expenses: true,
+      returns_request: true,
+      dashboard: true,
+      sales_history: true,
+      daily_records: true
+    };
+
+    let salesSection = '<div class="sidebar-section-label">Sales</div>';
+    
+    if (feat.dashboard) {
+      salesSection += `
+        <button class="nav-item" data-view="salesman-dashboard">
+          <span class="nav-icon">&#128200;</span> Dashboard
+        </button>
+      `;
+    }
+    
+    if (feat.pos) {
+      salesSection += `
+        <button class="nav-item" data-view="pos">
+          <span class="nav-icon">&#128179;</span> Point of Sale
+        </button>
+      `;
+    }
+    
+    if (feat.sales_history) {
+      salesSection += `
+        <button class="nav-item" data-view="sales-history">
+          <span class="nav-icon">&#128202;</span> Sales History
+        </button>
+      `;
+    }
+    
+    if (feat.daily_records) {
+      salesSection += `
+        <button class="nav-item" data-view="daily-reports">
+          <span class="nav-icon">📊</span> Daily Records
+        </button>
+      `;
+    }
+    
+    if (feat.customers) {
+      salesSection += `
+        <button class="nav-item" data-view="customers">
+          <span class="nav-icon">&#128100;</span> Customers
+        </button>
+      `;
+    }
+    
+    let clinicSection = '';
+    if (feat.patients) {
+      clinicSection = `
+        <div class="sidebar-section-label">Clinic</div>
+        <button class="nav-item" data-view="patients">
+          <span class="nav-icon">&#128104;</span> Patients
+        </button>
+      `;
+    }
+    
+    let operationsSection = '<div class="sidebar-section-label">Operations</div>';
+    
+    if (feat.returns_request) {
+      operationsSection += `
+        <button class="nav-item" data-view="returns-request">
+          <span class="nav-icon">&#x21A9;</span> Return Requests
+        </button>
+      `;
+    }
+    
+    if (feat.expenses) {
+      operationsSection += `
+        <button class="nav-item" data-view="expenses">
+          <span class="nav-icon">&#128181;</span> Expenses
+        </button>
+      `;
+    }
+    
+    navItems = salesSection + clinicSection + operationsSection;
   }
 
   const roleLabel = {
