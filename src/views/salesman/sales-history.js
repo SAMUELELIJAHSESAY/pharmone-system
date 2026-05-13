@@ -279,35 +279,35 @@ function renderSalesHistoryView(container, sales, user, pharmacyId, branchId) {
 
         <div style="border-top:1px dashed;border-bottom:1px dashed;padding:0.75rem 0;margin:1rem 0;font-size:0.85rem">
           <div style="display:flex;justify-content:space-between;font-weight:bold">
-            <span>ITEM</span>
-            <span>QTY</span>
-            <span>PRICE</span>
-            <span>TOTAL</span>
+            <span style="flex:1">ITEM</span>
+            <span style="width:50px;text-align:center">QTY</span>
+            <span style="width:70px;text-align:right">Price</span>
+            <span style="width:70px;text-align:right">Amount</span>
           </div>
           ${items.map(item => `
             <div style="display:flex;justify-content:space-between;margin-top:0.5rem">
               <span style="flex:1">${item.product_name}</span>
               <span style="width:50px;text-align:center">${item.quantity}</span>
-              <span style="width:70px;text-align:right">${currencySymbol}${parseFloat(item.unit_price).toFixed(2)}</span>
-              <span style="width:70px;text-align:right">${currencySymbol}${parseFloat(item.total_price).toFixed(2)}</span>
+              <span style="width:70px;text-align:right">${parseFloat(item.unit_price).toFixed(2)}</span>
+              <span style="width:70px;text-align:right">${parseFloat(item.total_price).toFixed(2)}</span>
             </div>
           `).join('')}
         </div>
 
         <div style="font-size:0.85rem;margin:1rem 0">
           <div style="display:flex;justify-content:space-between;padding:0.25rem 0">
-            <span>Subtotal:</span>
-            <strong>${currencySymbol}${items.reduce((sum, i) => sum + parseFloat(i.total_price), 0).toFixed(2)}</strong>
+            <span>Subtotal (${currencySymbol}):</span>
+            <strong>${items.reduce((sum, i) => sum + parseFloat(i.total_price), 0).toFixed(2)}</strong>
           </div>
           ${sale.discount > 0 ? `
             <div style="display:flex;justify-content:space-between;padding:0.25rem 0;color:var(--green-600)">
-              <span>Discount:</span>
-              <strong>-${currencySymbol}${parseFloat(sale.discount).toFixed(2)}</strong>
+              <span>Discount (${currencySymbol}):</span>
+              <strong>-${parseFloat(sale.discount).toFixed(2)}</strong>
             </div>
           ` : ''}
           <div style="display:flex;justify-content:space-between;padding:0.25rem 0;font-weight:bold;font-size:1rem;border-top:1px solid;margin-top:0.5rem;padding-top:0.5rem">
-            <span>TOTAL:</span>
-            <strong>${currencySymbol}${parseFloat(sale.total_amount).toFixed(2)}</strong>
+            <span>TOTAL (${currencySymbol}):</span>
+            <strong>${parseFloat(sale.total_amount).toFixed(2)}</strong>
           </div>
         </div>
 

@@ -11,54 +11,46 @@ export { supabase }; // Export supabase for use in other modules
  * @returns {Promise<{start: string, end: string, dateStr: string}>}
  */
 export async function getTodayDateRange(pharmacyId = null) {
-  // Use Postgres to calculate today's date range server-side
-  // This ensures accuracy regardless of client timezone
-  let query = supabase.rpc('get_today_date_range', { pharmacy_id: pharmacyId });
-  
-  const { data, error } = await query;
-  
-  if (error) {
-    console.warn('Error getting timezone-aware date range:', error);
-    // Fallback to UTC if timezone lookup fails
-    const now = new Date();
-    const todayUTC = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0, 0));
-    const tomorrowUTC = new Date(todayUTC.getTime() + 24 * 60 * 60 * 1000);
-    return {
-      start: todayUTC.toISOString(),
-      end: tomorrowUTC.toISOString(),
-      dateStr: todayUTC.toISOString().split('T')[0]
-    };
-  }
-  
-  return data;
+  // Client-side date calculation (avoid RPC issues)
+  const now = new Date();
+  const todayUTC = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0, 0));
+  const tomorrowUTC = new Date(todayUTC.getTime() + 24 * 60 * 60 * 1000);
+  return {
+    start: todayUTC.toISOString(),
+    end: tomorrowUTC.toISOString(),
+    dateStr: todayUTC.toISOString().split('T')[0]
+  };
 }
 
 /**
  * Get week date range using server-side timezone calculation
+ * Calculates Monday to Sunday of the current week
  * 
  * @param {string} pharmacyId - Optional pharmacy ID for timezone-aware calculation
  * @returns {Promise<{start: string, end: string}>}
  */
 export async function getWeekDateRange(pharmacyId = null) {
-  // Use Postgres to calculate week date range server-side
-  let query = supabase.rpc('get_week_date_range', { pharmacy_id: pharmacyId });
+  // Client-side: Get Monday to Sunday of current week (resets on Monday)
+  const now = new Date();
+  const todayUTC = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0, 0));
   
-  const { data, error } = await query;
+  // Calculate Monday of the current week
+  const dayOfWeek = todayUTC.getUTCDay(); // 0=Sunday, 1=Monday, etc.
+  const daysToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1; // 0=Sunday go back 6, 1=Monday go back 0
   
-  if (error) {
-    console.warn('Error getting week date range:', error);
-    // Fallback to UTC if timezone lookup fails
-    const now = new Date();
-    const todayUTC = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0, 0));
-    const weekAgoUTC = new Date(todayUTC.getTime() - 7 * 24 * 60 * 60 * 1000);
-    const tomorrowUTC = new Date(todayUTC.getTime() + 24 * 60 * 60 * 1000);
-    return {
-      start: weekAgoUTC.toISOString(),
-      end: tomorrowUTC.toISOString()
-    };
-  }
+  const weekStartUTC = new Date(todayUTC);
+  weekStartUTC.setUTCDate(todayUTC.getUTCDate() - daysToMonday);
+  weekStartUTC.setUTCHours(0, 0, 0, 0);
   
-  return data;
+  // Calculate Sunday of the current week (6 days after Monday)
+  const weekEndUTC = new Date(weekStartUTC);
+  weekEndUTC.setUTCDate(weekStartUTC.getUTCDate() + 7); // End at start of next Monday
+  weekEndUTC.setUTCHours(0, 0, 0, 0);
+  
+  return {
+    start: weekStartUTC.toISOString(),
+    end: weekEndUTC.toISOString()
+  };
 }
 
 /**
@@ -68,26 +60,16 @@ export async function getWeekDateRange(pharmacyId = null) {
  * @returns {Promise<{start: string, end: string}>}
  */
 export async function getMonthDateRange(pharmacyId = null) {
-  // Use Postgres to calculate month date range server-side
-  let query = supabase.rpc('get_month_date_range', { pharmacy_id: pharmacyId });
-  
-  const { data, error } = await query;
-  
-  if (error) {
-    console.warn('Error getting month date range:', error);
-    // Fallback to UTC if timezone lookup fails
-    const now = new Date();
-    const year = now.getUTCFullYear();
-    const month = now.getUTCMonth();
-    const monthStartUTC = new Date(Date.UTC(year, month, 1, 0, 0, 0, 0));
-    const tomorrowUTC = new Date(Date.UTC(year, month, new Date(Date.UTC(year, month + 1, 0)).getUTCDate() + 1, 0, 0, 0, 0));
-    return {
-      start: monthStartUTC.toISOString(),
-      end: tomorrowUTC.toISOString()
-    };
-  }
-  
-  return data;
+  // Client-side: Get current month (avoid RPC 400 error)
+  const now = new Date();
+  const year = now.getUTCFullYear();
+  const month = now.getUTCMonth();
+  const monthStartUTC = new Date(Date.UTC(year, month, 1, 0, 0, 0, 0));
+  const tomorrowUTC = new Date(Date.UTC(year, month, new Date(Date.UTC(year, month + 1, 0)).getUTCDate() + 1, 0, 0, 0, 0));
+  return {
+    start: monthStartUTC.toISOString(),
+    end: tomorrowUTC.toISOString()
+  };
 }
 
 /**
@@ -97,25 +79,15 @@ export async function getMonthDateRange(pharmacyId = null) {
  * @returns {Promise<{start: string, end: string}>}
  */
 export async function getYearDateRange(pharmacyId = null) {
-  // Use Postgres to calculate year date range server-side
-  let query = supabase.rpc('get_year_date_range', { pharmacy_id: pharmacyId });
-  
-  const { data, error } = await query;
-  
-  if (error) {
-    console.warn('Error getting year date range:', error);
-    // Fallback to UTC if timezone lookup fails
-    const now = new Date();
-    const year = now.getUTCFullYear();
-    const yearStartUTC = new Date(Date.UTC(year, 0, 1, 0, 0, 0, 0));
-    const yearEndUTC = new Date(Date.UTC(year, 11, 31, 23, 59, 59, 999));
-    return {
-      start: yearStartUTC.toISOString(),
-      end: yearEndUTC.toISOString()
-    };
-  }
-  
-  return data;
+  // Client-side: Get current year (avoid RPC 400 error)
+  const now = new Date();
+  const year = now.getUTCFullYear();
+  const yearStartUTC = new Date(Date.UTC(year, 0, 1, 0, 0, 0, 0));
+  const yearEndUTC = new Date(Date.UTC(year, 11, 31, 23, 59, 59, 999));
+  return {
+    start: yearStartUTC.toISOString(),
+    end: yearEndUTC.toISOString()
+  };
 }
 
 // ===================== PHARMACIES =====================
@@ -331,7 +303,10 @@ export async function getSaleItems(saleId) {
     .from('sale_items')
     .select('*')
     .eq('sale_id', saleId);
-  if (error) throw error;
+  if (error) {
+    console.error(`Error fetching sale_items for ${saleId}:`, error);
+    throw error;
+  }
   return data || [];
 }
 
@@ -339,31 +314,54 @@ export async function enrichSalesWithItems(sales) {
   if (!sales || sales.length === 0) return sales;
   
   try {
+    console.log(`[enrichSalesWithItems] Enriching ${sales.length} sales with items`);
+    
+    // Batch fetch items to avoid URL length limits (batch size: 50 sales per query)
     const saleIds = sales.map(s => s.id);
-    const { data: allItems, error } = await supabase
-      .from('sale_items')
-      .select('*')
-      .in('sale_id', saleIds);
+    const batchSize = 50;
+    const itemsBySaleId = {};
+    let totalItems = 0;
     
-    if (error) throw error;
-    
-    // Group items by sale_id
-    const itemsMap = {};
-    (allItems || []).forEach(item => {
-      if (!itemsMap[item.sale_id]) {
-        itemsMap[item.sale_id] = [];
-      }
-      itemsMap[item.sale_id].push(item);
-    });
+    for (let i = 0; i < saleIds.length; i += batchSize) {
+      const batch = saleIds.slice(i, i + batchSize);
+      const { data: batchItems, error: itemsError } = await supabase
+        .from('sale_items')
+        .select('*')
+        .in('sale_id', batch);
+      
+      if (itemsError) throw itemsError;
+      
+      // Map batch items by sale_id
+      (batchItems || []).forEach(item => {
+        if (!itemsBySaleId[item.sale_id]) {
+          itemsBySaleId[item.sale_id] = [];
+        }
+        itemsBySaleId[item.sale_id].push(item);
+        totalItems++;
+      });
+    }
     
     // Attach items to sales
+    const enrichedSales = sales.map(sale => ({
+      ...sale,
+      sale_items: itemsBySaleId[sale.id] || []
+    }));
+    
+    const numBatches = Math.ceil(saleIds.length / batchSize);
+    console.log(`[enrichSalesWithItems] Success - ${totalItems} total items across ${enrichedSales.length} sales (${numBatches} batches instead of ${enrichedSales.length} individual queries)`);
+    
+    return enrichedSales;
+  } catch (err) {
+    console.error('[enrichSalesWithItems] Error enriching sales:', {
+      error: err,
+      message: err.message,
+      salesCount: sales?.length
+    });
+    // Return sales with empty items array if enrichment fails
     return sales.map(sale => ({
       ...sale,
-      sale_items: itemsMap[sale.id] || []
+      sale_items: sale.sale_items || []
     }));
-  } catch (err) {
-    console.error('Error enriching sales with items:', err);
-    return sales;
   }
 }
 
@@ -1794,4 +1792,74 @@ export async function calculateNetProfit(pharmacyId, branchId = null, startDate,
     netProfit,
     profitMargin
   };
+}
+
+// ===================== SALESMAN FEATURES =====================
+/**
+ * Get salesman feature visibility settings for a pharmacy
+ * Returns which features salesman should see (dashboard, sales_history, daily_records, etc.)
+ */
+export async function getSalesmanFeatures(pharmacyId) {
+  try {
+    const { data, error } = await supabase
+      .from('pharmacies')
+      .select('salesman_features')
+      .eq('id', pharmacyId)
+      .single();
+    
+    if (error) throw error;
+    
+    // Return with defaults for any missing features
+    const defaults = {
+      pos: true,
+      customers: true,
+      patients: true,
+      expenses: true,
+      returns_request: true,
+      dashboard: true,
+      sales_history: true,
+      daily_records: true
+    };
+    
+    return { ...defaults, ...data?.salesman_features };
+  } catch (err) {
+    console.error('Error fetching salesman features:', err);
+    throw err;
+  }
+}
+
+/**
+ * Update salesman feature visibility settings for a pharmacy
+ * Only admin can call this (enforced by RLS)
+ */
+export async function updateSalesmanFeatures(pharmacyId, features) {
+  try {
+    if (!pharmacyId) throw new Error('Pharmacy ID is required');
+    if (!features || typeof features !== 'object') throw new Error('Features object is required');
+    
+    // Validate that all required features are present
+    const requiredFeatures = ['pos', 'customers', 'patients', 'expenses', 'returns_request', 'dashboard', 'sales_history', 'daily_records'];
+    const validatedFeatures = {};
+    
+    requiredFeatures.forEach(feat => {
+      validatedFeatures[feat] = Boolean(features[feat]);
+    });
+    
+    const { data, error } = await supabase
+      .from('pharmacies')
+      .update({
+        salesman_features: validatedFeatures,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', pharmacyId)
+      .select('salesman_features')
+      .single();
+    
+    if (error) throw error;
+    
+    return data;
+  } catch (err) {
+    console.error('Error updating salesman features:', err);
+    throw err;
+  }
 }

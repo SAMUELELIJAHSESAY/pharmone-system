@@ -63,7 +63,7 @@ export async function renderAdminDashboard(container, user) {
               <div class="stat-card-icon blue">&#128200;</div>
             </div>
             <div class="stat-card-value">${formatCurrency(stats.weekRevenue)}</div>
-            <div class="stat-card-change">Last 7 days</div>
+            <div class="stat-card-change">This week (Mon-Sun)</div>
           </div>
           <div class="stat-card">
             <div class="stat-card-header">

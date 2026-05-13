@@ -1,6 +1,7 @@
 import { signOut } from '../auth.js';
 import { renderSidebar } from '../components/sidebar.js';
-import { getPharmacySettings } from '../database.js';
+import { getPharmacySettings, getSalesmanFeatures } from '../database.js';
+import { createThemeToggle, initThemeToggle } from '../components/theme-toggle.js';
 import { renderSuperAdminDashboard } from './super-admin/dashboard.js';
 import { renderAdminDashboard } from './admin/dashboard.js';
 import { renderInventory } from './admin/inventory.js';
@@ -20,6 +21,7 @@ import { renderAlerts } from './admin/alerts.js';
 import { renderPatientManagementView } from './admin/patients.js';
 import { renderExpenseManagement } from './admin/expenses.js';
 import { renderStockTransfers } from './admin/stock-transfers.js';
+import { renderSalesmanFeatures } from './admin/salesman-features.js';
 import { renderSalesmanDashboard } from './salesman/dashboard.js';
 import { renderPOS } from './salesman/pos.js';
 import { renderSalesHistory } from './salesman/sales-history.js';
@@ -33,6 +35,7 @@ import { showProfileModal } from '../components/profile.js';
 let currentUser = null;
 let currentView = null;
 let currentParams = {};
+let currentSalesmanFeatures = null; // Store salesman features globally
 
 export function renderApp(user) {
   currentUser = user;
@@ -45,13 +48,37 @@ export function renderApp(user) {
         window.pharmacySettings = settings || { currency_symbol: 'Le', currency_code: 'NLE' };
       })
       .catch(err => console.error('Failed to load pharmacy settings:', err));
+
+    // Load salesman features for feature-based navigation filtering
+    if (role === 'salesman') {
+      getSalesmanFeatures(user.profile.pharmacy_id)
+        .then(features => {
+          currentSalesmanFeatures = features;
+          // Update sidebar with features-filtered navigation
+          updateSidebarWithFeatures(features);
+        })
+        .catch(err => {
+          console.error('Failed to load salesman features:', err);
+          // Continue with defaults
+          currentSalesmanFeatures = {
+            pos: true,
+            customers: true,
+            patients: true,
+            expenses: true,
+            returns_request: true,
+            dashboard: true,
+            sales_history: true,
+            daily_records: true
+          };
+        });
+    }
   }
 
   document.getElementById('app').innerHTML = `
     <div class="app-shell">
       <div class="sidebar-backdrop" id="sidebar-backdrop"></div>
       <aside class="sidebar" id="sidebar">
-        ${renderSidebar(user)}
+        ${renderSidebar(user, null)}
       </aside>
       <div class="main-content">
         <header class="topbar">
@@ -65,7 +92,8 @@ export function renderApp(user) {
               <span style="color:var(--gray-400);font-size:0.9rem">&#128269;</span>
               <input type="text" id="global-search" placeholder="Search..." />
             </div>
-            <button class="btn btn-ghost btn-sm" id="profile-btn" style="display:flex;align-items:center;gap:0.5rem">
+            ${createThemeToggle()}
+            <button class="btn btn-ghost btn-sm" id="profile-btn" style="display:inline-flex;align-items:center;gap:0.5rem;cursor:pointer;padding:0.5rem 0.75rem">
               <span>👤</span>
               <span>My Account</span>
             </button>
@@ -83,9 +111,20 @@ export function renderApp(user) {
     await signOut();
   });
 
-  document.getElementById('profile-btn').addEventListener('click', async () => {
-    await showProfileModal(currentUser);
+  document.getElementById('profile-btn').addEventListener('click', async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    console.log('Profile button clicked, currentUser:', currentUser);
+    try {
+      await showProfileModal(currentUser);
+      console.log('Profile modal shown');
+    } catch (err) {
+      console.error('Error showing profile modal:', err);
+    }
   });
+
+  // Initialize theme toggle
+  initThemeToggle();
 
   document.getElementById('mobile-menu-btn').addEventListener('click', () => {
     document.getElementById('sidebar').classList.toggle('open');
@@ -145,6 +184,34 @@ export function renderApp(user) {
   });
 }
 
+/**
+ * Update sidebar with feature-filtered navigation for salesman
+ * Called after features are loaded from database
+ */
+function updateSidebarWithFeatures(features) {
+  const sidebarNav = document.querySelector('.sidebar-nav');
+  if (!sidebarNav && currentUser) {
+    sidebarNav.innerHTML = renderSidebar(currentUser, features).match(/<nav class="sidebar-nav">([\s\S]*?)<\/nav>/)?.[1] || '';
+    // Re-attach click handlers to new nav items
+    document.querySelectorAll('.nav-item').forEach(item => {
+      item.addEventListener('click', () => {
+        const view = item.dataset.view;
+        if (view) navigate(view);
+        document.getElementById('sidebar').classList.remove('open');
+      });
+    });
+  }
+}
+
+/**
+ * Check if a salesman feature is enabled
+ * Used to prevent navigation to restricted views
+ */
+export function isSalesmanFeatureEnabled(featureName) {
+  if (!currentSalesmanFeatures) return true; // Default to enabled if not loaded yet
+  return currentSalesmanFeatures[featureName] !== false;
+}
+
 export function navigate(view, params = {}) {
   currentView = view;
   currentParams = params;
@@ -162,6 +229,39 @@ export function navigate(view, params = {}) {
   if (!content) return;
 
   content.innerHTML = '<div class="loading-spinner"></div>';
+
+  // Check if salesman is trying to access a disabled feature
+  if (currentUser.profile?.role === 'salesman') {
+    const featureMapping = {
+      'salesman-dashboard': 'dashboard',
+      'sales-history': 'sales_history',
+      'daily-reports': 'daily_records',
+      'pos': 'pos',
+      'customers': 'customers',
+      'patients': 'patients',
+      'expenses': 'expenses',
+      'returns-request': 'returns_request'
+    };
+    
+    const requiredFeature = featureMapping[view];
+    if (requiredFeature && !isSalesmanFeatureEnabled(requiredFeature)) {
+      content.innerHTML = `
+        <div class="animate-in">
+          <div style="padding: 2rem; text-align: center;">
+            <div style="font-size: 3rem; margin-bottom: 1rem">🔒</div>
+            <div style="font-size: 1.5rem; font-weight: 600; margin-bottom: 0.5rem">Access Denied</div>
+            <div style="color: var(--gray-600); margin-bottom: 2rem">This feature is not available for your account. Please contact your administrator.</div>
+            <button class="btn btn-primary" onclick="(async () => {
+              const { navigate } = await import('./app.js');
+              navigate('pos');
+            })()">Go to Point of Sale</button>
+          </div>
+        </div>
+      `;
+      if (titleEl) titleEl.textContent = 'Access Denied';
+      return;
+    }
+  }
 
   const titles = {
     'super-dashboard': 'Overview',
@@ -189,6 +289,7 @@ export function navigate(view, params = {}) {
     'pos': 'Point of Sale',
     'sales-history': 'My Sales History',
     'returns-request': 'Return Requests',
+    'salesman-features': 'Salesman Features',
   };
 
   if (titleEl) titleEl.textContent = titles[view] || 'Dashboard';
@@ -224,6 +325,7 @@ export function navigate(view, params = {}) {
     case 'pos': renderPOS(content, currentUser); break;
     case 'sales-history': renderSalesHistory(content, currentUser); break;
     case 'returns-request': renderSalesmanReturnsRequest(content, currentUser); break;
+    case 'salesman-features': renderSalesmanFeatures(content, currentUser); break;
     default: content.innerHTML = '<div class="empty-state"><div class="empty-state-icon">&#128269;</div><div class="empty-state-title">Page not found</div></div>';
   }
 }
