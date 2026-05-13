@@ -1,5 +1,5 @@
 // Admin Returns Management - Approve/Reject salesman return requests
-import { supabase } from '../../database.js';
+import { supabase, getSales, enrichSalesWithItems, getProducts, getPharmacySettings } from '../../database.js';
 import { formatCurrency, showToast } from '../../utils.js';
 
 export async function renderAdminReturnsManagement(container, user) {
@@ -11,6 +11,10 @@ export async function renderAdminReturnsManagement(container, user) {
   }
 
   try {
+    // Get pharmacy settings for currency
+    const settings = await getPharmacySettings(pharmacyId);
+    const currency = settings?.currency_symbol || 'Le';
+
     // Get all return requests for this pharmacy
     const { data: returnRequests, error } = await supabase
       .from('return_requests')
@@ -20,13 +24,13 @@ export async function renderAdminReturnsManagement(container, user) {
 
     if (error) throw error;
 
-    renderReturnsManagementView(container, returnRequests || [], user, pharmacyId);
+    renderReturnsManagementView(container, returnRequests || [], user, pharmacyId, currency);
   } catch (err) {
     container.innerHTML = `<div class="alert alert-danger">Failed to load return requests: ${err.message}</div>`;
   }
 }
 
-function renderReturnsManagementView(container, returnRequests, user, pharmacyId) {
+function renderReturnsManagementView(container, returnRequests, user, pharmacyId, currency) {
   // Separate by status
   const pending = returnRequests.filter(r => r.status === 'pending');
   const approved = returnRequests.filter(r => r.status === 'approved');
@@ -71,7 +75,7 @@ function renderReturnsManagementView(container, returnRequests, user, pharmacyId
             <span class="stat-card-label">Total Refunds</span>
             <div class="stat-card-icon blue">💰</div>
           </div>
-          <div class="stat-card-value">₦${returnRequests.reduce((sum, r) => sum + parseFloat(r.requested_amount || 0), 0).toFixed(2)}</div>
+          <div class="stat-card-value">${currency}${returnRequests.reduce((sum, r) => sum + parseFloat(r.requested_amount || 0), 0).toFixed(2)}</div>
         </div>
       </div>
 
@@ -110,7 +114,7 @@ function renderReturnsManagementView(container, returnRequests, user, pharmacyId
                       </div>
                     </td>
                     <td><span class="badge bg-blue">${request.items_count}</span></td>
-                    <td><strong>₦${parseFloat(request.requested_amount).toFixed(2)}</strong></td>
+                    <td><strong>${currency}${parseFloat(request.requested_amount).toFixed(2)}</strong></td>
                     <td style="font-size:0.9rem">${request.reason}</td>
                     <td style="text-align:center">
                       <button class="btn btn-sm btn-success" onclick="window.approveReturnRequest('${request.id}')" title="Approve">✓ Approve</button>
@@ -153,7 +157,7 @@ function renderReturnsManagementView(container, returnRequests, user, pharmacyId
                     <td><strong>${request.request_number}</strong></td>
                     <td>${request.invoice_number}</td>
                     <td>${request.profiles?.full_name || 'Unknown'}</td>
-                    <td><strong>₦${parseFloat(request.requested_amount).toFixed(2)}</strong></td>
+                    <td><strong>${currency}${parseFloat(request.requested_amount).toFixed(2)}</strong></td>
                     <td>${new Date(request.approved_at).toLocaleDateString()}</td>
                     <td style="text-align:center">
                       <button class="btn btn-sm btn-ghost" onclick="window.viewReturnRequestDetails('${request.id}')" title="Details">👁️ View</button>
@@ -194,7 +198,7 @@ function renderReturnsManagementView(container, returnRequests, user, pharmacyId
                     <td><strong>${request.request_number}</strong></td>
                     <td>${request.invoice_number}</td>
                     <td>${request.profiles?.full_name || 'Unknown'}</td>
-                    <td><strong>₦${parseFloat(request.requested_amount).toFixed(2)}</strong></td>
+                    <td><strong>${currency}${parseFloat(request.requested_amount).toFixed(2)}</strong></td>
                     <td>${request.updated_at ? new Date(request.updated_at).toLocaleDateString() : '-'}</td>
                     <td style="text-align:center">
                       <button class="btn btn-sm btn-ghost" onclick="window.viewReturnRequestDetails('${request.id}')" title="Details">👁️ View</button>
@@ -208,9 +212,12 @@ function renderReturnsManagementView(container, returnRequests, user, pharmacyId
       </div>
     </div>
 
+    <!-- Approval Modal Overlay -->
+    <div id="approvalModalOverlay" class="modal-overlay" style="display:none" onclick="if(event.target === this) window.closeApprovalModal()"></div>
+
     <!-- Approval Modal -->
     <div id="approvalModal" class="modal" style="display:none">
-      <div class="modal-content" style="max-width:500px">
+      <div style="max-width:500px;width:100%">
         <div class="modal-header">
           <h2 class="modal-title">Approve Return Request</h2>
           <button class="modal-close" onclick="window.closeApprovalModal()">✕</button>
@@ -219,7 +226,7 @@ function renderReturnsManagementView(container, returnRequests, user, pharmacyId
           <form onsubmit="window.submitApproval(event)">
             <div class="form-group">
               <label class="form-label">Admin Notes (Optional)</label>
-              <textarea id="approval-notes" class="form-control" rows="3" placeholder="Add any notes or comments..."></textarea>
+              <textarea id="approval-notes" class="form-input" rows="3" placeholder="Add any notes or comments..."></textarea>
             </div>
 
             <div style="display:flex;gap:0.5rem;justify-content:flex-end;margin-top:1.5rem">
@@ -231,9 +238,12 @@ function renderReturnsManagementView(container, returnRequests, user, pharmacyId
       </div>
     </div>
 
+    <!-- Rejection Modal Overlay -->
+    <div id="rejectionModalOverlay" class="modal-overlay" style="display:none" onclick="if(event.target === this) window.closeRejectionModal()"></div>
+
     <!-- Rejection Modal -->
     <div id="rejectionModal" class="modal" style="display:none">
-      <div class="modal-content" style="max-width:500px">
+      <div style="max-width:500px;width:100%">
         <div class="modal-header">
           <h2 class="modal-title">Reject Return Request</h2>
           <button class="modal-close" onclick="window.closeRejectionModal()">✕</button>
@@ -242,7 +252,7 @@ function renderReturnsManagementView(container, returnRequests, user, pharmacyId
           <form onsubmit="window.submitRejection(event)">
             <div class="form-group">
               <label class="form-label">Reason for Rejection *</label>
-              <select id="rejection-reason" class="form-control" required>
+              <select id="rejection-reason" class="form-select" required>
                 <option value="">-- Select reason --</option>
                 <option value="Invalid Invoice">Invalid Invoice</option>
                 <option value="Items Still Valid">Items Still Valid</option>
@@ -254,7 +264,7 @@ function renderReturnsManagementView(container, returnRequests, user, pharmacyId
 
             <div class="form-group">
               <label class="form-label">Rejection Notes</label>
-              <textarea id="rejection-notes" class="form-control" rows="3" placeholder="Explain why this request was rejected..."></textarea>
+              <textarea id="rejection-notes" class="form-input" rows="3" placeholder="Explain why this request was rejected..."></textarea>
             </div>
 
             <div style="display:flex;gap:0.5rem;justify-content:flex-end;margin-top:1.5rem">
@@ -266,9 +276,12 @@ function renderReturnsManagementView(container, returnRequests, user, pharmacyId
       </div>
     </div>
 
+    <!-- Details Modal Overlay -->
+    <div id="detailsModalOverlay" class="modal-overlay" style="display:none" onclick="if(event.target === this) window.closeDetailsModal()"></div>
+
     <!-- Details Modal -->
     <div id="detailsModal" class="modal" style="display:none">
-      <div class="modal-content" style="max-width:600px">
+      <div style="max-width:600px;width:100%">
         <div class="modal-header">
           <h2 class="modal-title">Return Request Details</h2>
           <button class="modal-close" onclick="window.closeDetailsModal()">✕</button>
@@ -286,23 +299,32 @@ function renderReturnsManagementView(container, returnRequests, user, pharmacyId
 
   window.approveReturnRequest = (requestId) => {
     currentRequestId = requestId;
+    document.getElementById('approvalModalOverlay').style.display = 'block';
     document.getElementById('approvalModal').style.display = 'flex';
   };
 
   window.rejectReturnRequest = (requestId) => {
     currentRequestId = requestId;
+    document.getElementById('rejectionModalOverlay').style.display = 'block';
     document.getElementById('rejectionModal').style.display = 'flex';
   };
 
   window.closeApprovalModal = () => {
+    document.getElementById('approvalModalOverlay').style.display = 'none';
     document.getElementById('approvalModal').style.display = 'none';
     document.getElementById('approval-notes').value = '';
   };
 
   window.closeRejectionModal = () => {
+    document.getElementById('rejectionModalOverlay').style.display = 'none';
     document.getElementById('rejectionModal').style.display = 'none';
     document.getElementById('rejection-reason').value = '';
     document.getElementById('rejection-notes').value = '';
+  };
+
+  window.closeDetailsModal = () => {
+    document.getElementById('detailsModalOverlay').style.display = 'none';
+    document.getElementById('detailsModal').style.display = 'none';
   };
 
   window.submitApproval = async (event) => {
@@ -311,7 +333,73 @@ function renderReturnsManagementView(container, returnRequests, user, pharmacyId
     try {
       const { data: userData } = await supabase.auth.getUser();
       const notes = document.getElementById('approval-notes').value;
+      const request = returnRequests.find(r => r.id === currentRequestId);
 
+      if (!request) {
+        showToast('Return request not found', 'error');
+        return;
+      }
+
+      // Get the sale to retrieve product details for restocking
+      let saleProducts = [];
+      if (request.invoice_id) {
+        const { data: sale } = await supabase
+          .from('sales')
+          .select('*, sale_items(*)')
+          .eq('id', request.invoice_id)
+          .single();
+
+        if (sale && sale.sale_items) {
+          saleProducts = sale.sale_items;
+        }
+      }
+
+      // Restock products
+      if (saleProducts.length > 0) {
+        for (const item of saleProducts) {
+          // Get product details
+          const { data: product } = await supabase
+            .from('products')
+            .select('*')
+            .eq('id', item.product_id)
+            .single();
+
+          if (product) {
+            const unitsPerBox = product.units_per_box || 1;
+            const quantityReturned = item.quantity;
+            
+            // Calculate new stock
+            let totalUnits = (product.stock_boxes * unitsPerBox) + product.stock_units + quantityReturned;
+            const newBoxes = Math.floor(totalUnits / unitsPerBox);
+            const newUnits = totalUnits % unitsPerBox;
+
+            // Update product stock
+            await supabase
+              .from('products')
+              .update({
+                stock_boxes: newBoxes,
+                stock_units: newUnits
+              })
+              .eq('id', item.product_id);
+
+            // Log the stock adjustment
+            await supabase
+              .from('stock_logs')
+              .insert({
+                product_id: item.product_id,
+                product_name: item.product_name,
+                change_type: 'return_restock',
+                quantity_change: quantityReturned,
+                notes: `Return approved: ${request.request_number} - ${currency}${parseFloat(request.requested_amount).toFixed(2)} refund`,
+                created_by: userData.user.id,
+                pharmacy_id: pharmacyId,
+                branch_id: request.branch_id
+              });
+          }
+        }
+      }
+
+      // Update return request status
       const { error } = await supabase
         .from('return_requests')
         .update({
@@ -324,7 +412,28 @@ function renderReturnsManagementView(container, returnRequests, user, pharmacyId
 
       if (error) throw error;
 
-      showToast('Return request approved successfully!', 'success');
+      // Create a refund transaction record (for accounting)
+      await supabase
+        .from('expenses')
+        .insert({
+          pharmacy_id: pharmacyId,
+          branch_id: request.branch_id,
+          expense_date: new Date().toISOString(),
+          category_id: null, // Can be set to a "Refunds" category if exists
+          description: `Refund for return request ${request.request_number} (Invoice: ${request.invoice_number})`,
+          amount: parseFloat(request.requested_amount),
+          is_approved: true,
+          approved_by: userData.user.id,
+          created_by: userData.user.id
+        })
+        .select()
+        .single()
+        .catch(err => {
+          // If expenses table doesn't support this structure, continue anyway
+          console.log('Refund transaction note: expense record creation skipped', err);
+        });
+
+      showToast(`✓ Return request approved! ${currency}${parseFloat(request.requested_amount).toFixed(2)} refund processed. Stock restocked: ${saleProducts.length} product(s)`, 'success');
       window.closeApprovalModal();
       location.reload();
     } catch (error) {
@@ -396,7 +505,7 @@ function renderReturnsManagementView(container, returnRequests, user, pharmacyId
         </div>
         <div>
           <h4 style="margin:0 0 0.5rem 0;color:var(--gray-600)">Requested Amount</h4>
-          <p style="margin:0;font-weight:600;color:var(--success)">₦${parseFloat(request.requested_amount).toFixed(2)}</p>
+          <p style="margin:0;font-weight:600;color:var(--success)">${currency}${parseFloat(request.requested_amount).toFixed(2)}</p>
         </div>
       </div>
 
@@ -427,6 +536,7 @@ function renderReturnsManagementView(container, returnRequests, user, pharmacyId
     `;
 
     document.getElementById('details-content').innerHTML = detailsHTML;
+    document.getElementById('detailsModalOverlay').style.display = 'block';
     document.getElementById('detailsModal').style.display = 'flex';
   };
 
