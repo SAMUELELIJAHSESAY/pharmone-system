@@ -1,5 +1,5 @@
 // Salesman Returns Request - Request returns with admin approval workflow
-import { getSales, enrichSalesWithItems, getCustomers, supabase } from '../../database.js';
+import { getSales, enrichSalesWithItems, getCustomers, getPharmacySettings, supabase } from '../../database.js';
 import { formatCurrency, showToast, formatUTCDate } from '../../utils.js';
 
 export async function renderSalesmanReturnsRequest(container, user) {
@@ -13,6 +13,10 @@ export async function renderSalesmanReturnsRequest(container, user) {
   }
 
   try {
+    // Get pharmacy settings for currency
+    const settings = await getPharmacySettings(pharmacyId);
+    const currency = settings?.currency_symbol || 'Le';
+
     // Get sales for this salesman in their branch
     const salesData = await getSales(pharmacyId, 500);
     const allSales = await enrichSalesWithItems(salesData);
@@ -28,13 +32,13 @@ export async function renderSalesmanReturnsRequest(container, user) {
       .eq('requested_by', userId)
       .order('created_at', { ascending: false });
 
-    renderReturnsRequestView(container, salesmanSales, returnRequests || [], user, pharmacyId, branchId);
+    renderReturnsRequestView(container, salesmanSales, returnRequests || [], user, pharmacyId, branchId, currency);
   } catch (err) {
     container.innerHTML = `<div class="alert alert-danger">Failed to load returns: ${err.message}</div>`;
   }
 }
 
-function renderReturnsRequestView(container, sales, returnRequests, user, pharmacyId, branchId) {
+function renderReturnsRequestView(container, sales, returnRequests, user, pharmacyId, branchId, currency) {
   const mainContent = container;
 
   mainContent.innerHTML = `
@@ -111,7 +115,7 @@ function renderReturnsRequestView(container, sales, returnRequests, user, pharma
                     <td><strong>${request.request_number || 'REQ-' + request.id.substring(0, 8)}</strong></td>
                     <td>${request.invoice_number || '-'}</td>
                     <td><span class="badge bg-blue">${request.items_count || '-'} item(s)</span></td>
-                    <td>${request.requested_amount ? '₦' + parseFloat(request.requested_amount).toFixed(2) : '-'}</td>
+                    <td>${request.requested_amount ? currency + parseFloat(request.requested_amount).toFixed(2) : '-'}</td>
                     <td>
                       <span class="badge ${statusColor}">${request.status?.toUpperCase()}</span>
                     </td>
@@ -131,9 +135,12 @@ function renderReturnsRequestView(container, sales, returnRequests, user, pharma
       </div>
     </div>
 
+    <!-- Modal Overlay -->
+    <div id="returnRequestModalOverlay" class="modal-overlay" style="display:none" onclick="if(event.target === this) window.closeReturnRequestModal()"></div>
+
     <!-- New Return Request Modal -->
     <div id="returnRequestModal" class="modal" style="display:none">
-      <div class="modal-content" style="max-width:700px">
+      <div style="max-width:700px;width:100%">
         <div class="modal-header">
           <h2 class="modal-title">New Return Request</h2>
           <button class="modal-close" onclick="window.closeReturnRequestModal()">✕</button>
@@ -142,11 +149,11 @@ function renderReturnsRequestView(container, sales, returnRequests, user, pharma
           <form onsubmit="window.saveReturnRequest(event)">
             <div class="form-group">
               <label class="form-label">Select Invoice *</label>
-              <select id="request-invoice" class="form-control" required onchange="window.loadInvoiceDetails()">
+              <select id="request-invoice" class="form-select" required onchange="window.loadInvoiceDetails()">
                 <option value="">-- Select an invoice from your sales --</option>
                 ${sales.map(s => `
                   <option value="${s.id}" data-invoice="${s.invoice_number}" data-total="${s.total_amount}">
-                    ${s.invoice_number} - ₦${parseFloat(s.total_amount).toFixed(2)} (${formatUTCDate(s.created_at)})
+                    ${s.invoice_number} - ${currency}${parseFloat(s.total_amount).toFixed(2)} (${formatUTCDate(s.created_at)})
                   </option>
                 `).join('')}
               </select>
@@ -168,7 +175,7 @@ function renderReturnsRequestView(container, sales, returnRequests, user, pharma
 
             <div class="form-group">
               <label class="form-label">Reason for Return *</label>
-              <select id="return-reason" class="form-control" required>
+              <select id="return-reason" class="form-select" required>
                 <option value="">-- Select reason --</option>
                 <option value="Defective">Defective Product</option>
                 <option value="Expired">Expired</option>
@@ -181,15 +188,15 @@ function renderReturnsRequestView(container, sales, returnRequests, user, pharma
 
             <div class="form-group">
               <label class="form-label">Requested Refund Amount *</label>
-              <input type="number" id="return-amount" class="form-control" step="0.01" min="0" placeholder="0.00" required>
+              <input type="number" id="return-amount" class="form-input" step="0.01" min="0" placeholder="0.00" required>
               <div style="font-size:0.85rem;color:var(--gray-600);margin-top:0.25rem">
-                Total invoice amount: <span id="invoice-total">₦0.00</span>
+                Total invoice amount: <span id="invoice-total">${currency}0.00</span>
               </div>
             </div>
 
             <div class="form-group">
               <label class="form-label">Additional Notes</label>
-              <textarea id="return-notes" class="form-control" rows="3" placeholder="Explain the reason for the return..."></textarea>
+              <textarea id="return-notes" class="form-input" rows="3" placeholder="Explain the reason for the return..."></textarea>
             </div>
 
             <div style="display:flex;gap:0.5rem;justify-content:flex-end;margin-top:1.5rem">
@@ -201,9 +208,12 @@ function renderReturnsRequestView(container, sales, returnRequests, user, pharma
       </div>
     </div>
 
+    <!-- Modal Overlay for Details -->
+    <div id="requestDetailsModalOverlay" class="modal-overlay" style="display:none" onclick="if(event.target === this) window.closeRequestDetailsModal()"></div>
+
     <!-- Request Details Modal -->
     <div id="requestDetailsModal" class="modal" style="display:none">
-      <div class="modal-content" style="max-width:600px">
+      <div style="max-width:600px;width:100%">
         <div class="modal-header">
           <h2 class="modal-title">Return Request Details</h2>
           <button class="modal-close" onclick="window.closeRequestDetailsModal()">✕</button>
@@ -217,10 +227,12 @@ function renderReturnsRequestView(container, sales, returnRequests, user, pharma
 
   // Global functions
   window.openReturnRequestModal = () => {
+    document.getElementById('returnRequestModalOverlay').style.display = 'block';
     document.getElementById('returnRequestModal').style.display = 'flex';
   };
 
   window.closeReturnRequestModal = () => {
+    document.getElementById('returnRequestModalOverlay').style.display = 'none';
     document.getElementById('returnRequestModal').style.display = 'none';
     document.getElementById('request-invoice').value = '';
     document.getElementById('return-amount').value = '';
@@ -235,7 +247,7 @@ function renderReturnsRequestView(container, sales, returnRequests, user, pharma
     if (!selectedId) {
       document.getElementById('invoice-items').innerHTML = '<div style="color:var(--gray-500);text-align:center">Select an invoice to see items</div>';
       document.getElementById('items-to-return').innerHTML = '<div style="color:var(--gray-500);text-align:center;font-size:0.9rem">Item selection will appear after invoice selection</div>';
-      document.getElementById('invoice-total').textContent = '₦0.00';
+      document.getElementById('invoice-total').textContent = currency + '0.00';
       return;
     }
 
@@ -253,7 +265,7 @@ function renderReturnsRequestView(container, sales, returnRequests, user, pharma
           ${items.map(item => `
             <div style="padding:0.5rem;border-bottom:1px solid var(--gray-200);display:flex;justify-content:space-between">
               <span>${item.product_name}</span>
-              <span>₦${parseFloat(item.total_price).toFixed(2)}</span>
+              <span>${currency}${parseFloat(item.total_price).toFixed(2)}</span>
             </div>
           `).join('')}
         </div>
@@ -270,7 +282,7 @@ function renderReturnsRequestView(container, sales, returnRequests, user, pharma
             ${items.map((item, idx) => `
               <label style="display:flex;align-items:center;gap:0.5rem;padding:0.5rem;cursor:pointer;border-radius:var(--radius-sm);transition:background 0.2s">
                 <input type="checkbox" class="return-item-checkbox" value="${idx}" data-amount="${item.total_price}">
-                <span>${item.product_name} - ₦${parseFloat(item.total_price).toFixed(2)}</span>
+                <span>${item.product_name} - ${currency}${parseFloat(item.total_price).toFixed(2)}</span>
               </label>
             `).join('')}
           </div>
@@ -281,7 +293,7 @@ function renderReturnsRequestView(container, sales, returnRequests, user, pharma
       </div>
     `;
 
-    document.getElementById('invoice-total').textContent = '₦' + totalAmount.toFixed(2);
+    document.getElementById('invoice-total').textContent = currency + totalAmount.toFixed(2);
     document.getElementById('return-amount').value = totalAmount;
   };
 
@@ -388,7 +400,7 @@ function renderReturnsRequestView(container, sales, returnRequests, user, pharma
         </div>
         <div>
           <h4 style="margin:0 0 0.5rem 0;color:var(--gray-600)">Refund Amount</h4>
-          <p style="margin:0;font-weight:600;color:var(--success)">₦${parseFloat(request.requested_amount || 0).toFixed(2)}</p>
+          <p style="margin:0;font-weight:600;color:var(--success)">${currency}${parseFloat(request.requested_amount || 0).toFixed(2)}</p>
         </div>
       </div>
 
@@ -413,7 +425,13 @@ function renderReturnsRequestView(container, sales, returnRequests, user, pharma
     `;
 
     document.getElementById('request-details-content').innerHTML = detailsHTML;
+    document.getElementById('requestDetailsModalOverlay').style.display = 'block';
     document.getElementById('requestDetailsModal').style.display = 'flex';
+  };
+
+  window.closeRequestDetailsModal = () => {
+    document.getElementById('requestDetailsModalOverlay').style.display = 'none';
+    document.getElementById('requestDetailsModal').style.display = 'none';
   };
 
   window.closeRequestDetailsModal = () => {
