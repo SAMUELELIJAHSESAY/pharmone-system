@@ -573,93 +573,174 @@ function showReceiptPreview() {
     const branchAddress = branchDetails?.address || '';
     const branchEmail = branchDetails?.email || '';
 
-    const printWindow = window.open('', '', 'width=400,height=600');
-    printWindow.document.write(`
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <title>Receipt Preview</title>
-          <style>
-            body { font-family: monospace; font-size: 12px; margin: 0; padding: 20px; }
-            .receipt { max-width: 300px; margin: 0 auto; }
-            .row { display: flex; justify-content: space-between; margin: 4px 0; }
-            .divider { border-bottom: 1px dashed #000; margin: 10px 0; }
-            .title { text-align: center; font-weight: bold; margin-bottom: 10px; }
-            .total { font-weight: bold; font-size: 14px; }
-            .success { color: green; }
-          </style>
-        </head>
-        <body>
-          <div class="receipt">
-            <div style="text-align: center; margin-bottom: 10px; border-bottom: 1px dashed #000; padding-bottom: 10px;">
-              <div class="title" style="font-size: 14px; font-weight: bold; margin-bottom: 5px;">${branchName}</div>
-              ${branchAddress ? `<div style="font-size: 10px; margin-bottom: 3px;">${branchAddress}</div>` : ''}
-              ${branchEmail ? `<div style="font-size: 10px; margin-bottom: 3px;">${branchEmail}</div>` : ''}
-            </div>
-            <div class="title">Receipt</div>
-            <div class="row"><span>Date:</span><span>${formatUTCDateTime(previewDate)}</span></div>
-            <div class="divider"></div>
+    const { overlay, closeModal } = createModal({
+      id: 'receipt-modal',
+      title: 'Receipt Preview',
+      body: `
+        <div id="receipt-content" style="font-family:monospace;font-size:0.9rem">
+          <div style="text-align:center;margin-bottom:1.25rem">
+            <div style="font-size:3rem;margin-bottom:0.5rem">📋</div>
+            <div style="font-size:1.25rem;font-weight:700;color:var(--primary)">${formatCurrency(total)}</div>
+            <div class="text-xs text-muted" style="margin-top:0.25rem">${formatUTCDateTime(previewDate)}</div>
+          </div>
+          <div style="background:var(--gray-50);border-radius:var(--radius);padding:1rem;margin-bottom:1rem">
             ${cart.map(i => {
               const packagingInfo = getPackagingInfo(i.packaging_type || 'unit', i.units_per_box || 10);
-              const symbol = window.pharmacySettings?.currency_symbol || 'Le';
-              return `<div class="row"><span>${i.product_name} × ${i.quantity} ${packagingInfo.label.toLowerCase()}</span><span>${symbol}${(i.quantity * i.unit_price).toFixed(2)}</span></div>`;
+              return `
+              <div class="cart-summary-row">
+                <span>${i.product_name} × ${i.quantity} ${packagingInfo.label.toLowerCase()}</span>
+                <span>${formatCurrency(i.quantity * i.unit_price)}</span>
+              </div>`;
             }).join('')}
-            <div class="divider"></div>
-            ${discount > 0 ? `<div class="row success"><span>Discount:</span><span>-${window.pharmacySettings?.currency_symbol || 'Le'}${discount.toFixed(2)}</span></div>` : ''}
-            <div class="row total success"><span>TOTAL:</span><span>${window.pharmacySettings?.currency_symbol || 'Le'}${total.toFixed(2)}</span></div>
-            <div class="row"><span>Payment:</span><span>${paymentMethod.replace('_', ' ')}</span></div>
-            <div class="divider"></div>
-            <div style="text-align: center; font-size: 10px; margin-top: 10px;">Thank you for visiting, ${branchName}!</div>
+            ${discount > 0 ? `<div class="cart-summary-row" style="color:var(--success)"><span>Discount</span><span>-${formatCurrency(discount)}</span></div>` : ''}
+            <div class="cart-summary-total">
+              <span>Total</span>
+              <span style="color:var(--success)">${formatCurrency(total)}</span>
+            </div>
+            <div class="cart-summary-row">
+              <span class="text-muted">Payment</span>
+              <span class="font-semibold">${paymentMethod.replace('_', ' ')}</span>
+            </div>
           </div>
-          <script>window.print(); window.close();</script>
-        </body>
-      </html>
-    `);
-    printWindow.document.close();
+        </div>
+      `,
+      footer: `
+        <button class="btn btn-ghost" id="print-receipt-btn">&#128424; Print</button>
+        <button class="btn btn-primary" id="receipt-close">Done</button>
+      `
+    });
+
+    overlay.querySelector('#receipt-close').addEventListener('click', closeModal);
+    overlay.querySelector('#print-receipt-btn').addEventListener('click', () => {
+      const printContent = overlay.querySelector('#receipt-content').innerHTML;
+      const printWindow = window.open('', '', 'width=400,height=600');
+      printWindow.document.write(`
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <title>Receipt</title>
+            <style>
+              body { font-family: monospace; font-size: 12px; margin: 0; padding: 20px; }
+              .receipt { max-width: 300px; margin: 0 auto; }
+              .row { display: flex; justify-content: space-between; margin: 4px 0; }
+              .divider { border-bottom: 1px dashed #000; margin: 10px 0; }
+              .title { text-align: center; font-weight: bold; margin-bottom: 10px; }
+              .total { font-weight: bold; font-size: 14px; }
+              .success { color: green; }
+            </style>
+          </head>
+          <body>
+            <div class="receipt">
+              <div style="text-align: center; margin-bottom: 10px; border-bottom: 1px dashed #000; padding-bottom: 10px;">
+                <div class="title" style="font-size: 14px; font-weight: bold; margin-bottom: 5px;">${branchName}</div>
+                ${branchAddress ? `<div style="font-size: 10px; margin-bottom: 3px;">${branchAddress}</div>` : ''}
+                ${branchEmail ? `<div style="font-size: 10px; margin-bottom: 3px;">${branchEmail}</div>` : ''}
+              </div>
+              <div class="title">Receipt</div>
+              <div class="row"><span>Date:</span><span>${formatUTCDateTime(previewDate)}</span></div>
+              <div class="divider"></div>
+              ${cart.map(i => {
+                const packagingInfo = getPackagingInfo(i.packaging_type || 'unit', i.units_per_box || 10);
+                const symbol = window.pharmacySettings?.currency_symbol || 'Le';
+                return `<div class="row"><span>${i.product_name} × ${i.quantity} ${packagingInfo.label.toLowerCase()}</span><span>${symbol}${(i.quantity * i.unit_price).toFixed(2)}</span></div>`;
+              }).join('')}
+              <div class="divider"></div>
+              ${discount > 0 ? `<div class="row success"><span>Discount:</span><span>-${window.pharmacySettings?.currency_symbol || 'Le'}${discount.toFixed(2)}</span></div>` : ''}
+              <div class="row total success"><span>TOTAL:</span><span>${window.pharmacySettings?.currency_symbol || 'Le'}${total.toFixed(2)}</span></div>
+              <div class="row"><span>Payment:</span><span>${paymentMethod.replace('_', ' ')}</span></div>
+              <div class="divider"></div>
+              <div style="text-align: center; font-size: 10px; margin-top: 10px;">Thank you for visiting, ${branchName}!</div>
+            </div>
+            <script>window.print(); window.close();</script>
+          </body>
+        </html>
+      `);
+      printWindow.document.close();
+    });
   }).catch(err => {
     console.error('Failed to fetch branch details:', err);
     // Continue with basic receipt if branch details fail
-    const printWindow = window.open('', '', 'width=400,height=600');
-    printWindow.document.write(`
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <title>Receipt Preview</title>
-          <style>
-            body { font-family: monospace; font-size: 12px; margin: 0; padding: 20px; }
-            .receipt { max-width: 300px; margin: 0 auto; }
-            .row { display: flex; justify-content: space-between; margin: 4px 0; }
-            .divider { border-bottom: 1px dashed #000; margin: 10px 0; }
-            .title { text-align: center; font-weight: bold; margin-bottom: 10px; }
-            .total { font-weight: bold; font-size: 14px; }
-            .success { color: green; }
-          </style>
-        </head>
-        <body>
-          <div class="receipt">
-            <div style="text-align: center; margin-bottom: 10px; border-bottom: 1px dashed #000; padding-bottom: 10px;">
-              <div class="title" style="font-size: 14px; font-weight: bold; margin-bottom: 5px;">Pharmacy</div>
-            </div>
-            <div class="title">Receipt</div>
-            <div class="row"><span>Date:</span><span>${formatUTCDateTime(previewDate)}</span></div>
-            <div class="divider"></div>
+    const { overlay, closeModal } = createModal({
+      id: 'receipt-modal',
+      title: 'Receipt Preview',
+      body: `
+        <div id="receipt-content" style="font-family:monospace;font-size:0.9rem">
+          <div style="text-align:center;margin-bottom:1.25rem">
+            <div style="font-size:3rem;margin-bottom:0.5rem">📋</div>
+            <div style="font-size:1.25rem;font-weight:700;color:var(--primary)">${formatCurrency(total)}</div>
+            <div class="text-xs text-muted" style="margin-top:0.25rem">${formatUTCDateTime(previewDate)}</div>
+          </div>
+          <div style="background:var(--gray-50);border-radius:var(--radius);padding:1rem;margin-bottom:1rem">
             ${cart.map(i => {
               const packagingInfo = getPackagingInfo(i.packaging_type || 'unit', i.units_per_box || 10);
-              const symbol = window.pharmacySettings?.currency_symbol || 'Le';
-              return `<div class="row"><span>${i.product_name} × ${i.quantity} ${packagingInfo.label.toLowerCase()}</span><span>${symbol}${(i.quantity * i.unit_price).toFixed(2)}</span></div>`;
+              return `
+              <div class="cart-summary-row">
+                <span>${i.product_name} × ${i.quantity} ${packagingInfo.label.toLowerCase()}</span>
+                <span>${formatCurrency(i.quantity * i.unit_price)}</span>
+              </div>`;
             }).join('')}
-            <div class="divider"></div>
-            ${discount > 0 ? `<div class="row success"><span>Discount:</span><span>-${window.pharmacySettings?.currency_symbol || 'Le'}${discount.toFixed(2)}</span></div>` : ''}
-            <div class="row total success"><span>TOTAL:</span><span>${window.pharmacySettings?.currency_symbol || 'Le'}${total.toFixed(2)}</span></div>
-            <div class="row"><span>Payment:</span><span>${paymentMethod.replace('_', ' ')}</span></div>
-            <div class="divider"></div>
-            <div style="text-align: center; font-size: 10px; margin-top: 10px;">Thank you for visiting, Pharmacy!</div>
+            ${discount > 0 ? `<div class="cart-summary-row" style="color:var(--success)"><span>Discount</span><span>-${formatCurrency(discount)}</span></div>` : ''}
+            <div class="cart-summary-total">
+              <span>Total</span>
+              <span style="color:var(--success)">${formatCurrency(total)}</span>
+            </div>
+            <div class="cart-summary-row">
+              <span class="text-muted">Payment</span>
+              <span class="font-semibold">${paymentMethod.replace('_', ' ')}</span>
+            </div>
           </div>
-          <script>window.print(); window.close();</script>
-        </body>
-      </html>
-    `);
-    printWindow.document.close();
+        </div>
+      `,
+      footer: `
+        <button class="btn btn-ghost" id="print-receipt-btn">&#128424; Print</button>
+        <button class="btn btn-primary" id="receipt-close">Done</button>
+      `
+    });
+
+    overlay.querySelector('#receipt-close').addEventListener('click', closeModal);
+    overlay.querySelector('#print-receipt-btn').addEventListener('click', () => {
+      const printWindow = window.open('', '', 'width=400,height=600');
+      printWindow.document.write(`
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <title>Receipt</title>
+            <style>
+              body { font-family: monospace; font-size: 12px; margin: 0; padding: 20px; }
+              .receipt { max-width: 300px; margin: 0 auto; }
+              .row { display: flex; justify-content: space-between; margin: 4px 0; }
+              .divider { border-bottom: 1px dashed #000; margin: 10px 0; }
+              .title { text-align: center; font-weight: bold; margin-bottom: 10px; }
+              .total { font-weight: bold; font-size: 14px; }
+              .success { color: green; }
+            </style>
+          </head>
+          <body>
+            <div class="receipt">
+              <div style="text-align: center; margin-bottom: 10px; border-bottom: 1px dashed #000; padding-bottom: 10px;">
+                <div class="title" style="font-size: 14px; font-weight: bold; margin-bottom: 5px;">Pharmacy</div>
+              </div>
+              <div class="title">Receipt</div>
+              <div class="row"><span>Date:</span><span>${formatUTCDateTime(previewDate)}</span></div>
+              <div class="divider"></div>
+              ${cart.map(i => {
+                const packagingInfo = getPackagingInfo(i.packaging_type || 'unit', i.units_per_box || 10);
+                const symbol = window.pharmacySettings?.currency_symbol || 'Le';
+                return `<div class="row"><span>${i.product_name} × ${i.quantity} ${packagingInfo.label.toLowerCase()}</span><span>${symbol}${(i.quantity * i.unit_price).toFixed(2)}</span></div>`;
+              }).join('')}
+              <div class="divider"></div>
+              ${discount > 0 ? `<div class="row success"><span>Discount:</span><span>-${window.pharmacySettings?.currency_symbol || 'Le'}${discount.toFixed(2)}</span></div>` : ''}
+              <div class="row total success"><span>TOTAL:</span><span>${window.pharmacySettings?.currency_symbol || 'Le'}${total.toFixed(2)}</span></div>
+              <div class="row"><span>Payment:</span><span>${paymentMethod.replace('_', ' ')}</span></div>
+              <div class="divider"></div>
+              <div style="text-align: center; font-size: 10px; margin-top: 10px;">Thank you for visiting, Pharmacy!</div>
+            </div>
+            <script>window.print(); window.close();</script>
+          </body>
+        </html>
+      `);
+      printWindow.document.close();
+    });
   });
 }
 
