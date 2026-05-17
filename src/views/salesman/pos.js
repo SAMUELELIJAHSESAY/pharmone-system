@@ -133,6 +133,14 @@ function renderPOSView(container) {
   document.getElementById('discount-input').addEventListener('input', updateCartTotals);
   document.getElementById('checkout-btn').addEventListener('click', processCheckout);
 
+  // Add keyboard listener for receipt preview (Ctrl+Shift+P)
+  document.addEventListener('keydown', (e) => {
+    if (e.ctrlKey && e.shiftKey && e.key === 'P') {
+      e.preventDefault();
+      showReceiptPreview();
+    }
+  });
+
   bindProductClicks();
 }
 
@@ -538,6 +546,114 @@ function showReceiptModal(sale, items, total, discount, paymentMethod, branchDet
             <div class="row"><span>Payment:</span><span>${paymentMethod.replace('_', ' ')}</span></div>
             <div class="divider"></div>
             <div style="text-align: center; font-size: 10px; margin-top: 10px;">Thank you for visiting, ${branchName}!</div>
+          </div>
+          <script>window.print(); window.close();</script>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+  });
+}
+
+function showReceiptPreview() {
+  if (cart.length === 0) {
+    showToast('Cart is empty - nothing to preview', 'warning');
+    return;
+  }
+
+  const subtotal = cart.reduce((sum, i) => sum + (i.quantity * i.unit_price), 0);
+  const discount = parseFloat(document.getElementById('discount-input')?.value || 0) || 0;
+  const total = Math.max(0, subtotal - discount);
+  const paymentMethod = document.getElementById('payment-method').value;
+  const previewDate = new Date().toISOString();
+
+  // Get branch details for receipt header
+  getBranchDetails(staffBranchId).then(branchDetails => {
+    const branchName = branchDetails?.name || 'Pharmacy';
+    const branchAddress = branchDetails?.address || '';
+    const branchEmail = branchDetails?.email || '';
+
+    const printWindow = window.open('', '', 'width=400,height=600');
+    printWindow.document.write(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Receipt Preview</title>
+          <style>
+            body { font-family: monospace; font-size: 12px; margin: 0; padding: 20px; }
+            .receipt { max-width: 300px; margin: 0 auto; }
+            .row { display: flex; justify-content: space-between; margin: 4px 0; }
+            .divider { border-bottom: 1px dashed #000; margin: 10px 0; }
+            .title { text-align: center; font-weight: bold; margin-bottom: 10px; }
+            .total { font-weight: bold; font-size: 14px; }
+            .success { color: green; }
+          </style>
+        </head>
+        <body>
+          <div class="receipt">
+            <div style="text-align: center; margin-bottom: 10px; border-bottom: 1px dashed #000; padding-bottom: 10px;">
+              <div class="title" style="font-size: 14px; font-weight: bold; margin-bottom: 5px;">${branchName}</div>
+              ${branchAddress ? `<div style="font-size: 10px; margin-bottom: 3px;">${branchAddress}</div>` : ''}
+              ${branchEmail ? `<div style="font-size: 10px; margin-bottom: 3px;">${branchEmail}</div>` : ''}
+            </div>
+            <div class="title">Receipt</div>
+            <div class="row"><span>Date:</span><span>${formatUTCDateTime(previewDate)}</span></div>
+            <div class="divider"></div>
+            ${cart.map(i => {
+              const packagingInfo = getPackagingInfo(i.packaging_type || 'unit', i.units_per_box || 10);
+              const symbol = window.pharmacySettings?.currency_symbol || 'Le';
+              return `<div class="row"><span>${i.product_name} × ${i.quantity} ${packagingInfo.label.toLowerCase()}</span><span>${symbol}${(i.quantity * i.unit_price).toFixed(2)}</span></div>`;
+            }).join('')}
+            <div class="divider"></div>
+            ${discount > 0 ? `<div class="row success"><span>Discount:</span><span>-${window.pharmacySettings?.currency_symbol || 'Le'}${discount.toFixed(2)}</span></div>` : ''}
+            <div class="row total success"><span>TOTAL:</span><span>${window.pharmacySettings?.currency_symbol || 'Le'}${total.toFixed(2)}</span></div>
+            <div class="row"><span>Payment:</span><span>${paymentMethod.replace('_', ' ')}</span></div>
+            <div class="divider"></div>
+            <div style="text-align: center; font-size: 10px; margin-top: 10px;">Thank you for visiting, ${branchName}!</div>
+          </div>
+          <script>window.print(); window.close();</script>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+  }).catch(err => {
+    console.error('Failed to fetch branch details:', err);
+    // Continue with basic receipt if branch details fail
+    const printWindow = window.open('', '', 'width=400,height=600');
+    printWindow.document.write(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Receipt Preview</title>
+          <style>
+            body { font-family: monospace; font-size: 12px; margin: 0; padding: 20px; }
+            .receipt { max-width: 300px; margin: 0 auto; }
+            .row { display: flex; justify-content: space-between; margin: 4px 0; }
+            .divider { border-bottom: 1px dashed #000; margin: 10px 0; }
+            .title { text-align: center; font-weight: bold; margin-bottom: 10px; }
+            .total { font-weight: bold; font-size: 14px; }
+            .success { color: green; }
+          </style>
+        </head>
+        <body>
+          <div class="receipt">
+            <div style="text-align: center; margin-bottom: 10px; border-bottom: 1px dashed #000; padding-bottom: 10px;">
+              <div class="title" style="font-size: 14px; font-weight: bold; margin-bottom: 5px;">Pharmacy</div>
+            </div>
+            <div class="title">Receipt</div>
+            <div class="row"><span>Date:</span><span>${formatUTCDateTime(previewDate)}</span></div>
+            <div class="divider"></div>
+            ${cart.map(i => {
+              const packagingInfo = getPackagingInfo(i.packaging_type || 'unit', i.units_per_box || 10);
+              const symbol = window.pharmacySettings?.currency_symbol || 'Le';
+              return `<div class="row"><span>${i.product_name} × ${i.quantity} ${packagingInfo.label.toLowerCase()}</span><span>${symbol}${(i.quantity * i.unit_price).toFixed(2)}</span></div>`;
+            }).join('')}
+            <div class="divider"></div>
+            ${discount > 0 ? `<div class="row success"><span>Discount:</span><span>-${window.pharmacySettings?.currency_symbol || 'Le'}${discount.toFixed(2)}</span></div>` : ''}
+            <div class="row total success"><span>TOTAL:</span><span>${window.pharmacySettings?.currency_symbol || 'Le'}${total.toFixed(2)}</span></div>
+            <div class="row"><span>Payment:</span><span>${paymentMethod.replace('_', ' ')}</span></div>
+            <div class="divider"></div>
+            <div style="text-align: center; font-size: 10px; margin-top: 10px;">Thank you for visiting, Pharmacy!</div>
           </div>
           <script>window.print(); window.close();</script>
         </body>
