@@ -566,6 +566,10 @@ function showReceiptPreview() {
   const total = Math.max(0, subtotal - discount);
   const paymentMethod = document.getElementById('payment-method').value;
   const previewDate = new Date().toISOString();
+  
+  // Generate preview invoice number
+  const previewInvoiceNumber = 'INV-' + Math.floor(Math.random() * 100000000).toString().padStart(8, '0');
+  const previewDateFormatted = formatUTCDateTime(previewDate);
 
   // Get branch details for receipt header
   getBranchDetails(staffBranchId).then(branchDetails => {
@@ -575,13 +579,14 @@ function showReceiptPreview() {
 
     const { overlay, closeModal } = createModal({
       id: 'receipt-modal',
-      title: 'Receipt Preview',
+      title: 'Sale Complete!',
       body: `
         <div id="receipt-content" style="font-family:monospace;font-size:0.9rem">
           <div style="text-align:center;margin-bottom:1.25rem">
-            <div style="font-size:3rem;margin-bottom:0.5rem">📋</div>
-            <div style="font-size:1.25rem;font-weight:700;color:var(--primary)">${formatCurrency(total)}</div>
-            <div class="text-xs text-muted" style="margin-top:0.25rem">${formatUTCDateTime(previewDate)}</div>
+            <div style="font-size:3rem;margin-bottom:0.5rem">&#9989;</div>
+            <div style="font-size:1.25rem;font-weight:700;color:var(--success)">${formatCurrency(total)}</div>
+            <div class="text-sm text-muted">${previewInvoiceNumber}</div>
+            <div class="text-xs text-muted" style="margin-top:0.25rem">${previewDateFormatted}</div>
           </div>
           <div style="background:var(--gray-50);border-radius:var(--radius);padding:1rem;margin-bottom:1rem">
             ${cart.map(i => {
@@ -618,7 +623,7 @@ function showReceiptPreview() {
         <!DOCTYPE html>
         <html>
           <head>
-            <title>Receipt</title>
+            <title>Receipt - ${previewInvoiceNumber}</title>
             <style>
               body { font-family: monospace; font-size: 12px; margin: 0; padding: 20px; }
               .receipt { max-width: 300px; margin: 0 auto; }
@@ -637,7 +642,8 @@ function showReceiptPreview() {
                 ${branchEmail ? `<div style="font-size: 10px; margin-bottom: 3px;">${branchEmail}</div>` : ''}
               </div>
               <div class="title">Receipt</div>
-              <div class="row"><span>Date:</span><span>${formatUTCDateTime(previewDate)}</span></div>
+              <div class="row"><span>Invoice:</span><span><strong>${previewInvoiceNumber}</strong></span></div>
+              <div class="row"><span>Date:</span><span>${previewDateFormatted}</span></div>
               <div class="divider"></div>
               ${cart.map(i => {
                 const packagingInfo = getPackagingInfo(i.packaging_type || 'unit', i.units_per_box || 10);
@@ -659,16 +665,17 @@ function showReceiptPreview() {
     });
   }).catch(err => {
     console.error('Failed to fetch branch details:', err);
-    // Continue with basic receipt if branch details fail
+    // Fallback with basic receipt
     const { overlay, closeModal } = createModal({
       id: 'receipt-modal',
-      title: 'Receipt Preview',
+      title: 'Sale Complete!',
       body: `
         <div id="receipt-content" style="font-family:monospace;font-size:0.9rem">
           <div style="text-align:center;margin-bottom:1.25rem">
-            <div style="font-size:3rem;margin-bottom:0.5rem">📋</div>
-            <div style="font-size:1.25rem;font-weight:700;color:var(--primary)">${formatCurrency(total)}</div>
-            <div class="text-xs text-muted" style="margin-top:0.25rem">${formatUTCDateTime(previewDate)}</div>
+            <div style="font-size:3rem;margin-bottom:0.5rem">&#9989;</div>
+            <div style="font-size:1.25rem;font-weight:700;color:var(--success)">${formatCurrency(total)}</div>
+            <div class="text-sm text-muted">${previewInvoiceNumber}</div>
+            <div class="text-xs text-muted" style="margin-top:0.25rem">${previewDateFormatted}</div>
           </div>
           <div style="background:var(--gray-50);border-radius:var(--radius);padding:1rem;margin-bottom:1rem">
             ${cart.map(i => {
@@ -704,7 +711,7 @@ function showReceiptPreview() {
         <!DOCTYPE html>
         <html>
           <head>
-            <title>Receipt</title>
+            <title>Receipt - ${previewInvoiceNumber}</title>
             <style>
               body { font-family: monospace; font-size: 12px; margin: 0; padding: 20px; }
               .receipt { max-width: 300px; margin: 0 auto; }
@@ -721,7 +728,8 @@ function showReceiptPreview() {
                 <div class="title" style="font-size: 14px; font-weight: bold; margin-bottom: 5px;">Pharmacy</div>
               </div>
               <div class="title">Receipt</div>
-              <div class="row"><span>Date:</span><span>${formatUTCDateTime(previewDate)}</span></div>
+              <div class="row"><span>Invoice:</span><span><strong>${previewInvoiceNumber}</strong></span></div>
+              <div class="row"><span>Date:</span><span>${previewDateFormatted}</span></div>
               <div class="divider"></div>
               ${cart.map(i => {
                 const packagingInfo = getPackagingInfo(i.packaging_type || 'unit', i.units_per_box || 10);
