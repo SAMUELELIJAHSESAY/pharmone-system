@@ -451,7 +451,6 @@ function showReturnForm(sale) {
         <option value="Expired">Expired</option>
         <option value="Wrong Item">Wrong Item</option>
         <option value="Customer Request">Customer Request</option>
-        <option value="Mistake">Mistake</option>
         <option value="Other">Other</option>
       </select>
     </div>
