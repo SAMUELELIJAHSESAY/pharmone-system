@@ -853,6 +853,19 @@ export async function createSalesReturn(returnPayload, items) {
   const { error: itemsError } = await supabase.from('return_items').insert(returnItems);
   if (itemsError) throw itemsError;
 
+  // Fetch original sale and items BEFORE making changes to calculate original quantity
+  const { data: originalSale } = await supabase
+    .from('sales')
+    .select('total_amount, sale_items(*)')
+    .eq('id', returnPayload.sale_id)
+    .single();
+
+  if (!originalSale) throw new Error('Sale not found');
+
+  // Calculate original total quantity
+  const originalSaleItems = originalSale.sale_items || [];
+  const totalOriginalQty = originalSaleItems.reduce((sum, item) => sum + item.quantity, 0);
+
   // Restore stock for returned items and update sale_items quantities
   for (const item of items) {
     // Restore stock
@@ -905,41 +918,29 @@ export async function createSalesReturn(returnPayload, items) {
     }
   }
 
-  // Update the sale record to deduct refund amount from total
-  if (returnPayload.sale_id) {
-    const { data: sale } = await supabase
+  // Check if this is a full return by comparing returned quantity with ORIGINAL quantity
+  const totalReturnedQty = items.reduce((sum, item) => sum + item.quantity, 0);
+  const isFullReturn = totalReturnedQty >= totalOriginalQty;
+
+  // Delete the entire sale if all items are returned, otherwise update total
+  if (isFullReturn) {
+    // Delete the entire sale if all items are returned
+    await supabase
       .from('sales')
-      .select('total_amount, sale_items(*)')
-      .eq('id', returnPayload.sale_id)
-      .single();
-
-    if (sale) {
-      const refundAmount = returnPayload.total_refund || 0;
-      const newTotal = Math.max(0, (sale.total_amount || 0) - refundAmount);
-      
-      // Check if this is a full return (all items returned / no items left)
-      const remainingItems = sale.sale_items || [];
-      const totalReturnedQty = items.reduce((sum, item) => sum + item.quantity, 0);
-      const totalSaleQty = remainingItems.reduce((sum, item) => sum + item.quantity, 0);
-      const isFullReturn = totalReturnedQty >= totalSaleQty;
-
-      if (isFullReturn) {
-        // Delete the entire sale if all items are returned
-        await supabase
-          .from('sales')
-          .delete()
-          .eq('id', returnPayload.sale_id);
-      } else {
-        // Update sale with new total amount for partial returns
-        await supabase
-          .from('sales')
-          .update({
-            total_amount: newTotal,
-            status: 'completed'
-          })
-          .eq('id', returnPayload.sale_id);
-      }
-    }
+      .delete()
+      .eq('id', returnPayload.sale_id);
+  } else {
+    // Update sale with new total amount for partial returns
+    const refundAmount = returnPayload.total_refund || 0;
+    const newTotal = Math.max(0, (originalSale.total_amount || 0) - refundAmount);
+    
+    await supabase
+      .from('sales')
+      .update({
+        total_amount: newTotal,
+        status: 'completed'
+      })
+      .eq('id', returnPayload.sale_id);
   }
 
   return ret;
