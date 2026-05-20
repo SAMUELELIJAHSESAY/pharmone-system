@@ -1,6 +1,6 @@
 // Branch Details Dashboard
 import { supabase } from '../../config.js';
-import { getBranchDetails, getBranchDashboard, getBranchAssignments, updateBranchDetails, getPharmacyStaff, assignStaffToBranch } from '../../database.js';
+import { getBranchDetails, getBranchDashboard, getBranchAssignments, updateBranchDetails, getPharmacyStaff, assignStaffToBranch, getTodayDateRange } from '../../database.js';
 import { createModal } from '../../components/modal.js';
 import { showToast, formatUTCDate, formatUTCDateTime } from '../../utils.js';
 
@@ -315,11 +315,10 @@ async function loadBranchStaff(branchId) {
       .select('created_by, total_amount, created_at')
       .eq('branch_id', branchId);
     
-    // Get today's date in the pharmacy timezone
-    const now = new Date();
-    const todayDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const nextDate = new Date(todayDate);
-    nextDate.setDate(nextDate.getDate() + 1);
+    // Get today's date range using proper UTC calculation
+    const todayRange = await getTodayDateRange();
+    const todayStart = new Date(todayRange.start);
+    const todayEnd = new Date(todayRange.end);
     
     // Calculate sales per staff member (daily and total)
     const staffSalesMap = {};
@@ -334,9 +333,9 @@ async function loadBranchStaff(branchId) {
           staffSalesMap[sale.created_by].total += sale.total_amount || 0;
           staffSalesMap[sale.created_by].count += 1;
           
-          // Check if sale is from today
+          // Check if sale is from today - compare UTC timestamps
           const saleDate = new Date(sale.created_at);
-          if (saleDate >= todayDate && saleDate < nextDate) {
+          if (saleDate >= todayStart && saleDate < todayEnd) {
             staffSalesMap[sale.created_by].daily_total += sale.total_amount || 0;
             staffSalesMap[sale.created_by].daily_count += 1;
           }
