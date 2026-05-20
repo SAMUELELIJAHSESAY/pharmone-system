@@ -874,6 +874,34 @@ export async function createSalesReturn(returnPayload, items) {
     }
   }
 
+  // Update the sale record to deduct refund amount from total
+  if (returnPayload.sale_id) {
+    const { data: sale } = await supabase
+      .from('sales')
+      .select('total_amount, sale_items(*)')
+      .eq('id', returnPayload.sale_id)
+      .single();
+
+    if (sale) {
+      const refundAmount = returnPayload.total_refund || 0;
+      const newTotal = Math.max(0, (sale.total_amount || 0) - refundAmount);
+      
+      // Check if this is a full return (all items returned)
+      const totalReturnedQty = items.reduce((sum, item) => sum + item.quantity, 0);
+      const totalSaleQty = (sale.sale_items || []).reduce((sum, item) => sum + item.quantity, 0);
+      const isFullReturn = totalReturnedQty >= totalSaleQty;
+
+      // Update sale with new total amount
+      await supabase
+        .from('sales')
+        .update({
+          total_amount: newTotal,
+          status: isFullReturn ? 'cancelled' : 'completed'
+        })
+        .eq('id', returnPayload.sale_id);
+    }
+  }
+
   return ret;
 }
 

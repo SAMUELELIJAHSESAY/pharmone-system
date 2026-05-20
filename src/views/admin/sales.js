@@ -379,8 +379,8 @@ function showSaleDetail(sale) {
         <div class="font-semibold">${formatDateTime(sale.created_at)}</div>
       </div>
       <div>
-        <div class="text-xs text-muted">Staff</div>
-        <div class="font-semibold">—</div>
+        <div class="text-xs text-muted">Status</div>
+        <div class="font-semibold"><span class="badge ${sale.status === 'cancelled' ? 'bg-red' : 'bg-emerald'}">${sale.status?.toUpperCase() || 'COMPLETED'}</span></div>
       </div>
     </div>
     <div class="table-container">
@@ -391,8 +391,11 @@ function showSaleDetail(sale) {
     </div>
     <div style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--gray-200)">
       <div class="cart-summary-total">
-        <span>Total</span>
+        <span>Total Amount</span>
         <span style="color:var(--success)">${formatCurrency(sale.total_amount)}</span>
+      </div>
+      <div style="margin-top:0.5rem;font-size:0.9rem;color:var(--gray-600)">
+        <em>Current sale amount after returns (if any)</em>
       </div>
     </div>
   `;
