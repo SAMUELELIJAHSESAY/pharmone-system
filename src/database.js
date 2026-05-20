@@ -853,8 +853,9 @@ export async function createSalesReturn(returnPayload, items) {
   const { error: itemsError } = await supabase.from('return_items').insert(returnItems);
   if (itemsError) throw itemsError;
 
-  // Restore stock for returned items
+  // Restore stock for returned items and update sale_items quantities
   for (const item of items) {
+    // Restore stock
     const { data: product } = await supabase.from('products').select('stock_boxes, stock_units, units_per_box').eq('id', item.product_id).single();
     if (product) {
       let totalUnits = (product.stock_boxes * product.units_per_box) + product.stock_units + item.quantity;
@@ -871,6 +872,36 @@ export async function createSalesReturn(returnPayload, items) {
         created_by: returnPayload.created_by,
         pharmacy_id: returnPayload.pharmacy_id
       });
+    }
+
+    // Update sale_items to reduce quantity for returned items
+    const { data: saleItem } = await supabase
+      .from('sale_items')
+      .select('*')
+      .eq('sale_id', returnPayload.sale_id)
+      .eq('product_id', item.product_id)
+      .single();
+
+    if (saleItem) {
+      const newQuantity = Math.max(0, saleItem.quantity - item.quantity);
+      const newTotalPrice = newQuantity > 0 ? newQuantity * saleItem.unit_price : 0;
+      
+      if (newQuantity === 0) {
+        // Delete the sale item if quantity becomes 0
+        await supabase
+          .from('sale_items')
+          .delete()
+          .eq('id', saleItem.id);
+      } else {
+        // Update with reduced quantity
+        await supabase
+          .from('sale_items')
+          .update({
+            quantity: newQuantity,
+            total_price: newTotalPrice
+          })
+          .eq('id', saleItem.id);
+      }
     }
   }
 

@@ -355,7 +355,10 @@ function bindViewActions(sales) {
 }
 
 function showSaleDetail(sale) {
-  const itemsHtml = (sale.sale_items || []).map(item => `
+  // Filter out items with 0 or negative quantity (returned items)
+  const validItems = (sale.sale_items || []).filter(item => item.quantity > 0);
+  
+  const itemsHtml = validItems.map(item => `
     <tr>
       <td>${item.product_name}</td>
       <td class="text-center">${item.quantity}</td>
@@ -421,7 +424,15 @@ function showSaleDetail(sale) {
 }
 
 function showReturnForm(sale) {
-  const itemsOptions = (sale.sale_items || []).map((item, idx) => `
+  // Only show items that have quantity > 0 (not fully returned)
+  const availableItems = (sale.sale_items || []).filter(item => item.quantity > 0);
+  
+  if (availableItems.length === 0) {
+    showToast('No items available to return on this sale', 'info');
+    return;
+  }
+
+  const itemsOptions = availableItems.map((item, idx) => `
     <div style="display:flex;align-items:center;gap:0.75rem;padding:0.75rem;border:1px solid var(--gray-300);border-radius:6px;margin-bottom:0.5rem">
       <input type="checkbox" class="return-item-checkbox" data-index="${idx}" data-product-id="${item.product_id}" data-quantity="${item.quantity}" data-unit-price="${item.unit_price}" data-product-name="${item.product_name}" onchange="updateReturnTotal()">
       <div style="flex:1">
