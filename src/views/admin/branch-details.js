@@ -309,36 +309,38 @@ async function loadBranchStaff(branchId) {
       return;
     }
     
-    // Fetch sales data for each staff member (both today and all-time)
-    const { data: allSales } = await supabase
+    // Get today's date in local format for server query (same as getBranchDashboard)
+    const today = new Date(new Date().setHours(0, 0, 0, 0)).toISOString();
+    
+    // Fetch all sales for the branch (including those without created_by)
+    const { data: allSales, error: salesError } = await supabase
       .from('sales')
-      .select('created_by, total_amount, created_at')
+      .select('*')
       .eq('branch_id', branchId);
     
-    // Get today's date range using proper UTC calculation
-    const todayRange = await getTodayDateRange();
-    const todayStart = new Date(todayRange.start);
-    const todayEnd = new Date(todayRange.end);
+    if (salesError) console.error('Sales fetch error:', salesError);
     
     // Calculate sales per staff member (daily and total)
     const staffSalesMap = {};
-    if (allSales) {
+    if (allSales && allSales.length > 0) {
       allSales.forEach(sale => {
-        if (sale.created_by) {
-          if (!staffSalesMap[sale.created_by]) {
-            staffSalesMap[sale.created_by] = { daily_total: 0, daily_count: 0, total: 0, count: 0 };
-          }
-          
-          // Add to total
-          staffSalesMap[sale.created_by].total += sale.total_amount || 0;
-          staffSalesMap[sale.created_by].count += 1;
-          
-          // Check if sale is from today - compare UTC timestamps
-          const saleDate = new Date(sale.created_at);
-          if (saleDate >= todayStart && saleDate < todayEnd) {
-            staffSalesMap[sale.created_by].daily_total += sale.total_amount || 0;
-            staffSalesMap[sale.created_by].daily_count += 1;
-          }
+        const createdBy = sale.created_by;
+        
+        // Initialize if not exists (regardless of whether created_by exists)
+        if (!staffSalesMap[createdBy]) {
+          staffSalesMap[createdBy] = { daily_total: 0, daily_count: 0, total: 0, count: 0 };
+        }
+        
+        // Add to total
+        staffSalesMap[createdBy].total += sale.total_amount || 0;
+        staffSalesMap[createdBy].count += 1;
+        
+        // Check if sale is from today
+        const saleDate = new Date(sale.created_at).toISOString().split('T')[0];
+        const todayDate = today.split('T')[0];
+        if (saleDate === todayDate) {
+          staffSalesMap[createdBy].daily_total += sale.total_amount || 0;
+          staffSalesMap[createdBy].daily_count += 1;
         }
       });
     }
