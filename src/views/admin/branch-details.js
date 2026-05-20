@@ -309,24 +309,42 @@ async function loadBranchStaff(branchId) {
       return;
     }
     
-    // Get today's date in local format for server query (same as getBranchDashboard)
-    const today = new Date(new Date().setHours(0, 0, 0, 0)).toISOString();
+    // Get today's date using UTC (same as getBranchDashboard)
+    const todayStart = new Date(new Date().setHours(0, 0, 0, 0)).toISOString();
     
-    // Fetch all sales for the branch (including those without created_by)
+    // Fetch all sales for the branch (same query as getBranchDashboard)
     const { data: allSales, error: salesError } = await supabase
+      .from('sales')
+      .select('*')
+      .eq('branch_id', branchId)
+      .gte('created_at', todayStart);
+    
+    console.log('DEBUG - Branch Staff Query:', {
+      branchId,
+      todayStart,
+      salesCount: allSales?.length,
+      salesData: allSales?.slice(0, 3) // Show first 3 sales
+    });
+    
+    if (salesError) {
+      console.error('Sales fetch error:', salesError);
+      return;
+    }
+    
+    // Calculate sales per staff member (daily and total)
+    const staffSalesMap = {};
+    
+    // Fetch all-time sales for total calculation
+    const { data: allTimeSales } = await supabase
       .from('sales')
       .select('*')
       .eq('branch_id', branchId);
     
-    if (salesError) console.error('Sales fetch error:', salesError);
-    
-    // Calculate sales per staff member (daily and total)
-    const staffSalesMap = {};
-    if (allSales && allSales.length > 0) {
-      allSales.forEach(sale => {
+    if (allTimeSales && allTimeSales.length > 0) {
+      allTimeSales.forEach(sale => {
         const createdBy = sale.created_by;
         
-        // Initialize if not exists (regardless of whether created_by exists)
+        // Initialize if not exists
         if (!staffSalesMap[createdBy]) {
           staffSalesMap[createdBy] = { daily_total: 0, daily_count: 0, total: 0, count: 0 };
         }
@@ -334,16 +352,30 @@ async function loadBranchStaff(branchId) {
         // Add to total
         staffSalesMap[createdBy].total += sale.total_amount || 0;
         staffSalesMap[createdBy].count += 1;
-        
-        // Check if sale is from today
-        const saleDate = new Date(sale.created_at).toISOString().split('T')[0];
-        const todayDate = today.split('T')[0];
-        if (saleDate === todayDate) {
-          staffSalesMap[createdBy].daily_total += sale.total_amount || 0;
-          staffSalesMap[createdBy].daily_count += 1;
-        }
       });
     }
+    
+    // Add today's sales
+    if (allSales && allSales.length > 0) {
+      allSales.forEach(sale => {
+        const createdBy = sale.created_by;
+        
+        if (!staffSalesMap[createdBy]) {
+          staffSalesMap[createdBy] = { daily_total: 0, daily_count: 0, total: 0, count: 0 };
+        }
+        
+        staffSalesMap[createdBy].daily_total += sale.total_amount || 0;
+        staffSalesMap[createdBy].daily_count += 1;
+      });
+    }
+    
+    console.log('DEBUG - Staff Sales Map:', staffSalesMap);
+    
+    console.log('DEBUG - Staff Assignments:', assignments.map(a => ({
+      fullName: a.profiles.full_name,
+      staffId: a.staff_id,
+      salesData: staffSalesMap[a.staff_id]
+    })));
     
     const currencySymbol = window.pharmacySettings?.currency_symbol || 'Le';
     tbody.innerHTML = assignments.map(a => {
