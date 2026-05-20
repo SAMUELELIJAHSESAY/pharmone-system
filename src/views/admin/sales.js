@@ -345,11 +345,23 @@ function renderRows(sales) {
 }
 
 function bindViewActions(sales) {
-  const saleMap = Object.fromEntries(sales.map(s => [s.id, s]));
   document.querySelectorAll('.view-sale-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const sale = saleMap[btn.dataset.id];
-      if (sale) showSaleDetail(sale);
+    btn.addEventListener('click', async () => {
+      const saleId = btn.dataset.id;
+      try {
+        // Fetch fresh sale data from database to ensure we have latest items
+        const { data: freshSale, error } = await supabase
+          .from('sales')
+          .select('*, sale_items(*)')
+          .eq('id', saleId)
+          .single();
+        
+        if (error) throw error;
+        if (freshSale) showSaleDetail(freshSale);
+      } catch (error) {
+        console.error('Error fetching sale:', error);
+        showToast('Error loading receipt', 'error');
+      }
     });
   });
 }
