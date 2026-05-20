@@ -355,11 +355,8 @@ function bindViewActions(sales) {
 }
 
 function showSaleDetail(sale) {
-  const itemsHtml = (sale.sale_items || []).map((item, idx) => `
+  const itemsHtml = (sale.sale_items || []).map(item => `
     <tr>
-      <td>
-        <input type="checkbox" class="return-item-checkbox" data-index="${idx}" data-product-id="${item.product_id}" data-quantity="${item.quantity}" data-unit-price="${item.unit_price}" data-product-name="${item.product_name}">
-      </td>
       <td>${item.product_name}</td>
       <td class="text-center">${item.quantity}</td>
       <td>${formatCurrency(item.unit_price)}</td>
@@ -367,7 +364,7 @@ function showSaleDetail(sale) {
     </tr>
   `).join('');
 
-  const initialBody = `
+  const body = `
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem;margin-bottom:1.25rem">
       <div>
         <div class="text-xs text-muted">Customer</div>
@@ -388,8 +385,8 @@ function showSaleDetail(sale) {
     </div>
     <div class="table-container">
       <table>
-        <thead><tr><th style="width:40px"></th><th>Product</th><th>Qty</th><th>Unit Price</th><th>Total</th></tr></thead>
-        <tbody>${itemsHtml || '<tr><td colspan="5" class="text-center text-muted">No items</td></tr>'}</tbody>
+        <thead><tr><th>Product</th><th>Qty</th><th>Unit Price</th><th>Total</th></tr></thead>
+        <tbody>${itemsHtml || '<tr><td colspan="4" class="text-center text-muted">No items</td></tr>'}</tbody>
       </table>
     </div>
     <div style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--gray-200)">
@@ -400,40 +397,30 @@ function showSaleDetail(sale) {
     </div>
   `;
 
-  const modal = document.createElement('div');
-  modal.className = 'modal-overlay';
-  modal.id = 'sale-detail-overlay';
-  modal.onclick = (e) => e.target === modal && modal.remove();
-
-  modal.innerHTML = `
-    <div class="modal" style="max-width:700px">
-      <div class="modal-header">
-        <h2 class="modal-title">Receipt - ${sale.invoice_number}</h2>
-        <button class="modal-close" onclick="document.getElementById('sale-detail-overlay').remove()">✕</button>
-      </div>
-      <div class="modal-body" style="max-height:60vh;overflow-y:auto">
-        ${initialBody}
-      </div>
-      <div class="modal-footer" style="display:flex;gap:0.5rem;justify-content:flex-end;padding:1rem;border-top:1px solid var(--gray-200)">
-        <button class="btn btn-ghost" onclick="document.getElementById('sale-detail-overlay').remove()">Close</button>
-        <button class="btn btn-warning" id="return-sale-btn" onclick="window.showReturnForm('${sale.id}')">↩️ Return Sale</button>
-      </div>
-    </div>
+  const footer = `
+    <button class="btn btn-ghost" id="close-sale-detail">Close</button>
+    <button class="btn btn-warning" id="return-sale-btn">↩️ Return Sale</button>
   `;
 
-  document.body.appendChild(modal);
+  const modal = createModal({
+    id: 'sale-detail',
+    title: `Receipt - ${sale.invoice_number}`,
+    body,
+    footer
+  });
 
-  // Handle return button
-  window.showReturnForm = (saleId) => {
-    modal.remove();
-    showReturnForm(sale, saleId);
-  };
+  // Attach event listeners after modal is created
+  document.getElementById('close-sale-detail')?.addEventListener('click', modal.closeModal);
+  document.getElementById('return-sale-btn')?.addEventListener('click', () => {
+    modal.closeModal();
+    setTimeout(() => showReturnForm(sale), 250);
+  });
 }
 
-function showReturnForm(sale, saleId) {
+function showReturnForm(sale) {
   const itemsOptions = (sale.sale_items || []).map((item, idx) => `
     <div style="display:flex;align-items:center;gap:0.75rem;padding:0.75rem;border:1px solid var(--gray-300);border-radius:6px;margin-bottom:0.5rem">
-      <input type="checkbox" class="return-item-checkbox" data-index="${idx}" data-product-id="${item.product_id}" data-quantity="${item.quantity}" data-unit-price="${item.unit_price}" data-product-name="${item.product_name}" onchange="window.updateReturnTotal()">
+      <input type="checkbox" class="return-item-checkbox" data-index="${idx}" data-product-id="${item.product_id}" data-quantity="${item.quantity}" data-unit-price="${item.unit_price}" data-product-name="${item.product_name}" onchange="updateReturnTotal()">
       <div style="flex:1">
         <div style="font-weight:600;font-size:0.95rem">${item.product_name}</div>
         <div style="color:var(--gray-500);font-size:0.85rem">Qty: ${item.quantity} × ${formatCurrency(item.unit_price)}</div>
@@ -442,59 +429,52 @@ function showReturnForm(sale, saleId) {
     </div>
   `).join('');
 
-  const modal = document.createElement('div');
-  modal.className = 'modal-overlay';
-  modal.id = 'return-form-overlay';
-  modal.onclick = (e) => e.target === modal && modal.remove();
-
-  modal.innerHTML = `
-    <div class="modal" style="max-width:600px">
-      <div class="modal-header">
-        <h2 class="modal-title">Return Sale - ${sale.invoice_number}</h2>
-        <button class="modal-close" onclick="document.getElementById('return-form-overlay').remove()">✕</button>
+  const body = `
+    <div class="form-group">
+      <label class="form-label">Select Items to Return</label>
+      <div id="return-items-container">
+        ${itemsOptions}
       </div>
-      <div class="modal-body" style="max-height:70vh;overflow-y:auto">
-        <div class="form-group">
-          <label class="form-label">Select Items to Return</label>
-          <div id="return-items-container">
-            ${itemsOptions}
-          </div>
-          <div style="margin-top:1rem;padding:1rem;background:var(--gray-100);border-radius:6px">
-            <div style="display:flex;justify-content:space-between;margin-bottom:0.5rem">
-              <span>Refund Amount:</span>
-              <span style="font-weight:600;color:var(--success);font-size:1.1rem" id="refund-amount">${formatCurrency(0)}</span>
-            </div>
-          </div>
-        </div>
-
-        <div class="form-group">
-          <label class="form-label">Reason for Return *</label>
-          <select id="return-reason" class="form-select" required>
-            <option value="">-- Select reason --</option>
-            <option value="Defective">Defective</option>
-            <option value="Expired">Expired</option>
-            <option value="Wrong Item">Wrong Item</option>
-            <option value="Customer Request">Customer Request</option>
-            <option value="Mistake">Mistake</option>
-            <option value="Other">Other</option>
-          </select>
-        </div>
-
-        <div class="form-group">
-          <label class="form-label">Notes (Optional)</label>
-          <textarea id="return-notes" class="form-input" rows="3" placeholder="Add any additional notes..."></textarea>
+      <div style="margin-top:1rem;padding:1rem;background:var(--gray-100);border-radius:6px">
+        <div style="display:flex;justify-content:space-between;margin-bottom:0.5rem">
+          <span>Refund Amount:</span>
+          <span style="font-weight:600;color:var(--success);font-size:1.1rem" id="refund-amount">${formatCurrency(0)}</span>
         </div>
       </div>
-      <div class="modal-footer" style="display:flex;gap:0.5rem;justify-content:flex-end;padding:1rem;border-top:1px solid var(--gray-200)">
-        <button class="btn btn-ghost" onclick="document.getElementById('return-form-overlay').remove()">Cancel</button>
-        <button class="btn btn-danger" id="confirm-return-btn" onclick="window.confirmReturn('${sale.id}')">Process Return</button>
-      </div>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Reason for Return *</label>
+      <select id="return-reason" class="form-select" required>
+        <option value="">-- Select reason --</option>
+        <option value="Defective">Defective</option>
+        <option value="Expired">Expired</option>
+        <option value="Wrong Item">Wrong Item</option>
+        <option value="Customer Request">Customer Request</option>
+        <option value="Mistake">Mistake</option>
+        <option value="Other">Other</option>
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Notes (Optional)</label>
+      <textarea id="return-notes" class="form-input" rows="3" placeholder="Add any additional notes..."></textarea>
     </div>
   `;
 
-  document.body.appendChild(modal);
+  const footer = `
+    <button class="btn btn-ghost" id="cancel-return-btn">Cancel</button>
+    <button class="btn btn-danger" id="confirm-return-btn">Process Return</button>
+  `;
 
-  // Handle calculations and submission
+  const modal = createModal({
+    id: 'return-form',
+    title: `Return Sale - ${sale.invoice_number}`,
+    body,
+    footer
+  });
+
+  // Global functions for the return form
   window.updateReturnTotal = () => {
     const checkboxes = document.querySelectorAll('.return-item-checkbox:checked');
     let total = 0;
@@ -503,10 +483,13 @@ function showReturnForm(sale, saleId) {
       const unitPrice = parseFloat(cb.dataset.unitPrice);
       total += quantity * unitPrice;
     });
-    document.getElementById('refund-amount').textContent = formatCurrency(total);
+    const refundEl = document.getElementById('refund-amount');
+    if (refundEl) refundEl.textContent = formatCurrency(total);
   };
 
-  window.confirmReturn = async (saleId) => {
+  // Attach event listeners
+  document.getElementById('cancel-return-btn')?.addEventListener('click', modal.closeModal);
+  document.getElementById('confirm-return-btn')?.addEventListener('click', async () => {
     const reason = document.getElementById('return-reason')?.value;
     const notes = document.getElementById('return-notes')?.value;
     const checkboxes = document.querySelectorAll('.return-item-checkbox:checked');
@@ -534,7 +517,7 @@ function showReturnForm(sale, saleId) {
 
       // Create the return
       const returnPayload = {
-        sale_id: saleId,
+        sale_id: sale.id,
         customer_id: sale.customer_id || null,
         reason: reason,
         total_refund: totalRefund,
@@ -547,7 +530,7 @@ function showReturnForm(sale, saleId) {
       const ret = await createSalesReturn(returnPayload, returnItems);
 
       // Close modal
-      document.getElementById('return-form-overlay').remove();
+      modal.closeModal();
 
       showToast(`✓ Return processed successfully! ${formatCurrency(totalRefund)} refunded. ${returnItems.length} item(s) restocked.`, 'success');
       
@@ -557,5 +540,5 @@ function showReturnForm(sale, saleId) {
       console.error('Error processing return:', error);
       showToast(`Error: ${error.message}`, 'error');
     }
-  };
+  });
 }
