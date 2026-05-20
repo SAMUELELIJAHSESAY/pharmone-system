@@ -917,19 +917,28 @@ export async function createSalesReturn(returnPayload, items) {
       const refundAmount = returnPayload.total_refund || 0;
       const newTotal = Math.max(0, (sale.total_amount || 0) - refundAmount);
       
-      // Check if this is a full return (all items returned)
+      // Check if this is a full return (all items returned / no items left)
+      const remainingItems = sale.sale_items || [];
       const totalReturnedQty = items.reduce((sum, item) => sum + item.quantity, 0);
-      const totalSaleQty = (sale.sale_items || []).reduce((sum, item) => sum + item.quantity, 0);
+      const totalSaleQty = remainingItems.reduce((sum, item) => sum + item.quantity, 0);
       const isFullReturn = totalReturnedQty >= totalSaleQty;
 
-      // Update sale with new total amount
-      await supabase
-        .from('sales')
-        .update({
-          total_amount: newTotal,
-          status: isFullReturn ? 'cancelled' : 'completed'
-        })
-        .eq('id', returnPayload.sale_id);
+      if (isFullReturn) {
+        // Delete the entire sale if all items are returned
+        await supabase
+          .from('sales')
+          .delete()
+          .eq('id', returnPayload.sale_id);
+      } else {
+        // Update sale with new total amount for partial returns
+        await supabase
+          .from('sales')
+          .update({
+            total_amount: newTotal,
+            status: 'completed'
+          })
+          .eq('id', returnPayload.sale_id);
+      }
     }
   }
 
