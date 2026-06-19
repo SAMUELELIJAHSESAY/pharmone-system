@@ -215,17 +215,7 @@ function renderView(container, products, user, branchList) {
   });
 
   document.getElementById('add-product-btn').addEventListener('click', () => showProductModal(null, user, updateView, branchList));
-  document.getElementById('add-multiple-btn').addEventListener('click', () => {
-    const updateView = async () => {
-      try {
-        allProducts = await getProducts(user.profile.pharmacy_id, selectedBranchId);
-        renderView(container, allProducts, user, branchList);
-      } catch (err) {
-        showToast(`Failed to update view: ${err.message}`, 'error');
-      }
-    };
-    showAddMultipleModal(user, updateView, branchList);
-  });
+  document.getElementById('add-multiple-btn').addEventListener('click', () => showAddMultipleModal(user, updateView, branchList));
   document.getElementById('stock-log-btn').addEventListener('click', () => showStockLogs(user));
   document.getElementById('download-template-btn').addEventListener('click', () => downloadInventoryTemplate());
   
@@ -409,7 +399,7 @@ function renderRows(products, branchList) {
         <td class="font-semibold">${p.cost_price ? formatCurrency(p.cost_price) : '-'}</td>
         <td class="font-semibold">${formatCurrency(p.price)}</td>
         <td>
-          <div class="font-semibold ${isLow ? 'expiry-soon' : ''}">${p.stock_boxes} boxes</div>
+          <div class="font-semibold ${isLow ? 'expiry-soon' : ''}">${p.stock_boxes} ${(p.stock_unit_type || 'box').toLowerCase()}${p.stock_boxes !== 1 ? 's' : ''}</div>
           <div class="text-xs text-muted">${totalUnits} units total</div>
         </td>
         <td>${expiryHtml}</td>
@@ -586,6 +576,27 @@ function showProductModal(product, user, updateView, branchList) {
           <input type="number" class="form-input" id="prod-upb" value="${product?.units_per_box || 1}" min="1" />
           <div class="text-xs text-muted" style="margin-top: 0.25rem;">How many units are in 1 box (for bulk tracking)</div>
         </div>
+        <div class="form-group">
+          <label class="form-label">Stock Unit Type *</label>
+          <select class="form-select" id="prod-stock-unit-type" required>
+            <option value="box" ${product?.stock_unit_type === 'box' || !product?.stock_unit_type ? 'selected' : ''}>Box</option>
+            <option value="carton" ${product?.stock_unit_type === 'carton' ? 'selected' : ''}>Carton</option>
+            <option value="strip" ${product?.stock_unit_type === 'strip' ? 'selected' : ''}>Strip</option>
+            <option value="cup" ${product?.stock_unit_type === 'cup' ? 'selected' : ''}>Cup</option>
+            <option value="packet" ${product?.stock_unit_type === 'packet' ? 'selected' : ''}>Packet</option>
+            <option value="blister" ${product?.stock_unit_type === 'blister' ? 'selected' : ''}>Blister</option>
+            <option value="sachet" ${product?.stock_unit_type === 'sachet' ? 'selected' : ''}>Sachet</option>
+            <option value="bottle" ${product?.stock_unit_type === 'bottle' ? 'selected' : ''}>Bottle</option>
+            <option value="vial" ${product?.stock_unit_type === 'vial' ? 'selected' : ''}>Vial</option>
+            <option value="jar" ${product?.stock_unit_type === 'jar' ? 'selected' : ''}>Jar</option>
+            <option value="tube" ${product?.stock_unit_type === 'tube' ? 'selected' : ''}>Tube</option>
+            <option value="bag" ${product?.stock_unit_type === 'bag' ? 'selected' : ''}>Bag</option>
+            <option value="pack" ${product?.stock_unit_type === 'pack' ? 'selected' : ''}>Pack</option>
+            <option value="piece" ${product?.stock_unit_type === 'piece' ? 'selected' : ''}>Piece</option>
+            <option value="card" ${product?.stock_unit_type === 'card' ? 'selected' : ''}>Card</option>
+          </select>
+          <div class="text-xs text-muted" style="margin-top: 0.25rem;">How is stock tracked/stored (boxes, strips, cups, etc)?</div>
+        </div>
         </div>
         <div class="grid-2">
           <div class="form-group">
@@ -636,6 +647,7 @@ function showProductModal(product, user, updateView, branchList) {
       units_per_box: parseInt(overlay.querySelector('#prod-upb').value) || 1,
       stock_boxes: parseInt(overlay.querySelector('#prod-boxes').value) || 0,
       stock_units: parseInt(overlay.querySelector('#prod-units').value) || 0,
+      stock_unit_type: overlay.querySelector('#prod-stock-unit-type').value || 'box',
       expiry_date: overlay.querySelector('#prod-expiry').value || null,
       low_stock_threshold: parseInt(overlay.querySelector('#prod-threshold').value) || 5,
       description: overlay.querySelector('#prod-desc').value.trim(),
@@ -1302,6 +1314,7 @@ function showAddMultipleModal(user, updateView, branchList) {
       const price = parseFloat(row.querySelector('.row-price').value) || 0;
       const cost = parseFloat(row.querySelector('.row-cost').value) || 0;
       const unitType = row.querySelector('.row-unit-type').value;
+      const stockUnitType = row.querySelector('.row-stock-unit-type').value || 'box';
       const minSell = parseInt(row.querySelector('.row-min-sell').value) || 1;
       const upb = parseInt(row.querySelector('.row-upb').value) || 1;
       const boxes = parseInt(row.querySelector('.row-boxes').value) || 0;
@@ -1339,6 +1352,7 @@ function showAddMultipleModal(user, updateView, branchList) {
         units_per_box: upb,
         stock_boxes: boxes,
         stock_units: units,
+        stock_unit_type: stockUnitType,
         low_stock_threshold: threshold,
         expiry_date: expiry,
         description: desc,
@@ -1444,12 +1458,28 @@ function generateProductRow(rowId) {
           <input type="number" class="form-input row-upb" value="1" min="1" />
         </div>
         <div class="form-group">
-          <label class="form-label">Stock (Boxes)</label>
-          <input type="number" class="form-input row-boxes" value="0" min="0" />
+          <label class="form-label">Stock Unit Type *</label>
+          <select class="form-input row-stock-unit-type" required>
+            <option value="box">Box</option>
+            <option value="carton">Carton</option>
+            <option value="strip">Strip</option>
+            <option value="cup">Cup</option>
+            <option value="packet">Packet</option>
+            <option value="blister">Blister</option>
+            <option value="sachet">Sachet</option>
+            <option value="bottle">Bottle</option>
+            <option value="vial">Vial</option>
+            <option value="jar">Jar</option>
+            <option value="tube">Tube</option>
+            <option value="bag">Bag</option>
+            <option value="pack">Pack</option>
+            <option value="piece">Piece</option>
+            <option value="card">Card</option>
+          </select>
         </div>
         <div class="form-group">
-          <label class="form-label">Stock (Units)</label>
-          <input type="number" class="form-input row-units" value="0" min="0" />
+          <label class="form-label">Stock (Quantity)</label>
+          <input type="number" class="form-input row-boxes" value="0" min="0" />
         </div>
       </div>
       <div class="grid-3">

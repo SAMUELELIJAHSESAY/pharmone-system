@@ -508,7 +508,7 @@ export async function getStockLogs(pharmacyId, limit = 100) {
 }
 
 export async function addStock(productId, productName, quantity, notes, userId, pharmacyId, branchId = null, stockUnitType = 'box') {
-  const { data: product } = await supabase.from('products').select('stock_boxes, units_per_box, branch_id').eq('id', productId).single();
+  const { data: product } = await supabase.from('products').select('stock_boxes, units_per_box, branch_id, stock_unit_type').eq('id', productId).single();
   if (!product) throw new Error('Product not found');
   
   // Ensure stock is added to product's branch
@@ -517,13 +517,17 @@ export async function addStock(productId, productName, quantity, notes, userId, 
 
   // Store stock with unit type information
   const newBoxes = product.stock_boxes + quantity;
-  await supabase.from('products').update({ stock_boxes: newBoxes }).eq('id', productId);
+  await supabase
+    .from('products')
+    .update({ stock_boxes: newBoxes, stock_unit_type: stockUnitType })
+    .eq('id', productId);
+  
   await supabase.from('stock_logs').insert({
     product_id: productId,
     product_name: productName,
     change_type: 'restock',
     quantity_change: quantity,
-    notes: `${notes}${stockUnitType !== 'box' ? ` [Unit: ${stockUnitType}]` : ''}`,
+    notes: `${notes}${stockUnitType !== 'box' ? ` [${stockUnitType}s]` : ''}`,
     created_by: userId,
     pharmacy_id: pharmacyId,
     branch_id: targetBranchId
