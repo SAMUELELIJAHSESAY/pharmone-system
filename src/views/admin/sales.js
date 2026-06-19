@@ -121,7 +121,7 @@ export async function renderSales(container, user) {
               <span class="stat-card-label">Today's Revenue</span>
               <div class="stat-card-icon teal">&#128176;</div>
             </div>
-            <div class="stat-card-value">${formatCurrency(todayRevenue)}</div>
+            <div class="stat-card-value" id="today-revenue">${formatCurrency(todayRevenue)}</div>
             <div class="stat-card-change" title="Resets daily at midnight">${todayReset}</div>
           </div>
           <div class="stat-card">
@@ -129,7 +129,7 @@ export async function renderSales(container, user) {
               <span class="stat-card-label">Weekly Revenue</span>
               <div class="stat-card-icon blue">&#128200;</div>
             </div>
-            <div class="stat-card-value" data-stat="week-revenue">${formatCurrency(weekRevenue)}</div>
+            <div class="stat-card-value" id="week-revenue" data-stat="week-revenue">${formatCurrency(weekRevenue)}</div>
             <div class="stat-card-change" title="${periods.weekStart} - ${periods.weekEnd} | Resets every Monday">${periods.weekStart} - ${periods.weekEnd} | ${weekReset}</div>
           </div>
           <div class="stat-card">
@@ -137,7 +137,7 @@ export async function renderSales(container, user) {
               <span class="stat-card-label">Monthly Revenue</span>
               <div class="stat-card-icon purple">&#128181;</div>
             </div>
-            <div class="stat-card-value" data-stat="month-revenue">${formatCurrency(monthRevenue)}</div>
+            <div class="stat-card-value" id="month-revenue" data-stat="month-revenue">${formatCurrency(monthRevenue)}</div>
             <div class="stat-card-change" title="${periods.monthStart} - ${periods.monthEnd} | Resets on the 1st">${periods.monthStart} - ${periods.monthEnd} | ${monthReset}</div>
           </div>
           <div class="stat-card">
@@ -145,7 +145,7 @@ export async function renderSales(container, user) {
               <span class="stat-card-label">Yearly Revenue</span>
               <div class="stat-card-icon green">&#128202;</div>
             </div>
-            <div class="stat-card-value" data-stat="year-revenue">${formatCurrency(yearRevenue)}</div>
+            <div class="stat-card-value" id="year-revenue" data-stat="year-revenue">${formatCurrency(yearRevenue)}</div>
             <div class="stat-card-change" title="${periods.yearStart} - ${periods.yearEnd} | Resets on Jan 1st">${periods.yearStart} - ${periods.yearEnd} | ${yearReset}</div>
           </div>
           <div class="stat-card">
@@ -153,14 +153,14 @@ export async function renderSales(container, user) {
               <span class="stat-card-label">Total Transactions</span>
               <div class="stat-card-icon orange">&#128179;</div>
             </div>
-            <div class="stat-card-value">${sales.length}</div>
+            <div class="stat-card-value" id="total-transactions">${sales.length}</div>
           </div>
           <div class="stat-card">
             <div class="stat-card-header">
               <span class="stat-card-label">Total Revenue</span>
               <div class="stat-card-icon darkgreen">&#128200;</div>
             </div>
-            <div class="stat-card-value" data-stat="total-revenue">${formatCurrency(totalRevenue)}</div>
+            <div class="stat-card-value" id="total-revenue" data-stat="total-revenue">${formatCurrency(totalRevenue)}</div>
             <div class="stat-card-change">All time</div>
           </div>
         </div>
@@ -318,6 +318,42 @@ export async function renderSales(container, user) {
     }
 
     bindViewActions(sales);
+
+    // Auto-refresh stat cards every 30 seconds to show new sales
+    async function refreshSalesStats() {
+      try {
+        const freshStats = await getSalesStats(pharmacyId);
+        
+        // Update stat card values
+        const todayCard = document.getElementById('today-revenue');
+        if (todayCard) todayCard.textContent = formatCurrency(freshStats.todayRevenue);
+        
+        const weekCard = document.getElementById('week-revenue');
+        if (weekCard) weekCard.textContent = formatCurrency(freshStats.weekRevenue);
+        
+        const monthCard = document.getElementById('month-revenue');
+        if (monthCard) monthCard.textContent = formatCurrency(freshStats.monthRevenue);
+        
+        const yearCard = document.getElementById('year-revenue');
+        if (yearCard) yearCard.textContent = formatCurrency(freshStats.yearRevenue);
+        
+        const totalCard = document.getElementById('total-revenue');
+        if (totalCard) totalCard.textContent = formatCurrency(freshStats.totalRevenue);
+      } catch (err) {
+        console.error('Error refreshing sales stats:', err);
+      }
+    }
+
+    // Start auto-refresh interval
+    window.salesStatsRefreshInterval = setInterval(refreshSalesStats, 30000);
+
+    // Store a cleanup function for when user navigates away
+    window.cleanupSalesRefresh = () => {
+      if (window.salesStatsRefreshInterval) {
+        clearInterval(window.salesStatsRefreshInterval);
+        window.salesStatsRefreshInterval = null;
+      }
+    };
   } catch (err) {
     container.innerHTML = `<div class="alert alert-danger">Failed to load sales: ${err.message}</div>`;
   }
