@@ -215,7 +215,17 @@ function renderView(container, products, user, branchList) {
   });
 
   document.getElementById('add-product-btn').addEventListener('click', () => showProductModal(null, user, updateView, branchList));
-  document.getElementById('add-multiple-btn').addEventListener('click', () => showAddMultipleModal(user, reload, branchList));
+  document.getElementById('add-multiple-btn').addEventListener('click', () => {
+    const updateView = async () => {
+      try {
+        allProducts = await getProducts(user.profile.pharmacy_id, selectedBranchId);
+        renderView(container, allProducts, user, branchList);
+      } catch (err) {
+        showToast(`Failed to update view: ${err.message}`, 'error');
+      }
+    };
+    showAddMultipleModal(user, updateView, branchList);
+  });
   document.getElementById('stock-log-btn').addEventListener('click', () => showStockLogs(user));
   document.getElementById('download-template-btn').addEventListener('click', () => downloadInventoryTemplate());
   
@@ -231,6 +241,16 @@ function renderView(container, products, user, branchList) {
     const progressDiv = document.getElementById('import-progress');
     if (progressDiv) progressDiv.style.display = 'block';
     
+    // Smart update callback that preserves branch selection
+    const updateView = async () => {
+      try {
+        allProducts = await getProducts(user.profile.pharmacy_id, selectedBranchId);
+        renderView(container, allProducts, user, branchList);
+      } catch (err) {
+        showToast(`Failed to update view: ${err.message}`, 'error');
+      }
+    };
+    
     try {
       // Detect file type by extension
       const fileName = file.name.toLowerCase();
@@ -238,14 +258,14 @@ function renderView(container, products, user, branchList) {
         // Handle Excel files
         const reader = new FileReader();
         reader.onload = async (event) => {
-          await importProductsFromExcel(event.target.result, file.name, user, reload, progressDiv);
+          await importProductsFromExcel(event.target.result, file.name, user, updateView, progressDiv);
         };
         reader.readAsArrayBuffer(file);
       } else if (fileName.endsWith('.csv')) {
         // Handle CSV files
         const reader = new FileReader();
         reader.onload = async (event) => {
-          await importProductsFromCSV(event.target.result, user, reload, progressDiv);
+          await importProductsFromCSV(event.target.result, user, updateView, progressDiv);
         };
         reader.readAsText(file);
       } else {
@@ -413,6 +433,16 @@ function renderRows(products, branchList) {
 function bindTableActions(products, user, reload, branchList) {
   const productMap = Object.fromEntries(products.map(p => [p.id, p]));
 
+  // Smart update callback that preserves branch selection
+  const updateView = async () => {
+    try {
+      allProducts = await getProducts(user.profile.pharmacy_id, selectedBranchId);
+      renderView(container, allProducts, user, branchList);
+    } catch (err) {
+      showToast(`Failed to update view: ${err.message}`, 'error');
+    }
+  };
+
   // Checkbox selection
   document.querySelectorAll('.product-checkbox').forEach(cb => {
     cb.addEventListener('change', updateBulkActionsBar);
@@ -422,7 +452,7 @@ function bindTableActions(products, user, reload, branchList) {
   document.getElementById('bulk-edit-btn').addEventListener('click', () => {
     const selected = Array.from(document.querySelectorAll('.product-checkbox:checked')).map(cb => cb.dataset.id);
     if (selected.length === 0) return;
-    showBulkEditModal(selected, productMap, user, reload);
+    showBulkEditModal(selected, productMap, user, updateView);
   });
 
   // Bulk deactivate
@@ -431,7 +461,7 @@ function bindTableActions(products, user, reload, branchList) {
     if (selected.length === 0) return;
     const confirmed = await showConfirm(`Deactivate ${selected.length} product(s)?`);
     if (!confirmed) return;
-    await bulkUpdateProducts(selected, { is_active: false }, reload);
+    await bulkUpdateProducts(selected, { is_active: false }, updateView);
   });
 
   // Bulk activate
@@ -440,7 +470,7 @@ function bindTableActions(products, user, reload, branchList) {
     if (selected.length === 0) return;
     const confirmed = await showConfirm(`Activate ${selected.length} product(s)?`);
     if (!confirmed) return;
-    await bulkUpdateProducts(selected, { is_active: true }, reload);
+    await bulkUpdateProducts(selected, { is_active: true }, updateView);
   });
 
   // Bulk delete
@@ -449,7 +479,7 @@ function bindTableActions(products, user, reload, branchList) {
     if (selected.length === 0) return;
     const confirmed = await showConfirm(`Delete ${selected.length} product(s)? This cannot be undone.`);
     if (!confirmed) return;
-    await bulkDeleteProducts(selected, reload);
+    await bulkDeleteProducts(selected, updateView);
   });
 
   // Cancel bulk selection
@@ -477,7 +507,7 @@ function bindTableActions(products, user, reload, branchList) {
       try {
         await deleteProduct(btn.dataset.id);
         showToast('Product deleted');
-        reload();
+        await updateView();
       } catch (err) {
         showToast(err.message, 'error');
       }
@@ -641,13 +671,22 @@ function showProductModal(product, user, updateView, branchList) {
 }
 
 function showRestockModal(productId, productName, user, updateView) {
+  const stockUnitTypes = ['box', 'carton', 'strip', 'cup', 'packet', 'blister', 'sachet', 'bottle', 'vial', 'jar', 'tube', 'bag', 'pack', 'piece'];
+  
   const { overlay, closeModal } = createModal({
     id: 'restock-modal',
     title: `Restock: ${productName}`,
     body: `
       <div class="form-group">
-        <label class="form-label">Quantity to Add (boxes) *</label>
-        <input type="number" class="form-input" id="restock-qty" min="1" value="1" placeholder="Enter boxes to add" />
+        <label class="form-label">Stock Unit Type *</label>
+        <select class="form-select" id="restock-unit-type" required>
+          ${stockUnitTypes.map(unit => `<option value="${unit}" ${unit === 'box' ? 'selected' : ''}>${unit.charAt(0).toUpperCase() + unit.slice(1)}</option>`).join('')}
+        </select>
+        <div class="text-xs text-muted" style="margin-top: 0.25rem;">What unit are you adding (boxes, strips, cups, etc)?</div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Quantity to Add *</label>
+        <input type="number" class="form-input" id="restock-qty" min="1" value="1" placeholder="Enter quantity" />
       </div>
       <div class="form-group">
         <label class="form-label">Notes</label>
@@ -665,11 +704,13 @@ function showRestockModal(productId, productName, user, updateView) {
   overlay.querySelector('#save-restock').addEventListener('click', async () => {
     const qty = parseInt(overlay.querySelector('#restock-qty').value);
     const notes = overlay.querySelector('#restock-notes').value;
+    const unitType = overlay.querySelector('#restock-unit-type').value;
     const errEl = overlay.querySelector('#restock-err');
     if (!qty || qty < 1) { errEl.textContent = 'Enter a valid quantity.'; errEl.classList.remove('hidden'); return; }
+    if (!unitType) { errEl.textContent = 'Please select a unit type.'; errEl.classList.remove('hidden'); return; }
     try {
-      await addStock(productId, productName, qty, notes, user.id, user.profile.pharmacy_id);
-      showToast('Stock added successfully');
+      await addStock(productId, productName, qty, notes, user.id, user.profile.pharmacy_id, null, unitType);
+      showToast(`Stock added successfully (${qty} ${unitType}s)`);
       closeModal();
       // Update the view without losing branch selection
       await updateView();
@@ -714,7 +755,7 @@ async function showStockLogs(user) {
   });
 }
 
-async function importProductsFromCSV(csvText, user, reload, progressDiv) {
+async function importProductsFromCSV(csvText, user, updateView, progressDiv) {
   const { createProduct } = await import('../../database.js');
   const { showToast } = await import('../../utils.js');
   
@@ -835,7 +876,7 @@ async function importProductsFromCSV(csvText, user, reload, progressDiv) {
     if (progressDiv) progressDiv.style.display = 'none';
     
     if (successCount > 0) {
-      setTimeout(() => reload(), 500);
+      setTimeout(() => updateView(), 500);
     }
   } catch (err) {
     console.error('CSV import error:', err);
@@ -844,7 +885,7 @@ async function importProductsFromCSV(csvText, user, reload, progressDiv) {
   }
 }
 
-async function importProductsFromExcel(arrayBuffer, fileName, user, reload, progressDiv) {
+async function importProductsFromExcel(arrayBuffer, fileName, user, updateView, progressDiv) {
   try {
     // Check if a branch is selected
     if (!selectedBranchId) {
@@ -959,7 +1000,7 @@ async function importProductsFromExcel(arrayBuffer, fileName, user, reload, prog
     if (progressDiv) progressDiv.style.display = 'none';
     
     if (successCount > 0) {
-      setTimeout(() => reload(), 500);
+      setTimeout(() => updateView(), 500);
     }
   } catch (err) {
     console.error('Excel import error:', err);
@@ -1039,7 +1080,7 @@ function updateBulkActionsBar() {
   }
 }
 
-async function bulkUpdateProducts(productIds, updates, reload) {
+async function bulkUpdateProducts(productIds, updates, updateView) {
   try {
     let successCount = 0;
     let errorCount = 0;
@@ -1058,13 +1099,13 @@ async function bulkUpdateProducts(productIds, updates, reload) {
     document.querySelectorAll('.product-checkbox').forEach(cb => cb.checked = false);
     document.getElementById('select-all-products').checked = false;
     updateBulkActionsBar();
-    reload();
+    await updateView();
   } catch (err) {
     showToast(`Bulk update failed: ${err.message}`, 'error');
   }
 }
 
-async function bulkDeleteProducts(productIds, reload) {
+async function bulkDeleteProducts(productIds, updateView) {
   try {
     let successCount = 0;
     let errorCount = 0;
@@ -1083,13 +1124,13 @@ async function bulkDeleteProducts(productIds, reload) {
     document.querySelectorAll('.product-checkbox').forEach(cb => cb.checked = false);
     document.getElementById('select-all-products').checked = false;
     updateBulkActionsBar();
-    reload();
+    await updateView();
   } catch (err) {
     showToast(`Bulk delete failed: ${err.message}`, 'error');
   }
 }
 
-function showBulkEditModal(productIds, productMap, user, reload) {
+function showBulkEditModal(productIds, productMap, user, updateView) {
   const { overlay, closeModal } = createModal({
     id: 'bulk-edit-modal',
     title: `Bulk Edit (${productIds.length} products)`,
@@ -1196,7 +1237,7 @@ function showBulkEditModal(productIds, productMap, user, reload) {
       document.querySelectorAll('.product-checkbox').forEach(cb => cb.checked = false);
       document.getElementById('select-all-products').checked = false;
       updateBulkActionsBar();
-      reload();
+      await updateView();
     } catch (err) {
       errEl.textContent = err.message;
       errEl.classList.remove('hidden');
@@ -1206,7 +1247,7 @@ function showBulkEditModal(productIds, productMap, user, reload) {
   });
 }
 
-function showAddMultipleModal(user, reload, branchList) {
+function showAddMultipleModal(user, updateView, branchList) {
   const { overlay, closeModal } = createModal({
     id: 'add-multiple-modal',
     title: 'Add Multiple Products',
@@ -1333,7 +1374,7 @@ function showAddMultipleModal(user, reload, branchList) {
 
       showToast(`✓ Added ${successCount} product(s). ${errorCount} failed.`, errorCount === 0 ? 'success' : 'warning');
       closeModal();
-      reload();
+      await updateView();
     } catch (err) {
       errEl.textContent = err.message;
       errEl.classList.remove('hidden');
