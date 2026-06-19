@@ -193,6 +193,16 @@ function renderView(container, products, user, branchList) {
 
   const reload = () => renderInventory(container, user);
 
+  // Smart update callback that preserves branch selection
+  const updateView = async () => {
+    try {
+      allProducts = await getProducts(user.profile.pharmacy_id, selectedBranchId);
+      renderView(container, allProducts, user, branchList);
+    } catch (err) {
+      showToast(`Failed to update view: ${err.message}`, 'error');
+    }
+  };
+
   // Branch selector change handler
   document.getElementById('branch-selector').addEventListener('change', async (e) => {
     selectedBranchId = e.target.value;
@@ -204,7 +214,7 @@ function renderView(container, products, user, branchList) {
     }
   });
 
-  document.getElementById('add-product-btn').addEventListener('click', () => showProductModal(null, user, reload, branchList));
+  document.getElementById('add-product-btn').addEventListener('click', () => showProductModal(null, user, updateView, branchList));
   document.getElementById('add-multiple-btn').addEventListener('click', () => showAddMultipleModal(user, reload, branchList));
   document.getElementById('stock-log-btn').addEventListener('click', () => showStockLogs(user));
   document.getElementById('download-template-btn').addEventListener('click', () => downloadInventoryTemplate());
@@ -452,12 +462,12 @@ function bindTableActions(products, user, reload, branchList) {
   document.querySelectorAll('.edit-product-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       const product = productMap[btn.dataset.id];
-      if (product) showProductModal(product, user, reload, branchList);
+      if (product) showProductModal(product, user, updateView, branchList);
     });
   });
 
   document.querySelectorAll('.restock-btn').forEach(btn => {
-    btn.addEventListener('click', () => showRestockModal(btn.dataset.id, btn.dataset.name, user, reload));
+    btn.addEventListener('click', () => showRestockModal(btn.dataset.id, btn.dataset.name, user, updateView));
   });
 
   document.querySelectorAll('.delete-product-btn').forEach(btn => {
@@ -475,7 +485,7 @@ function bindTableActions(products, user, reload, branchList) {
   });
 }
 
-function showProductModal(product, user, reload, branchList) {
+function showProductModal(product, user, updateView, branchList) {
   const isEdit = !!product;
   // Pre-select the currently viewed branch when adding a new product
   const preSelectedBranchId = isEdit ? product?.branch_id : selectedBranchId;
@@ -619,7 +629,8 @@ function showProductModal(product, user, reload, branchList) {
         showToast('Product added successfully');
       }
       closeModal();
-      reload();
+      // Update the view without losing branch selection
+      await updateView();
     } catch (err) {
       errEl.textContent = err.message;
       errEl.classList.remove('hidden');
@@ -629,7 +640,7 @@ function showProductModal(product, user, reload, branchList) {
   });
 }
 
-function showRestockModal(productId, productName, user, reload) {
+function showRestockModal(productId, productName, user, updateView) {
   const { overlay, closeModal } = createModal({
     id: 'restock-modal',
     title: `Restock: ${productName}`,
@@ -660,7 +671,8 @@ function showRestockModal(productId, productName, user, reload) {
       await addStock(productId, productName, qty, notes, user.id, user.profile.pharmacy_id);
       showToast('Stock added successfully');
       closeModal();
-      reload();
+      // Update the view without losing branch selection
+      await updateView();
     } catch (err) {
       errEl.textContent = err.message;
       errEl.classList.remove('hidden');
