@@ -6,6 +6,7 @@ let allProducts = [];
 let branches = [];
 let selectedBranchId = null;
 let currentFilterType = null; // For pre-filtering from dashboard
+let containerRef = null; // Module-level reference to container for updateView callbacks
 
 export async function renderInventory(container, user, filterType = null) {
   // Store filter type for use in rendering
@@ -40,6 +41,9 @@ export async function renderInventory(container, user, filterType = null) {
 }
 
 function renderView(container, products, user, branchList) {
+  // Store container reference for use in callbacks
+  containerRef = container;
+  
   const lowStockCount = products.filter(p => p.stock_boxes <= p.low_stock_threshold).length;
   const expiredCount = products.filter(p => isExpired(p.expiry_date)).length;
   
@@ -197,7 +201,7 @@ function renderView(container, products, user, branchList) {
   const updateView = async () => {
     try {
       allProducts = await getProducts(user.profile.pharmacy_id, selectedBranchId);
-      renderView(container, allProducts, user, branchList);
+      renderView(containerRef, allProducts, user, branchList);
     } catch (err) {
       showToast(`Failed to update view: ${err.message}`, 'error');
     }
@@ -208,7 +212,7 @@ function renderView(container, products, user, branchList) {
     selectedBranchId = e.target.value;
     try {
       allProducts = await getProducts(user.profile.pharmacy_id, selectedBranchId);
-      renderView(container, allProducts, user, branchList);
+      renderView(containerRef, allProducts, user, branchList);
     } catch (err) {
       showToast(`Failed to load products: ${err.message}`, 'error');
     }
@@ -235,7 +239,7 @@ function renderView(container, products, user, branchList) {
     const updateView = async () => {
       try {
         allProducts = await getProducts(user.profile.pharmacy_id, selectedBranchId);
-        renderView(container, allProducts, user, branchList);
+        renderView(containerRef, allProducts, user, branchList);
       } catch (err) {
         showToast(`Failed to update view: ${err.message}`, 'error');
       }
@@ -427,7 +431,7 @@ function bindTableActions(products, user, reload, branchList) {
   const updateView = async () => {
     try {
       allProducts = await getProducts(user.profile.pharmacy_id, selectedBranchId);
-      renderView(container, allProducts, user, branchList);
+      renderView(containerRef, allProducts, user, branchList);
     } catch (err) {
       showToast(`Failed to update view: ${err.message}`, 'error');
     }
