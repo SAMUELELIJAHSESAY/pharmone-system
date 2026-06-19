@@ -186,7 +186,14 @@ export function renderBranchDetailsView(branchId, pharmacyId) {
     // Add event listener for back button
     const backBtn = document.getElementById('back-to-branches-btn');
     if (backBtn) {
-      backBtn.addEventListener('click', () => window.navigate('branches'));
+      backBtn.addEventListener('click', () => {
+        // Clear the refresh interval to avoid memory leaks
+        if (window.staffSalesRefreshInterval) {
+          clearInterval(window.staffSalesRefreshInterval);
+          window.staffSalesRefreshInterval = null;
+        }
+        window.navigate('branches');
+      });
     }
     
     document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -230,6 +237,11 @@ async function loadBranchData(branchId, pharmacyId) {
     loadBranchSales(branchId);
     loadBranchStaff(branchId);
     loadRecentActivity(branchId);
+    
+    // Auto-refresh staff sales data every 30 seconds to show new sales in total
+    window.staffSalesRefreshInterval = setInterval(() => {
+      loadBranchStaff(branchId);
+    }, 30000);
     
   } catch (error) {
     console.error('Error loading branch data:', error);
