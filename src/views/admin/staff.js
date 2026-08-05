@@ -60,7 +60,7 @@ function renderView(container, profiles, user) {
 function renderRows(profiles, currentUser) {
   if (!profiles.length) return `<tr><td colspan="6"><div class="empty-state"><div class="empty-state-icon">&#128101;</div><div class="empty-state-title">No staff yet</div><div class="empty-state-desc">Add your first team member</div></div></td></tr>`;
 
-  const roleColors = { admin: 'badge-primary', salesman: 'badge-gray' };
+  const roleColors = { admin: 'badge-primary', salesman: 'badge-gray', inventory_manager: 'badge-info' };
 
   return profiles.map(p => `
     <tr>
@@ -139,6 +139,7 @@ function showAddStaffModal(user, reload) {
             <label class="form-label">Role *</label>
             <select class="form-select" id="staff-role">
               <option value="salesman">Salesman</option>
+              <option value="inventory_manager">Inventory Manager</option>
               <option value="admin">Admin</option>
             </select>
           </div>
@@ -204,6 +205,7 @@ function showEditStaffModal(staff, reload) {
           <label class="form-label">Role</label>
           <select class="form-select" id="es-role">
             <option value="salesman" ${staff.role === 'salesman' ? 'selected' : ''}>Salesman</option>
+            <option value="inventory_manager" ${staff.role === 'inventory_manager' ? 'selected' : ''}>Inventory Manager</option>
             <option value="admin" ${staff.role === 'admin' ? 'selected' : ''}>Admin</option>
           </select>
         </div>

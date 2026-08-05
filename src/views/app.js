@@ -165,12 +165,16 @@ export function renderApp(user) {
 
   const defaultView = role === 'super_admin' ? 'super-dashboard'
     : role === 'admin' ? 'admin-dashboard'
+    : role === 'inventory_manager' ? 'inventory'
     : 'salesman-dashboard';
 
   // Try to restore last visited view from localStorage
   const savedView = localStorage.getItem('currentView');
   const savedParams = localStorage.getItem('currentParams');
-  const viewToLoad = savedView || defaultView;
+  let viewToLoad = savedView || defaultView;
+  if (role === 'inventory_manager' && !['inventory', 'branches', 'branch-details'].includes(viewToLoad)) {
+    viewToLoad = defaultView;
+  }
   const paramsToLoad = savedParams ? JSON.parse(savedParams) : {};
 
   navigate(viewToLoad, paramsToLoad);
@@ -255,6 +259,27 @@ export function navigate(view, params = {}) {
               const { navigate } = await import('./app.js');
               navigate('pos');
             })()">Go to Point of Sale</button>
+          </div>
+        </div>
+      `;
+      if (titleEl) titleEl.textContent = 'Access Denied';
+      return;
+    }
+  }
+
+  if (currentUser.profile?.role === 'inventory_manager') {
+    const allowedViews = new Set(['inventory', 'branches', 'branch-details']);
+    if (!allowedViews.has(view)) {
+      content.innerHTML = `
+        <div class="animate-in">
+          <div style="padding: 2rem; text-align: center;">
+            <div style="font-size: 3rem; margin-bottom: 1rem">🔒</div>
+            <div style="font-size: 1.5rem; font-weight: 600; margin-bottom: 0.5rem">Access Denied</div>
+            <div style="color: var(--gray-600); margin-bottom: 2rem">You only have access to Inventory and Branches. Please contact your administrator for additional access.</div>
+            <button class="btn btn-primary" onclick="(async () => {
+              const { navigate } = await import('./app.js');
+              navigate('inventory');
+            })()">Go to Inventory</button>
           </div>
         </div>
       `;
