@@ -85,6 +85,17 @@ export function renderSidebar(user, features = null) {
         <span class="nav-icon">⚙️</span> Salesman Features
       </button>
     `;
+  } else if (role === 'inventory_manager') {
+    navItems = `
+      <div class="sidebar-section-label">Inventory</div>
+      <button class="nav-item" data-view="inventory">
+        <span class="nav-icon">&#128230;</span> Inventory
+      </button>
+      <div class="sidebar-section-label">Organization</div>
+      <button class="nav-item" data-view="branches">
+        <span class="nav-icon">&#127968;</span> Branches
+      </button>
+    `;
   } else {
     // Salesman navigation with feature filtering
     // Default to all features enabled for backward compatibility if features not provided
@@ -175,7 +186,8 @@ export function renderSidebar(user, features = null) {
   const roleLabel = {
     super_admin: 'Super Admin',
     admin: 'Admin',
-    salesman: 'Salesman'
+    salesman: 'Salesman',
+    inventory_manager: 'Inventory Manager'
   }[role] || role;
 
   return `
