@@ -33,17 +33,73 @@ import { showToast } from '../utils.js';
 import { showProfileModal } from '../components/profile.js';
 
 let currentUser = null;
+let activeUser = null;
 let currentView = null;
 let currentParams = {};
 let currentSalesmanFeatures = null; // Store salesman features globally
+let currentImpersonation = null;
+
+function getActiveUser() {
+  if (!currentImpersonation) return currentUser;
+
+  const impersonatedProfile = {
+    ...currentUser.profile,
+    role: currentImpersonation.role || 'admin',
+    pharmacy_id: currentImpersonation.pharmacyId,
+    pharmacies: currentImpersonation.pharmacy
+  };
+
+  return {
+    ...currentUser,
+    profile: impersonatedProfile
+  };
+}
+
+export function impersonatePharmacy(pharmacy) {
+  if (!currentUser || currentUser.profile?.role !== 'super_admin') return;
+  currentImpersonation = {
+    pharmacyId: pharmacy.id,
+    role: 'admin',
+    pharmacy,
+    profile: {
+      role: 'admin',
+      pharmacy_id: pharmacy.id,
+      pharmacies: pharmacy
+    }
+  };
+  localStorage.setItem('impersonation', JSON.stringify(currentImpersonation));
+  activeUser = getActiveUser();
+  renderApp(currentUser);
+  navigate('admin-dashboard');
+}
+
+export function clearImpersonation() {
+  currentImpersonation = null;
+  localStorage.removeItem('impersonation');
+  activeUser = currentUser;
+  renderApp(currentUser);
+  navigate('super-dashboard');
+}
 
 export function renderApp(user) {
   currentUser = user;
-  const role = user.profile?.role || 'salesman';
+  const savedImpersonation = localStorage.getItem('impersonation');
+  if (savedImpersonation && currentUser.profile?.role === 'super_admin') {
+    try {
+      currentImpersonation = JSON.parse(savedImpersonation);
+    } catch (err) {
+      currentImpersonation = null;
+      localStorage.removeItem('impersonation');
+    }
+  } else {
+    currentImpersonation = null;
+  }
+  activeUser = getActiveUser();
+  const role = activeUser.profile?.role || 'salesman';
 
   // Load pharmacy settings globally for currency display on all pages
-  if (user.profile?.pharmacy_id) {
-    getPharmacySettings(user.profile.pharmacy_id)
+  if (activeUser.profile?.pharmacy_id) {
+    getPharmacySettings(activeUser.profile.pharmacy_id)
       .then(settings => {
         window.pharmacySettings = settings || { currency_symbol: 'Le', currency_code: 'NLE' };
       })
@@ -51,15 +107,13 @@ export function renderApp(user) {
 
     // Load salesman features for feature-based navigation filtering
     if (role === 'salesman') {
-      getSalesmanFeatures(user.profile.pharmacy_id)
+      getSalesmanFeatures(activeUser.profile.pharmacy_id)
         .then(features => {
           currentSalesmanFeatures = features;
-          // Update sidebar with features-filtered navigation
-          updateSidebarWithFeatures(features);
+          updateSidebarWithFeatures(activeUser, features);
         })
         .catch(err => {
           console.error('Failed to load salesman features:', err);
-          // Continue with defaults
           currentSalesmanFeatures = {
             pos: true,
             customers: true,
@@ -78,21 +132,23 @@ export function renderApp(user) {
     <div class="app-shell">
       <div class="sidebar-backdrop" id="sidebar-backdrop"></div>
       <aside class="sidebar" id="sidebar">
-        ${renderSidebar(user, null)}
+        ${renderSidebar(activeUser, null)}
       </aside>
       <div class="main-content">
         <header class="topbar">
           <div style="display:flex;gap:0.5rem;align-items:center">
-            <button class="mobile-toggle" id="mobile-menu-btn" aria-label="Toggle menu">&#9776;</button>
+            <button class="mobile-toggle" id="mobile-menu-btn" aria-label="Toggle menu">☰</button>
             <button class="btn btn-ghost btn-sm desktop-sidebar-toggle" id="desktop-sidebar-toggle" aria-label="Toggle sidebar" style="display:none;font-size:1.2rem">☰</button>
           </div>
           <span class="topbar-title" id="topbar-title">Dashboard</span>
           <div class="topbar-actions">
             <div class="topbar-search">
-              <span style="color:var(--gray-400);font-size:0.9rem">&#128269;</span>
+              <span style="color:var(--gray-400);font-size:0.9rem">🔍</span>
               <input type="text" id="global-search" placeholder="Search..." />
             </div>
             ${createThemeToggle()}
+            <span id="impersonation-note" class="topbar-impersonation-note" style="display:none;align-self:center;font-size:0.9rem;color:var(--gray-700);"></span>
+            <button class="btn btn-warning btn-sm" id="exit-impersonation-btn" style="display:none;">Exit Pharmacy View</button>
             <button class="btn btn-ghost btn-sm" id="profile-btn" style="display:inline-flex;align-items:center;gap:0.5rem;cursor:pointer;padding:0.5rem 0.75rem">
               <span>👤</span>
               <span>My Account</span>
@@ -111,13 +167,25 @@ export function renderApp(user) {
     await signOut();
   });
 
+  const impersonationNote = document.getElementById('impersonation-note');
+  const exitImpersonationBtn = document.getElementById('exit-impersonation-btn');
+  if (currentImpersonation && impersonationNote && exitImpersonationBtn) {
+    impersonationNote.textContent = `Viewing as ${currentImpersonation.role.replace('_', ' ')} for ${currentImpersonation.pharmacy?.name || 'selected pharmacy'}`;
+    impersonationNote.style.display = 'inline-flex';
+    exitImpersonationBtn.style.display = 'inline-flex';
+    exitImpersonationBtn.addEventListener('click', () => {
+      clearImpersonation();
+    });
+  } else if (impersonationNote && exitImpersonationBtn) {
+    impersonationNote.style.display = 'none';
+    exitImpersonationBtn.style.display = 'none';
+  }
+
   document.getElementById('profile-btn').addEventListener('click', async (e) => {
     e.preventDefault();
     e.stopPropagation();
-    console.log('Profile button clicked, currentUser:', currentUser);
     try {
       await showProfileModal(currentUser);
-      console.log('Profile modal shown');
     } catch (err) {
       console.error('Error showing profile modal:', err);
     }
@@ -138,12 +206,12 @@ export function renderApp(user) {
       sidebar.classList.toggle('collapsed');
       localStorage.setItem('sidebar-collapsed', sidebar.classList.contains('collapsed'));
     });
-    
+
     // Restore sidebar state
     if (localStorage.getItem('sidebar-collapsed') === 'true') {
       document.getElementById('sidebar').classList.add('collapsed');
     }
-    
+
     // Show desktop toggle on larger screens
     desktopToggle.style.display = 'block';
   }
@@ -158,7 +226,7 @@ export function renderApp(user) {
     globalSearchEl.addEventListener('keyup', (e) => {
       const query = e.target.value.toLowerCase().trim();
       if (e.key === 'Enter' && query) {
-        handleGlobalSearch(query, currentUser);
+        handleGlobalSearch(query, activeUser);
       }
     });
   }
@@ -192,10 +260,10 @@ export function renderApp(user) {
  * Update sidebar with feature-filtered navigation for salesman
  * Called after features are loaded from database
  */
-function updateSidebarWithFeatures(features) {
+function updateSidebarWithFeatures(user, features) {
   const sidebarNav = document.querySelector('.sidebar-nav');
-  if (!sidebarNav && currentUser) {
-    sidebarNav.innerHTML = renderSidebar(currentUser, features).match(/<nav class="sidebar-nav">([\s\S]*?)<\/nav>/)?.[1] || '';
+  if (sidebarNav && user) {
+    sidebarNav.innerHTML = renderSidebar(user, features).match(/<nav class="sidebar-nav">([\s\S]*?)<\/nav>/)?.[1] || '';
     // Re-attach click handlers to new nav items
     document.querySelectorAll('.nav-item').forEach(item => {
       item.addEventListener('click', () => {
@@ -234,8 +302,10 @@ export function navigate(view, params = {}) {
 
   content.innerHTML = '<div class="loading-spinner"></div>';
 
+  const activeRole = activeUser.profile?.role;
+
   // Check if salesman is trying to access a disabled feature
-  if (currentUser.profile?.role === 'salesman') {
+  if (activeRole === 'salesman') {
     const featureMapping = {
       'salesman-dashboard': 'dashboard',
       'sales-history': 'sales_history',
@@ -267,7 +337,7 @@ export function navigate(view, params = {}) {
     }
   }
 
-  if (currentUser.profile?.role === 'inventory_manager') {
+  if (activeRole === 'inventory_manager') {
     const allowedViews = new Set(['inventory', 'branches', 'branch-details']);
     if (!allowedViews.has(view)) {
       content.innerHTML = `
@@ -320,38 +390,38 @@ export function navigate(view, params = {}) {
   if (titleEl) titleEl.textContent = titles[view] || 'Dashboard';
 
   switch (view) {
-    case 'super-dashboard': renderSuperAdminDashboard(content, currentUser); break;
-    case 'pharmacies': renderPharmacies(content, currentUser); break;
-    case 'all-users': renderAllUsers(content, currentUser); break;
-    case 'settings': renderSettings(content, currentUser); break;
-    case 'admin-dashboard': renderAdminDashboard(content, currentUser); break;
-    case 'inventory': renderInventory(content, currentUser, currentParams.filterType); break;
-    case 'sales': renderSales(content, currentUser); break;
-    case 'customers': renderCustomers(content, currentUser); break;
-    case 'patients': renderPatientManagementView(content, currentUser); break;
-    case 'expenses': renderExpenseManagement(content, currentUser); break;
-    case 'stock-transfers': renderStockTransfers(content, currentUser); break;
-    case 'suppliers': renderSuppliers(content, currentUser); break;
-    case 'purchases': renderPurchases(content, currentUser); break;
-    case 'returns': renderReturns(content, currentUser); break;
-    case 'returns-management': renderAdminReturnsManagement(content, currentUser); break;
-    case 'alerts': renderAlerts(content, currentUser); break;
-    case 'reports': renderReports(content, currentUser); break;
-    case 'sales-reports': renderAdminSalesReports(content, currentUser); break;
-    case 'daily-reports': renderDailyReports(content, currentUser); break;
-    case 'staff': renderStaff(content, currentUser); break;
-    case 'branches': renderBranches(content, currentUser); break;
+    case 'super-dashboard': renderSuperAdminDashboard(content, activeUser); break;
+    case 'pharmacies': renderPharmacies(content, activeUser); break;
+    case 'all-users': renderAllUsers(content, activeUser); break;
+    case 'settings': renderSettings(content, activeUser); break;
+    case 'admin-dashboard': renderAdminDashboard(content, activeUser); break;
+    case 'inventory': renderInventory(content, activeUser, currentParams.filterType); break;
+    case 'sales': renderSales(content, activeUser); break;
+    case 'customers': renderCustomers(content, activeUser); break;
+    case 'patients': renderPatientManagementView(content, activeUser); break;
+    case 'expenses': renderExpenseManagement(content, activeUser); break;
+    case 'stock-transfers': renderStockTransfers(content, activeUser); break;
+    case 'suppliers': renderSuppliers(content, activeUser); break;
+    case 'purchases': renderPurchases(content, activeUser); break;
+    case 'returns': renderReturns(content, activeUser); break;
+    case 'returns-management': renderAdminReturnsManagement(content, activeUser); break;
+    case 'alerts': renderAlerts(content, activeUser); break;
+    case 'reports': renderReports(content, activeUser); break;
+    case 'sales-reports': renderAdminSalesReports(content, activeUser); break;
+    case 'daily-reports': renderDailyReports(content, activeUser); break;
+    case 'staff': renderStaff(content, activeUser); break;
+    case 'branches': renderBranches(content, activeUser); break;
     case 'branch-details': 
       if (params.branchId && params.pharmacyId) {
         renderBranchDetailsView(params.branchId, params.pharmacyId);
       }
       break;
-    case 'salesman-dashboard': renderSalesmanDashboard(content, currentUser); break;
-    case 'pos': renderPOS(content, currentUser); break;
-    case 'sales-history': renderSalesHistory(content, currentUser); break;
-    case 'returns-request': renderSalesmanReturnsRequest(content, currentUser); break;
-    case 'salesman-features': renderSalesmanFeatures(content, currentUser); break;
-    default: content.innerHTML = '<div class="empty-state"><div class="empty-state-icon">&#128269;</div><div class="empty-state-title">Page not found</div></div>';
+    case 'salesman-dashboard': renderSalesmanDashboard(content, activeUser); break;
+    case 'pos': renderPOS(content, activeUser); break;
+    case 'sales-history': renderSalesHistory(content, activeUser); break;
+    case 'returns-request': renderSalesmanReturnsRequest(content, activeUser); break;
+    case 'salesman-features': renderSalesmanFeatures(content, activeUser); break;
+    default: content.innerHTML = '<div class="empty-state"><div class="empty-state-icon">🔍</div><div class="empty-state-title">Page not found</div></div>';
   }
 }
 
@@ -371,7 +441,7 @@ function handleGlobalSearch(query, user) {
       <div class="card">
         <div class="card-body">
           <div class="empty-state">
-            <div class="empty-state-icon">&#128269;</div>
+            <div class="empty-state-icon">🔍</div>
             <div class="empty-state-title">Search functionality</div>
             <div class="empty-state-desc">Use the navigation menu to browse specific sections. Search is available within each module.</div>
           </div>
