@@ -54,7 +54,7 @@ function renderRows(pharmacies) {
   if (!pharmacies.length) return `
     <tr><td colspan="6">
       <div class="empty-state">
-        <div class="empty-state-icon">&#127978;</div>
+        <div class="empty-state-icon">🏥</div>
         <div class="empty-state-title">No pharmacies yet</div>
         <div class="empty-state-desc">Click "New Pharmacy" to add the first one</div>
       </div>
@@ -68,7 +68,10 @@ function renderRows(pharmacies) {
       <td><span class="badge ${p.is_active ? 'badge-success' : 'badge-danger'}">${p.is_active ? 'Active' : 'Disabled'}</span></td>
       <td class="text-sm text-muted">${formatDate(p.created_at)}</td>
       <td>
-        <div class="flex gap-2">
+        <div class="flex gap-2 flex-wrap">
+          <button class="btn btn-ghost btn-sm access-pharmacy-btn" data-pharmacy='${JSON.stringify(p)}'>
+            Access Pharmacy
+          </button>
           <button class="btn btn-ghost btn-sm edit-pharmacy-btn" data-id="${p.id}" data-pharmacy='${JSON.stringify(p)}'>
             Edit
           </button>
@@ -82,7 +85,6 @@ function renderRows(pharmacies) {
 }
 
 function bindRowActions(pharmacies, user) {
-  // Edit button handlers
   document.querySelectorAll('.edit-pharmacy-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       const pharmacy = JSON.parse(btn.dataset.pharmacy);
@@ -92,7 +94,14 @@ function bindRowActions(pharmacies, user) {
     });
   });
 
-  // Toggle status button handlers
+  document.querySelectorAll('.access-pharmacy-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const pharmacy = JSON.parse(btn.dataset.pharmacy);
+      const { impersonatePharmacy } = await import('../app.js');
+      impersonatePharmacy(pharmacy);
+    });
+  });
+
   document.querySelectorAll('.toggle-status-btn').forEach(btn => {
     btn.addEventListener('click', async () => {
       const id = btn.dataset.id;

@@ -63,8 +63,8 @@ export async function renderAllUsers(container, user) {
 }
 
 function renderRows(profiles) {
-  if (!profiles.length) return `<tr><td colspan="7"><div class="empty-state"><div class="empty-state-icon">&#128101;</div><div class="empty-state-title">No users found</div></div></td></tr>`;
-  const roleColors = { super_admin: 'badge-danger', admin: 'badge-primary', salesman: 'badge-gray' };
+  if (!profiles.length) return `<tr><td colspan="7"><div class="empty-state"><div class="empty-state-icon">👥</div><div class="empty-state-title">No users found</div></div></td></tr>`;
+  const roleColors = { super_admin: 'badge-danger', admin: 'badge-primary', salesman: 'badge-gray', inventory_manager: 'badge-info' };
   return profiles.map(p => `
     <tr>
       <td class="font-semibold">${p.full_name || '—'}</td>
@@ -74,7 +74,8 @@ function renderRows(profiles) {
       <td><span class="badge ${p.is_active ? 'badge-success' : 'badge-danger'}">${p.is_active ? 'Active' : 'Inactive'}</span></td>
       <td class="text-sm text-muted">${formatDate(p.created_at)}</td>
       <td>
-        <div class="flex gap-2">
+        <div class="flex gap-2 flex-wrap">
+          ${p.pharmacy_id ? `<button class="btn btn-ghost btn-sm access-user-pharmacy-btn" data-user='${JSON.stringify(p)}'>Access Pharmacy</button>` : ''}
           <button class="btn btn-ghost btn-sm edit-user-btn" data-id="${p.id}" data-user='${JSON.stringify(p)}'>
             Edit
           </button>
@@ -88,7 +89,6 @@ function renderRows(profiles) {
 }
 
 function bindActions(profiles) {
-  // Edit button handlers
   document.querySelectorAll('.edit-user-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       const profile = JSON.parse(btn.dataset.user);
@@ -98,7 +98,16 @@ function bindActions(profiles) {
     });
   });
 
-  // Toggle button handlers
+  document.querySelectorAll('.access-user-pharmacy-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const profile = JSON.parse(btn.dataset.user);
+      if (!profile.pharmacy_id) return;
+      const { impersonatePharmacy } = await import('../app.js');
+      const pharmacy = profile.pharmacies || { id: profile.pharmacy_id, name: 'Selected Pharmacy' };
+      impersonatePharmacy(pharmacy);
+    });
+  });
+
   document.querySelectorAll('.toggle-user-btn').forEach(btn => {
     btn.addEventListener('click', async () => {
       const confirmed = await showConfirm(`Are you sure you want to ${btn.dataset.active === 'true' ? 'disable' : 'enable'} this user?`);
@@ -133,6 +142,7 @@ function showEditUserModal(profile, onSave) {
           <select class="form-select" id="eu-role" disabled>
             <option value="super_admin" ${profile.role === 'super_admin' ? 'selected' : ''}>Super Admin</option>
             <option value="admin" ${profile.role === 'admin' ? 'selected' : ''}>Admin</option>
+            <option value="inventory_manager" ${profile.role === 'inventory_manager' ? 'selected' : ''}>Inventory Manager</option>
             <option value="salesman" ${profile.role === 'salesman' ? 'selected' : ''}>Salesman</option>
           </select>
           <small class="text-muted" style="display:block;margin-top:0.25rem">Role cannot be changed here</small>
@@ -190,13 +200,11 @@ function showEditUserModal(profile, onSave) {
     saveBtn.textContent = 'Saving...';
 
     try {
-      // Update profile information
       await updateProfile(profile.id, { 
         full_name: name,
         email: email
       });
 
-      // Update password if provided
       if (newPassword) {
         const { error: pwdError } = await supabase.auth.admin.updateUserById(profile.id, {
           password: newPassword
