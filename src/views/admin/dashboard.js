@@ -1,4 +1,4 @@
-import { getDashboardStats, getSales, getPharmacySettings } from '../../database.js';
+import { getDashboardStats, getPharmacySettings } from '../../database.js';
 import { formatCurrency, formatDate, formatDateTime } from '../../utils.js';
 
 export async function renderAdminDashboard(container, user) {
@@ -16,9 +16,10 @@ export async function renderAdminDashboard(container, user) {
     }
     
     // Force fresh data fetch by adding cache buster
+    const db = await import('../../database.js');
     const [stats, recentSales] = await Promise.all([
       getDashboardStats(pharmacyId),
-      getSales(pharmacyId, 10)
+      db.getSales(pharmacyId, 10)
     ]);
 
     // Validate data freshness - if data seems stale, refetch
