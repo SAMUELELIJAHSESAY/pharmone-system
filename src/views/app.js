@@ -40,6 +40,35 @@ let currentParams = {};
 let currentSalesmanFeatures = null; // Store salesman features globally
 let currentImpersonation = null;
 
+function setMobileSidebarOpen(isOpen) {
+  const sidebar = document.getElementById('sidebar');
+  const backdrop = document.getElementById('sidebar-backdrop');
+  const menuButton = document.getElementById('mobile-menu-btn');
+  const shouldOpen = Boolean(isOpen) && window.matchMedia('(max-width: 768px)').matches;
+
+  sidebar?.classList.toggle('open', shouldOpen);
+  backdrop?.classList.toggle('show', shouldOpen);
+  document.body.classList.toggle('mobile-nav-open', shouldOpen);
+  menuButton?.setAttribute('aria-expanded', String(shouldOpen));
+  menuButton?.setAttribute('aria-label', shouldOpen ? 'Close navigation menu' : 'Open navigation menu');
+}
+
+function closeMobileSidebar() {
+  setMobileSidebarOpen(false);
+}
+
+// Global mobile-navigation safety. The module is evaluated once, so these listeners cannot stack.
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && document.getElementById('sidebar')?.classList.contains('open')) {
+    closeMobileSidebar();
+    document.getElementById('mobile-menu-btn')?.focus();
+  }
+});
+
+window.addEventListener('resize', () => {
+  if (window.innerWidth > 768) closeMobileSidebar();
+});
+
 function getActiveUser() {
   if (!currentImpersonation) return currentUser;
 
@@ -138,8 +167,8 @@ export function renderApp(user) {
       <div class="main-content">
         <header class="topbar">
           <div style="display:flex;gap:0.5rem;align-items:center">
-            <button class="mobile-toggle" id="mobile-menu-btn" aria-label="Toggle menu">&#9776;</button>
-            <button class="btn btn-ghost btn-sm desktop-sidebar-toggle" id="desktop-sidebar-toggle" aria-label="Toggle sidebar" style="display:none;font-size:1.2rem">☰</button>
+            <button class="mobile-toggle" id="mobile-menu-btn" aria-label="Open navigation menu" aria-controls="sidebar" aria-expanded="false">&#9776;</button>
+            <button class="btn btn-ghost btn-sm desktop-sidebar-toggle" id="desktop-sidebar-toggle" aria-label="Toggle sidebar" style="font-size:1.2rem">☰</button>
           </div>
           <span class="topbar-title" id="topbar-title">Dashboard</span>
           <div class="topbar-actions">
@@ -149,12 +178,15 @@ export function renderApp(user) {
             </div>
             ${createThemeToggle()}
             <span id="impersonation-note" class="topbar-impersonation-note" style="display:none;align-self:center;font-size:0.9rem;color:var(--gray-700);"></span>
-            <button class="btn btn-warning btn-sm" id="exit-impersonation-btn" style="display:none;">Exit Pharmacy View</button>
-            <button class="btn btn-ghost btn-sm" id="profile-btn" style="display:inline-flex;align-items:center;gap:0.5rem;cursor:pointer;padding:0.5rem 0.75rem">
-              <span>👤</span>
-              <span>My Account</span>
+            <button class="btn btn-warning btn-sm" id="exit-impersonation-btn" aria-label="Exit pharmacy view" style="display:none;">Exit Pharmacy View</button>
+            <button class="btn btn-ghost btn-sm topbar-action-btn" id="profile-btn" aria-label="My Account">
+              <span aria-hidden="true">👤</span>
+              <span class="topbar-action-label">My Account</span>
             </button>
-            <button class="btn btn-ghost btn-sm" id="signout-btn">Sign out</button>
+            <button class="btn btn-ghost btn-sm topbar-action-btn" id="signout-btn" aria-label="Sign out">
+              <span aria-hidden="true">↪</span>
+              <span class="topbar-action-label">Sign out</span>
+            </button>
           </div>
         </header>
         <main class="page-content" id="page-content">
@@ -196,31 +228,32 @@ export function renderApp(user) {
   // Initialize theme toggle
   initThemeToggle();
 
-  document.getElementById('mobile-menu-btn').addEventListener('click', () => {
-    document.getElementById('sidebar').classList.toggle('open');
+  const sidebar = document.getElementById('sidebar');
+  const sidebarBackdrop = document.getElementById('sidebar-backdrop');
+  const mobileMenuBtn = document.getElementById('mobile-menu-btn');
+
+  mobileMenuBtn?.addEventListener('click', () => {
+    setMobileSidebarOpen(!sidebar?.classList.contains('open'));
   });
+
+  sidebarBackdrop?.addEventListener('click', closeMobileSidebar);
+
+  // A desktop sidebar preference must never leak into the mobile drawer.
+  const desktopMediaQuery = window.matchMedia('(min-width: 769px)');
 
   // Desktop sidebar collapse toggle
   const desktopToggle = document.getElementById('desktop-sidebar-toggle');
   if (desktopToggle) {
     desktopToggle.addEventListener('click', () => {
-      const sidebar = document.getElementById('sidebar');
-      sidebar.classList.toggle('collapsed');
-      localStorage.setItem('sidebar-collapsed', sidebar.classList.contains('collapsed'));
+      sidebar?.classList.toggle('collapsed');
+      localStorage.setItem('sidebar-collapsed', sidebar?.classList.contains('collapsed') ? 'true' : 'false');
     });
-    
-    // Restore sidebar state
-    if (localStorage.getItem('sidebar-collapsed') === 'true') {
-      document.getElementById('sidebar').classList.add('collapsed');
-    }
-    
-    // Show desktop toggle on larger screens
-    desktopToggle.style.display = 'block';
-  }
 
-  document.getElementById('sidebar-backdrop').addEventListener('click', () => {
-    document.getElementById('sidebar').classList.remove('open');
-  });
+    // Restore sidebar state only on desktop. A desktop preference must never affect the mobile drawer.
+    if (desktopMediaQuery.matches && localStorage.getItem('sidebar-collapsed') === 'true') {
+      sidebar?.classList.add('collapsed');
+    }
+  }
 
   // Global search functionality
   const globalSearchEl = document.getElementById('global-search');
@@ -253,7 +286,7 @@ export function renderApp(user) {
     item.addEventListener('click', () => {
       const view = item.dataset.view;
       if (view) navigate(view);
-      document.getElementById('sidebar').classList.remove('open');
+      closeMobileSidebar();
     });
   });
 }
@@ -271,7 +304,7 @@ function updateSidebarWithFeatures(user, features) {
       item.addEventListener('click', () => {
         const view = item.dataset.view;
         if (view) navigate(view);
-        document.getElementById('sidebar').classList.remove('open');
+        closeMobileSidebar();
       });
     });
   }
@@ -287,6 +320,12 @@ export function isSalesmanFeatureEnabled(featureName) {
 }
 
 export function navigate(view, params = {}) {
+  // Programmatic navigation must also dismiss the mobile drawer/backdrop.
+  document.getElementById('sidebar')?.classList.remove('open');
+  document.getElementById('sidebar-backdrop')?.classList.remove('show');
+  document.body.classList.remove('mobile-nav-open');
+  document.getElementById('mobile-menu-btn')?.setAttribute('aria-expanded', 'false');
+
   // End timers/subscriptions owned by the previous SPA view before rendering the next one.
   const lifecycleToken = beginViewLifecycle();
 
