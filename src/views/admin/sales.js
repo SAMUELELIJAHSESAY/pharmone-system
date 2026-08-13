@@ -1,7 +1,7 @@
 import { getSales, enrichSalesWithItems, getBranches, getSalesStats, createSalesReturn, supabase } from '../../database.js';
 import { formatCurrency, formatDateTime, showToast } from '../../utils.js';
 import { createModal } from '../../components/modal.js';
-import { isViewLifecycleActive, registerViewInterval } from '../../view-lifecycle.js';
+import { isViewLifecycleActive, registerViewCleanup, registerViewInterval } from '../../view-lifecycle.js';
 
 // Helper function to get the next period reset time
 function getNextPeriodResets() {
@@ -328,9 +328,13 @@ export async function renderSales(container, user, lifecycleToken) {
 
     bindViewActions(sales);
 
-    // Keep headline totals fresh without polling while the view is hidden or filtered.
-    // The lifecycle registry guarantees that this interval is destroyed on navigation.
+    // Keep headline totals current primarily from database change events instead of polling.
+    // A slow safety interval remains as a fallback in case Realtime is unavailable.
     let statsRefreshInFlight = false;
+    let realtimeRefreshTimer = null;
+    const SALES_STATS_SAFETY_REFRESH_MS = 15 * 60 * 1000;
+    const SALES_STATS_EVENT_DEBOUNCE_MS = 2500;
+
     const hasActiveFilters = () => Boolean(
       document.getElementById('sales-search')?.value ||
       document.getElementById('payment-filter')?.value ||
@@ -372,8 +376,58 @@ export async function renderSales(container, user, lifecycleToken) {
       }
     }
 
-    // One lightweight aggregate refresh per minute while this exact view remains active.
-    registerViewInterval(lifecycleToken, refreshSalesStats, 60000);
+    // Batch closely-spaced sales/return events into one tiny aggregate RPC.
+    // This prevents a burst of transactions from causing a burst of stats queries.
+    const queueEventDrivenStatsRefresh = () => {
+      if (!isViewLifecycleActive(lifecycleToken) || document.visibilityState !== 'visible' || hasActiveFilters()) return;
+
+      if (realtimeRefreshTimer) {
+        window.clearTimeout(realtimeRefreshTimer);
+      }
+
+      realtimeRefreshTimer = window.setTimeout(() => {
+        realtimeRefreshTimer = null;
+        void refreshSalesStats();
+      }, SALES_STATS_EVENT_DEBOUNCE_MS);
+    };
+
+    // While the Sales view is active, listen only for sales/return mutations for this pharmacy.
+    // Realtime updates the small revenue cards; the heavier sales table is intentionally not
+    // re-downloaded automatically. Reopening Sales or using normal navigation refreshes the list.
+    const salesStatsChannel = supabase
+      .channel(`sales-stats-${pharmacyId}-${lifecycleToken}`)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'sales', filter: `pharmacy_id=eq.${pharmacyId}` },
+        queueEventDrivenStatsRefresh
+      )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'sales', filter: `pharmacy_id=eq.${pharmacyId}` },
+        queueEventDrivenStatsRefresh
+      )
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'sales_returns', filter: `pharmacy_id=eq.${pharmacyId}` },
+        queueEventDrivenStatsRefresh
+      )
+      .subscribe((status) => {
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          console.warn('Sales stats Realtime unavailable; using 15-minute safety refresh.');
+        }
+      });
+
+    registerViewCleanup(lifecycleToken, () => {
+      if (realtimeRefreshTimer) {
+        window.clearTimeout(realtimeRefreshTimer);
+        realtimeRefreshTimer = null;
+      }
+      void supabase.removeChannel(salesStatsChannel);
+    });
+
+    // Safety fallback only: four tiny aggregate requests per hour while Sales stays open.
+    // This is 93% less idle polling than the former 60-second refresh.
+    registerViewInterval(lifecycleToken, refreshSalesStats, SALES_STATS_SAFETY_REFRESH_MS);
   } catch (err) {
     if (!isViewLifecycleActive(lifecycleToken)) return;
     container.innerHTML = `<div class="alert alert-danger">Failed to load sales: ${err.message}</div>`;
@@ -616,8 +670,11 @@ function showReturnForm(sale) {
 
       showToast(`✓ Return processed successfully! ${formatCurrency(totalRefund)} refunded. ${returnItems.length} item(s) restocked.`, 'success');
       
-      // Reload sales
-      setTimeout(() => location.reload(), 1500);
+      // Refresh only the Sales SPA view. Avoid a browser-level reload, which would
+      // rebuild the whole application and cause unrelated startup queries.
+      window.setTimeout(() => {
+        import('../app.js').then(m => m.navigate('sales'));
+      }, 400);
     } catch (error) {
       console.error('Error processing return:', error);
       showToast(`Error: ${error.message}`, 'error');
