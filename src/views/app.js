@@ -461,7 +461,7 @@ export function navigate(view, params = {}) {
       }
       break;
     case 'salesman-dashboard': renderSalesmanDashboard(content, activeUser); break;
-    case 'pos': renderPOS(content, activeUser); break;
+    case 'pos': renderPOS(content, activeUser, lifecycleToken); break;
     case 'sales-history': renderSalesHistory(content, activeUser); break;
     case 'returns-request': renderSalesmanReturnsRequest(content, activeUser); break;
     case 'salesman-features': renderSalesmanFeatures(content, activeUser); break;
