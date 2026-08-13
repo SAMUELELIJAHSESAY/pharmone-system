@@ -1,6 +1,7 @@
 import { getSales, enrichSalesWithItems, getBranches, getSalesStats, createSalesReturn, supabase } from '../../database.js';
 import { formatCurrency, formatDateTime, showToast } from '../../utils.js';
 import { createModal } from '../../components/modal.js';
+import { isViewLifecycleActive, registerViewInterval } from '../../view-lifecycle.js';
 
 // Helper function to get the next period reset time
 function getNextPeriodResets() {
@@ -78,17 +79,21 @@ function getPeriodInfo() {
   };
 }
 
-export async function renderSales(container, user) {
+export async function renderSales(container, user, lifecycleToken) {
   const pharmacyId = user.profile?.pharmacy_id;
   if (!pharmacyId) { container.innerHTML = `<div class="alert alert-warning">No pharmacy linked.</div>`; return; }
 
   try {
-    const salesData = await getSales(pharmacyId, 200);
-    const sales = await enrichSalesWithItems(salesData);
-    const [branches, stats] = await Promise.all([
+    const [salesData, branches, stats] = await Promise.all([
+      getSales(pharmacyId, 200),
       getBranches(pharmacyId),
       getSalesStats(pharmacyId)
     ]);
+
+    if (!isViewLifecycleActive(lifecycleToken)) return;
+
+    const sales = await enrichSalesWithItems(salesData);
+    if (!isViewLifecycleActive(lifecycleToken)) return;
 
     // Extract calculated values from server-side stats
     const todayRevenue = stats.todayRevenue;
@@ -153,7 +158,7 @@ export async function renderSales(container, user) {
               <span class="stat-card-label">Total Transactions</span>
               <div class="stat-card-icon orange">&#128179;</div>
             </div>
-            <div class="stat-card-value" id="total-transactions">${sales.length}</div>
+            <div class="stat-card-value" id="total-transactions">${stats.totalTransactions}</div>
           </div>
           <div class="stat-card">
             <div class="stat-card-header">
@@ -298,6 +303,10 @@ export async function renderSales(container, user) {
       if (revenueCard) {
         revenueCard.textContent = formatCurrency(filteredRevenue);
       }
+      const transactionsCard = document.getElementById('total-transactions');
+      if (transactionsCard) {
+        transactionsCard.textContent = filteredCompletedSales.length;
+      }
       
       document.getElementById('sales-tbody').innerHTML = renderRows(filtered);
       bindViewActions(filtered);
@@ -319,42 +328,54 @@ export async function renderSales(container, user) {
 
     bindViewActions(sales);
 
-    // Auto-refresh stat cards every 30 seconds to show new sales
+    // Keep headline totals fresh without polling while the view is hidden or filtered.
+    // The lifecycle registry guarantees that this interval is destroyed on navigation.
+    let statsRefreshInFlight = false;
+    const hasActiveFilters = () => Boolean(
+      document.getElementById('sales-search')?.value ||
+      document.getElementById('payment-filter')?.value ||
+      document.getElementById('branch-filter')?.value ||
+      document.getElementById('date-filter-from')?.value ||
+      document.getElementById('date-filter-to')?.value
+    );
+
     async function refreshSalesStats() {
+      if (statsRefreshInFlight || document.visibilityState !== 'visible' || hasActiveFilters()) return;
+      if (!isViewLifecycleActive(lifecycleToken)) return;
+
+      statsRefreshInFlight = true;
       try {
         const freshStats = await getSalesStats(pharmacyId);
-        
-        // Update stat card values
+        if (!isViewLifecycleActive(lifecycleToken)) return;
+
         const todayCard = document.getElementById('today-revenue');
         if (todayCard) todayCard.textContent = formatCurrency(freshStats.todayRevenue);
-        
+
         const weekCard = document.getElementById('week-revenue');
         if (weekCard) weekCard.textContent = formatCurrency(freshStats.weekRevenue);
-        
+
         const monthCard = document.getElementById('month-revenue');
         if (monthCard) monthCard.textContent = formatCurrency(freshStats.monthRevenue);
-        
+
         const yearCard = document.getElementById('year-revenue');
         if (yearCard) yearCard.textContent = formatCurrency(freshStats.yearRevenue);
-        
+
         const totalCard = document.getElementById('total-revenue');
         if (totalCard) totalCard.textContent = formatCurrency(freshStats.totalRevenue);
+
+        const transactionsCard = document.getElementById('total-transactions');
+        if (transactionsCard) transactionsCard.textContent = freshStats.totalTransactions;
       } catch (err) {
         console.error('Error refreshing sales stats:', err);
+      } finally {
+        statsRefreshInFlight = false;
       }
     }
 
-    // Start auto-refresh interval
-    window.salesStatsRefreshInterval = setInterval(refreshSalesStats, 30000);
-
-    // Store a cleanup function for when user navigates away
-    window.cleanupSalesRefresh = () => {
-      if (window.salesStatsRefreshInterval) {
-        clearInterval(window.salesStatsRefreshInterval);
-        window.salesStatsRefreshInterval = null;
-      }
-    };
+    // One lightweight aggregate refresh per minute while this exact view remains active.
+    registerViewInterval(lifecycleToken, refreshSalesStats, 60000);
   } catch (err) {
+    if (!isViewLifecycleActive(lifecycleToken)) return;
     container.innerHTML = `<div class="alert alert-danger">Failed to load sales: ${err.message}</div>`;
   }
 }
