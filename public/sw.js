@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'v1.2.1';
+const CACHE_VERSION = 'v1.2.2';
 const CACHE_NAME = `pharmacare-shell-${CACHE_VERSION}`;
 const CACHE_PREFIX = 'pharmacare-shell-';
 const OFFLINE_URL = '/offline.html';
