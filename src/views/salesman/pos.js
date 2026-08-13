@@ -1,6 +1,7 @@
 import { getProducts, getCustomers, createCustomer, createSale, getStaffBranch, getPharmacySettings, getBranchDetails } from '../../database.js';
 import { formatCurrency, showToast, debounce, formatUTCDateTime } from '../../utils.js';
 import { createModal } from '../../components/modal.js';
+import { isViewLifecycleActive, registerViewCleanup } from '../../view-lifecycle.js';
 
 let cart = [];
 let allProducts = [];
@@ -8,8 +9,16 @@ let allCustomers = [];
 let selectedCustomer = null;
 let currentUser = null;
 let staffBranchId = null;
+let currentLifecycleToken = null;
+let cleanupPOSInteractions = null;
 
-export async function renderPOS(container, user) {
+export async function renderPOS(container, user, lifecycleToken = null) {
+  if (cleanupPOSInteractions) {
+    cleanupPOSInteractions();
+    cleanupPOSInteractions = null;
+  }
+
+  currentLifecycleToken = lifecycleToken;
   currentUser = user;
   cart = [];
   selectedCustomer = null;
@@ -20,10 +29,12 @@ export async function renderPOS(container, user) {
   try {
     // Load pharmacy settings globally so all formatCurrency calls use correct currency
     const settings = await getPharmacySettings(pharmacyId);
+    if (lifecycleToken && !isViewLifecycleActive(lifecycleToken)) return;
     window.pharmacySettings = settings || { currency_symbol: 'Le', currency_code: 'NLE' };
     
     // Get the salesman's assigned branch
     staffBranchId = await getStaffBranch(user.id);
+    if (lifecycleToken && !isViewLifecycleActive(lifecycleToken)) return;
     if (!staffBranchId) {
       container.innerHTML = `<div class="alert alert-warning">You are not assigned to any branch. Contact your administrator.</div>`;
       return;
@@ -33,6 +44,7 @@ export async function renderPOS(container, user) {
       getProducts(pharmacyId, staffBranchId),
       getCustomers(pharmacyId)
     ]);
+    if (lifecycleToken && !isViewLifecycleActive(lifecycleToken)) return;
 
     if (allProducts.length === 0) {
       container.innerHTML = `<div class="alert alert-warning">No products available in your assigned branch.</div>`;
@@ -41,6 +53,7 @@ export async function renderPOS(container, user) {
 
     renderPOSView(container);
   } catch (err) {
+    if (lifecycleToken && !isViewLifecycleActive(lifecycleToken)) return;
     container.innerHTML = `<div class="alert alert-danger">Failed to load POS: ${err.message}</div>`;
   }
 }
@@ -52,7 +65,7 @@ function renderPOSView(container) {
         <div class="page-title">Point of Sale</div>
         <div class="page-subtitle">Select products to create a sale</div>
       </div>
-      <div class="flex gap-2">
+      <div class="flex gap-2 pos-customer-actions">
         <select class="form-select" id="customer-select" style="min-width:200px">
           <option value="">Walk-in Customer</option>
           ${allCustomers.map(c => `<option value="${c.id}">${c.name} ${c.phone ? '('+c.phone+')' : ''}</option>`).join('')}
@@ -81,7 +94,10 @@ function renderPOSView(container) {
       <div class="pos-cart">
         <div class="pos-cart-header">
           <span>&#128179; Cart</span>
-          <span id="cart-count" class="badge badge-gray">0 items</span>
+          <div class="pos-cart-header-actions">
+            <span id="cart-count" class="badge badge-gray">0 items</span>
+            <button type="button" class="mobile-pos-cart-close" id="mobile-pos-cart-close" aria-label="Close cart">&#10005;</button>
+          </div>
         </div>
         <div class="pos-cart-items" id="cart-items">
           <div class="empty-state" style="padding:1.5rem">
@@ -122,7 +138,84 @@ function renderPOSView(container) {
         </div>
       </div>
     </div>
+
+    <button type="button" class="mobile-pos-cart-toggle" id="mobile-pos-cart-toggle" aria-expanded="false" aria-controls="pos-cart">
+      <span class="mobile-pos-cart-toggle-main">
+        <span aria-hidden="true">&#128722;</span>
+        <span>View Cart</span>
+        <span class="mobile-pos-cart-count" id="mobile-cart-count">0</span>
+      </span>
+      <span class="mobile-pos-cart-total" id="mobile-cart-total">Le0.00</span>
+    </button>
+    <div class="mobile-pos-cart-backdrop" id="mobile-pos-cart-backdrop" aria-hidden="true"></div>
   `;
+
+  const posCart = document.querySelector('.pos-cart');
+  if (posCart) posCart.id = 'pos-cart';
+
+  const mobileCartToggle = document.getElementById('mobile-pos-cart-toggle');
+  const mobileCartClose = document.getElementById('mobile-pos-cart-close');
+  const mobileCartBackdrop = document.getElementById('mobile-pos-cart-backdrop');
+  const mobileCartMedia = window.matchMedia('(max-width: 640px)');
+
+  const setMobileCartOpen = (open) => {
+    if (!posCart) return;
+    const shouldOpen = Boolean(open && mobileCartMedia.matches);
+    posCart.classList.toggle('mobile-open', shouldOpen);
+    mobileCartBackdrop?.classList.toggle('show', shouldOpen);
+    document.body.classList.toggle('mobile-pos-cart-open', shouldOpen);
+    mobileCartToggle?.setAttribute('aria-expanded', shouldOpen ? 'true' : 'false');
+    mobileCartBackdrop?.setAttribute('aria-hidden', shouldOpen ? 'false' : 'true');
+
+    if (mobileCartMedia.matches) {
+      posCart.setAttribute('aria-hidden', shouldOpen ? 'false' : 'true');
+      if (shouldOpen) window.setTimeout(() => mobileCartClose?.focus(), 0);
+    } else {
+      posCart.removeAttribute('aria-hidden');
+    }
+  };
+
+  const handleMobileCartMediaChange = () => setMobileCartOpen(false);
+  const handlePOSKeydown = (e) => {
+    if (e.key === 'Escape' && posCart?.classList.contains('mobile-open')) {
+      setMobileCartOpen(false);
+      mobileCartToggle?.focus();
+      return;
+    }
+
+    if (e.ctrlKey && e.shiftKey && e.key === 'P') {
+      e.preventDefault();
+      showReceiptPreview();
+    }
+  };
+
+  const openMobileCart = () => setMobileCartOpen(true);
+  const closeMobileCart = () => setMobileCartOpen(false);
+
+  mobileCartToggle?.addEventListener('click', openMobileCart);
+  mobileCartClose?.addEventListener('click', closeMobileCart);
+  mobileCartBackdrop?.addEventListener('click', closeMobileCart);
+  mobileCartMedia.addEventListener?.('change', handleMobileCartMediaChange);
+  document.addEventListener('keydown', handlePOSKeydown);
+  setMobileCartOpen(false);
+
+  cleanupPOSInteractions = () => {
+    mobileCartToggle?.removeEventListener('click', openMobileCart);
+    mobileCartClose?.removeEventListener('click', closeMobileCart);
+    mobileCartBackdrop?.removeEventListener('click', closeMobileCart);
+    mobileCartMedia.removeEventListener?.('change', handleMobileCartMediaChange);
+    document.removeEventListener('keydown', handlePOSKeydown);
+    document.body.classList.remove('mobile-pos-cart-open');
+    posCart?.classList.remove('mobile-open');
+    mobileCartBackdrop?.classList.remove('show');
+  };
+
+  if (currentLifecycleToken && isViewLifecycleActive(currentLifecycleToken)) {
+    registerViewCleanup(currentLifecycleToken, () => {
+      cleanupPOSInteractions?.();
+      cleanupPOSInteractions = null;
+    });
+  }
 
   document.getElementById('pos-search').addEventListener('input', debounce((e) => filterProducts()));
   document.getElementById('pos-cat-filter').addEventListener('change', () => filterProducts());
@@ -132,14 +225,6 @@ function renderPOSView(container) {
   document.getElementById('add-customer-quick').addEventListener('click', showQuickAddCustomer);
   document.getElementById('discount-input').addEventListener('input', updateCartTotals);
   document.getElementById('checkout-btn').addEventListener('click', processCheckout);
-
-  // Add keyboard listener for receipt preview (Ctrl+Shift+P)
-  document.addEventListener('keydown', (e) => {
-    if (e.ctrlKey && e.shiftKey && e.key === 'P') {
-      e.preventDefault();
-      showReceiptPreview();
-    }
-  });
 
   bindProductClicks();
 }
@@ -234,6 +319,8 @@ function renderCart() {
     `;
     if (checkoutBtn) checkoutBtn.disabled = true;
     if (countBadge) countBadge.textContent = '0 items';
+    const mobileCount = document.getElementById('mobile-cart-count');
+    if (mobileCount) mobileCount.textContent = '0';
     updateCartTotals();
     return;
   }
@@ -290,6 +377,8 @@ function renderCart() {
 
   const totalItems = cart.reduce((sum, i) => sum + i.quantity, 0);
   if (countBadge) countBadge.textContent = totalItems + ' item(s)';
+  const mobileCount = document.getElementById('mobile-cart-count');
+  if (mobileCount) mobileCount.textContent = String(totalItems);
   if (checkoutBtn) checkoutBtn.disabled = false;
 
   document.querySelectorAll('.decrease-qty').forEach(btn => {
@@ -368,6 +457,8 @@ function updateCartTotals() {
   const totalEl = document.getElementById('cart-total');
   if (subtotalEl) subtotalEl.textContent = formatCurrency(subtotal);
   if (totalEl) totalEl.textContent = formatCurrency(total);
+  const mobileTotalEl = document.getElementById('mobile-cart-total');
+  if (mobileTotalEl) mobileTotalEl.textContent = formatCurrency(total);
 }
 
 async function processCheckout() {
@@ -435,7 +526,7 @@ async function processCheckout() {
     showReceiptModal(sale, cart.slice(), total, discount, paymentMethod, branchDetails);
     cart = [];
     selectedCustomer = null;
-    renderPOS(document.getElementById('page-content'), currentUser);
+    renderPOS(document.getElementById('page-content'), currentUser, currentLifecycleToken);
   } catch (err) {
     let errorMsg = err.message || 'Unknown error occurred';
     
