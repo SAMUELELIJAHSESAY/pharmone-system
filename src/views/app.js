@@ -31,6 +31,7 @@ import { renderAllUsers } from './super-admin/users.js';
 import { renderSettings } from './super-admin/settings.js';
 import { showToast } from '../utils.js';
 import { showProfileModal } from '../components/profile.js';
+import { beginViewLifecycle, cleanupActiveView } from '../view-lifecycle.js';
 
 let currentUser = null;
 let activeUser = null;
@@ -137,13 +138,13 @@ export function renderApp(user) {
       <div class="main-content">
         <header class="topbar">
           <div style="display:flex;gap:0.5rem;align-items:center">
-            <button class="mobile-toggle" id="mobile-menu-btn" aria-label="Toggle menu">☰</button>
+            <button class="mobile-toggle" id="mobile-menu-btn" aria-label="Toggle menu">&#9776;</button>
             <button class="btn btn-ghost btn-sm desktop-sidebar-toggle" id="desktop-sidebar-toggle" aria-label="Toggle sidebar" style="display:none;font-size:1.2rem">☰</button>
           </div>
           <span class="topbar-title" id="topbar-title">Dashboard</span>
           <div class="topbar-actions">
             <div class="topbar-search">
-              <span style="color:var(--gray-400);font-size:0.9rem">🔍</span>
+              <span style="color:var(--gray-400);font-size:0.9rem">&#128269;</span>
               <input type="text" id="global-search" placeholder="Search..." />
             </div>
             ${createThemeToggle()}
@@ -164,6 +165,7 @@ export function renderApp(user) {
   `;
 
   document.getElementById('signout-btn').addEventListener('click', async () => {
+    cleanupActiveView();
     await signOut();
   });
 
@@ -206,12 +208,12 @@ export function renderApp(user) {
       sidebar.classList.toggle('collapsed');
       localStorage.setItem('sidebar-collapsed', sidebar.classList.contains('collapsed'));
     });
-
+    
     // Restore sidebar state
     if (localStorage.getItem('sidebar-collapsed') === 'true') {
       document.getElementById('sidebar').classList.add('collapsed');
     }
-
+    
     // Show desktop toggle on larger screens
     desktopToggle.style.display = 'block';
   }
@@ -285,6 +287,9 @@ export function isSalesmanFeatureEnabled(featureName) {
 }
 
 export function navigate(view, params = {}) {
+  // End timers/subscriptions owned by the previous SPA view before rendering the next one.
+  const lifecycleToken = beginViewLifecycle();
+
   currentView = view;
   currentParams = params;
 
@@ -396,7 +401,7 @@ export function navigate(view, params = {}) {
     case 'settings': renderSettings(content, activeUser); break;
     case 'admin-dashboard': renderAdminDashboard(content, activeUser); break;
     case 'inventory': renderInventory(content, activeUser, currentParams.filterType); break;
-    case 'sales': renderSales(content, activeUser); break;
+    case 'sales': renderSales(content, activeUser, lifecycleToken); break;
     case 'customers': renderCustomers(content, activeUser); break;
     case 'patients': renderPatientManagementView(content, activeUser); break;
     case 'expenses': renderExpenseManagement(content, activeUser); break;
@@ -413,7 +418,7 @@ export function navigate(view, params = {}) {
     case 'branches': renderBranches(content, activeUser); break;
     case 'branch-details': 
       if (params.branchId && params.pharmacyId) {
-        renderBranchDetailsView(params.branchId, params.pharmacyId);
+        renderBranchDetailsView(params.branchId, params.pharmacyId, lifecycleToken);
       }
       break;
     case 'salesman-dashboard': renderSalesmanDashboard(content, activeUser); break;
@@ -421,7 +426,7 @@ export function navigate(view, params = {}) {
     case 'sales-history': renderSalesHistory(content, activeUser); break;
     case 'returns-request': renderSalesmanReturnsRequest(content, activeUser); break;
     case 'salesman-features': renderSalesmanFeatures(content, activeUser); break;
-    default: content.innerHTML = '<div class="empty-state"><div class="empty-state-icon">🔍</div><div class="empty-state-title">Page not found</div></div>';
+    default: content.innerHTML = '<div class="empty-state"><div class="empty-state-icon">&#128269;</div><div class="empty-state-title">Page not found</div></div>';
   }
 }
 
@@ -441,7 +446,7 @@ function handleGlobalSearch(query, user) {
       <div class="card">
         <div class="card-body">
           <div class="empty-state">
-            <div class="empty-state-icon">🔍</div>
+            <div class="empty-state-icon">&#128269;</div>
             <div class="empty-state-title">Search functionality</div>
             <div class="empty-state-desc">Use the navigation menu to browse specific sections. Search is available within each module.</div>
           </div>
