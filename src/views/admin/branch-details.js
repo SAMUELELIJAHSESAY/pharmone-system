@@ -1,10 +1,11 @@
 // Branch Details Dashboard
 import { supabase } from '../../config.js';
-import { getBranchDetails, getBranchDashboard, getBranchAssignments, updateBranchDetails, getPharmacyStaff, assignStaffToBranch, getTodayDateRange } from '../../database.js';
+import { getBranchDetails, getBranchDashboard, getBranchAssignments, getBranchStaffSalesStats, updateBranchDetails, getPharmacyStaff, assignStaffToBranch } from '../../database.js';
 import { createModal } from '../../components/modal.js';
 import { showToast, formatUTCDate, formatUTCDateTime } from '../../utils.js';
+import { isViewLifecycleActive } from '../../view-lifecycle.js';
 
-export function renderBranchDetailsView(branchId, pharmacyId) {
+export function renderBranchDetailsView(branchId, pharmacyId, lifecycleToken) {
   const mainContent = document.getElementById('page-content');
   
   // Store pharmacyId in a global variable for later access in functions
@@ -181,69 +182,59 @@ export function renderBranchDetailsView(branchId, pharmacyId) {
     </div>
   `;
   
-  // Add event listeners for tab buttons
-  setTimeout(() => {
-    // Add event listener for back button
-    const backBtn = document.getElementById('back-to-branches-btn');
-    if (backBtn) {
-      backBtn.addEventListener('click', () => {
-        // Clear the refresh interval to avoid memory leaks
-        if (window.staffSalesRefreshInterval) {
-          clearInterval(window.staffSalesRefreshInterval);
-          window.staffSalesRefreshInterval = null;
-        }
-        window.navigate('branches');
-      });
-    }
-    
-    document.querySelectorAll('.tab-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        switchBranchTab(btn.dataset.tab);
-      });
-    });
-    
-    // Add event listener for filter button
-    const filterBtn = document.getElementById('filter-sales-btn');
-    if (filterBtn) {
-      filterBtn.addEventListener('click', () => filterBranchSales());
-    }
-  }, 100);
-  
-  // Load branch data
-  loadBranchData(branchId, pharmacyId);
+  // The elements exist immediately after innerHTML assignment, so listeners can be
+  // attached synchronously without leaving an orphan timeout behind.
+  const backBtn = document.getElementById('back-to-branches-btn');
+  if (backBtn) {
+    backBtn.addEventListener('click', () => window.navigate('branches'));
+  }
+
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => switchBranchTab(btn.dataset.tab));
+  });
+
+  const filterBtn = document.getElementById('filter-sales-btn');
+  if (filterBtn) {
+    filterBtn.addEventListener('click', () => filterBranchSales());
+  }
+
+  // Load branch data. Async completion is guarded by the current view token.
+  loadBranchData(branchId, pharmacyId, lifecycleToken);
 }
 
-async function loadBranchData(branchId, pharmacyId) {
+async function loadBranchData(branchId, pharmacyId, lifecycleToken) {
   try {
-    // Get branch details
-    const branch = await getBranchDetails(branchId);
+    const [branch, dashboard] = await Promise.all([
+      getBranchDetails(branchId),
+      getBranchDashboard(branchId, pharmacyId)
+    ]);
+
+    if (!isViewLifecycleActive(lifecycleToken)) return;
+
     document.getElementById('branch-name').textContent = branch.name;
     document.getElementById('branch-name-input').value = branch.name;
     document.getElementById('branch-location').value = branch.address || '';
     document.getElementById('branch-contact-person').value = branch.contact_person || '';
     document.getElementById('branch-phone').value = branch.phone || '';
     document.getElementById('branch-email').value = branch.email || '';
-    
-    // Get dashboard stats
-    const dashboard = await getBranchDashboard(branchId, pharmacyId);
+
     const currencySymbol = window.pharmacySettings?.currency_symbol || 'Le';
     document.getElementById('daily-sales').textContent = `${currencySymbol}${dashboard.dailySales.toFixed(2)}`;
     document.getElementById('monthly-revenue').textContent = `${currencySymbol}${dashboard.monthlyRevenue.toFixed(2)}`;
     document.getElementById('low-stock-count').textContent = dashboard.lowStockCount;
     document.getElementById('alert-count').textContent = dashboard.alertCount;
     
-    // Load additional data
-    loadBranchInventory(branchId);
-    loadBranchSales(branchId);
-    loadBranchStaff(branchId);
-    loadRecentActivity(branchId);
-    
-    // Auto-refresh staff sales data every 30 seconds to show new sales in total
-    window.staffSalesRefreshInterval = setInterval(() => {
-      loadBranchStaff(branchId);
-    }, 30000);
+    // Load tab data once. Branch staff totals are now aggregated server-side, so
+    // there is no background polling that keeps downloading historical sales.
+    await Promise.all([
+      loadBranchInventory(branchId),
+      loadBranchSales(branchId),
+      loadBranchStaff(branchId, pharmacyId),
+      loadRecentActivity(branchId)
+    ]);
     
   } catch (error) {
+    if (!isViewLifecycleActive(lifecycleToken)) return;
     console.error('Error loading branch data:', error);
     alert('Error loading branch details: ' + error.message);
   }
@@ -253,7 +244,7 @@ async function loadBranchInventory(branchId) {
   try {
     const { data, error } = await supabase
       .from('products')
-      .select('*')
+      .select('id, name, stock_boxes, stock_units, low_stock_threshold, expiry_date')
       .eq('branch_id', branchId)
       .eq('is_active', true);
     
@@ -283,7 +274,7 @@ async function loadBranchSales(branchId) {
   try {
     const { data, error } = await supabase
       .from('sales')
-      .select('*')
+      .select('id, invoice_number, total_amount, payment_method, created_by, created_at')
       .eq('branch_id', branchId)
       .order('created_at', { ascending: false })
       .limit(50);
@@ -311,93 +302,37 @@ async function loadBranchSales(branchId) {
   }
 }
 
-async function loadBranchStaff(branchId) {
+async function loadBranchStaff(branchId, pharmacyId = window.currentPharmacyId) {
   try {
-    const assignments = await getBranchAssignments(branchId);
-    
+    const [assignments, staffStats] = await Promise.all([
+      getBranchAssignments(branchId),
+      getBranchStaffSalesStats(pharmacyId, branchId)
+    ]);
+
     const tbody = document.getElementById('staff-table');
+    if (!tbody) return;
+
     if (assignments.length === 0) {
       tbody.innerHTML = '<tr><td colspan="6">No staff assigned to this branch</td></tr>';
       return;
     }
-    
-    // Get today's date using UTC (same as getBranchDashboard)
-    const todayStart = new Date(new Date().setHours(0, 0, 0, 0)).toISOString();
-    
-    // Fetch all sales for the branch (same query as getBranchDashboard)
-    const { data: allSales, error: salesError } = await supabase
-      .from('sales')
-      .select('*')
-      .eq('branch_id', branchId)
-      .gte('created_at', todayStart);
-    
-    console.log('DEBUG - Branch Staff Query:', {
-      branchId,
-      todayStart,
-      salesCount: allSales?.length,
-      salesData: allSales?.slice(0, 3) // Show first 3 sales
-    });
-    
-    if (salesError) {
-      console.error('Sales fetch error:', salesError);
-      return;
-    }
-    
-    // Calculate sales per staff member (daily and total)
-    const staffSalesMap = {};
-    
-    // Fetch all-time sales for total calculation
-    const { data: allTimeSales } = await supabase
-      .from('sales')
-      .select('*')
-      .eq('branch_id', branchId);
-    
-    if (allTimeSales && allTimeSales.length > 0) {
-      allTimeSales.forEach(sale => {
-        const createdBy = sale.created_by;
-        
-        // Initialize if not exists
-        if (!staffSalesMap[createdBy]) {
-          staffSalesMap[createdBy] = { daily_total: 0, daily_count: 0, total: 0, count: 0 };
-        }
-        
-        // Add to total
-        staffSalesMap[createdBy].total += sale.total_amount || 0;
-        staffSalesMap[createdBy].count += 1;
-      });
-    }
-    
-    // Add today's sales
-    if (allSales && allSales.length > 0) {
-      allSales.forEach(sale => {
-        const createdBy = sale.created_by;
-        
-        if (!staffSalesMap[createdBy]) {
-          staffSalesMap[createdBy] = { daily_total: 0, daily_count: 0, total: 0, count: 0 };
-        }
-        
-        staffSalesMap[createdBy].daily_total += sale.total_amount || 0;
-        staffSalesMap[createdBy].daily_count += 1;
-      });
-    }
-    
-    console.log('DEBUG - Staff Sales Map:', staffSalesMap);
-    
-    console.log('DEBUG - Staff Assignments:', assignments.map(a => ({
-      fullName: a.profiles.full_name,
-      staffId: a.staff_id,
-      salesData: staffSalesMap[a.staff_id]
-    })));
-    
+
+    const staffSalesMap = new Map(staffStats.map(stat => [stat.staffId, stat]));
     const currencySymbol = window.pharmacySettings?.currency_symbol || 'Le';
+
     tbody.innerHTML = assignments.map(a => {
-      const staffId = a.staff_id;
-      const salesData = staffSalesMap[staffId] || { daily_total: 0, daily_count: 0, total: 0, count: 0 };
+      const salesData = staffSalesMap.get(a.staff_id) || {
+        dailyTotal: 0,
+        dailyCount: 0,
+        total: 0,
+        count: 0
+      };
+
       return `
       <tr>
         <td>${a.profiles.full_name}</td>
         <td>${a.role_in_branch}</td>
-        <td>${currencySymbol}${salesData.daily_total.toFixed(2)}</td>
+        <td>${currencySymbol}${salesData.dailyTotal.toFixed(2)}</td>
         <td>${currencySymbol}${salesData.total.toFixed(2)}</td>
         <td>${salesData.count}</td>
         <td>
@@ -415,8 +350,9 @@ async function loadRecentActivity(branchId) {
   try {
     const { data, error } = await supabase
       .from('sales')
-      .select('*')
+      .select('id, total_amount, created_at')
       .eq('branch_id', branchId)
+      .eq('status', 'completed')
       .order('created_at', { ascending: false })
       .limit(10);
     
@@ -574,7 +510,7 @@ async function openAssignStaffModal() {
         closeModal();
         
         // Reload the staff table
-        loadBranchStaff(branchId);
+        loadBranchStaff(branchId, pharmacyId);
       } catch (error) {
         errorEl.textContent = error.message;
         errorEl.classList.remove('hidden');
@@ -597,7 +533,7 @@ async function removeStaffFromBranch(assignmentId) {
     const { removeStaffFromBranch: removeFn } = await import('../../database.js');
     await removeFn(assignmentId);
     showToast('Staff member removed');
-    loadBranchStaff(window.currentBranchId);
+    loadBranchStaff(window.currentBranchId, window.currentPharmacyId);
   } catch (error) {
     console.error('Error removing staff:', error);
     showToast('Error: ' + error.message, 'error');
