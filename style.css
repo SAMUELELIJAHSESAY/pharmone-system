@@ -3585,7 +3585,7 @@ body {
 .pill.success { background: #dcfce7; color: #15803d; }
 .pill.warning { background: #fef3c7; color: #b45309; }
 
-.role-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 1rem; }
+.role-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 1rem; }
 .role-card { padding: 1.4rem; border-top: 3px solid var(--sammia-blue); border-radius: 0 0 14px 14px; background: #fff; box-shadow: 0 8px 28px rgba(15,45,91,.08); }
 .role-number { color: #93c5fd; font-size: .7rem; font-weight: 800; letter-spacing: .08em; }
 .role-card h3 { margin: .8rem 0 .4rem; color: var(--sammia-navy); font-size: .95rem; }
@@ -3599,7 +3599,7 @@ body {
 .public-cta .btn { position: relative; z-index: 1; flex: 0 0 auto; }
 
 .public-footer { padding: 4rem 0 1.5rem; background: var(--sammia-navy-dark); color: #cbd5e1; }
-.public-footer-grid { display: grid; grid-template-columns: 1.55fr repeat(3,1fr); gap: 2.5rem; }
+.public-footer-grid { display: grid; grid-template-columns: 1.55fr repeat(2,1fr); gap: 2.5rem; }
 .public-footer-brand p { max-width: 340px; margin-top: 1rem; color: #94a3b8; font-size: .82rem; line-height: 1.6; }
 .public-footer-grid > div:not(.public-footer-brand) { display: flex; flex-direction: column; gap: .6rem; }
 .public-footer-grid strong { color: #fff; font-size: .82rem; }
@@ -3697,7 +3697,6 @@ body {
   .solution-layout { grid-template-columns: 1fr; }
   .role-grid { grid-template-columns: repeat(2,1fr); }
   .public-footer-grid { grid-template-columns: 1.4fr repeat(2,1fr); }
-  .public-footer-grid > div:last-child { grid-column: 2 / -1; }
 }
 
 @media (max-width: 768px) {
@@ -3740,7 +3739,6 @@ body {
   .public-cta { margin-bottom: 3.5rem; flex-direction: column; align-items: flex-start; }
   .public-footer-grid { grid-template-columns: 1fr 1fr; }
   .public-footer-brand { grid-column: 1 / -1; }
-  .public-footer-grid > div:last-child { grid-column: auto; }
   .sammia-auth-page { padding: 4.2rem 1rem 1rem; }
   .auth-back-link { top: 1rem; left: 1rem; }
   .sammia-auth-shell { width: min(100%, 520px); grid-template-columns: 1fr; border-radius: 18px; }
@@ -3766,7 +3764,6 @@ body {
   .solution-row { grid-template-columns: minmax(0,1.4fr) .55fr .7fr; padding-inline: .6rem; }
   .role-grid { grid-template-columns: 1fr; }
   .public-footer-grid { grid-template-columns: 1fr; }
-  .public-footer-grid > div:last-child { grid-column: auto; }
   .public-footer-bottom { flex-direction: column; }
   .demo-access-grid { grid-template-columns: 1fr; }
 }

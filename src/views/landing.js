@@ -12,8 +12,7 @@ const featureCards = [
 const roleCards = [
   ['Administrator', 'Full pharmacy oversight, reporting and team management.'],
   ['Inventory Manager', 'Stock control, transfers, purchasing and branch inventory.'],
-  ['Salesperson', 'Fast point of sale, customer service and sales history.'],
-  ['Super Administrator', 'Platform-wide pharmacy, account and configuration control.']
+  ['Salesperson', 'Fast point of sale, customer service and sales history.']
 ];
 
 export function renderLanding() {
@@ -183,7 +182,6 @@ export function renderLanding() {
           </div>
           <div><strong>Product</strong><a href="#features">Features</a><a href="#solutions">Solutions</a><a href="#roles">Roles</a></div>
           <div><strong>Access</strong><a href="#login" data-auth-link>Sign In</a><a href="#support">Support</a></div>
-          <div><strong>Brand</strong><span>SamMia Blue · #2563eb</span><span>SamMia Navy · #0f2d5b</span></div>
         </div>
         <div class="shell-container public-footer-bottom"><span>© 2026 SamMia Pharm. All rights reserved.</span><span>${BRAND.domain}</span></div>
       </footer>
