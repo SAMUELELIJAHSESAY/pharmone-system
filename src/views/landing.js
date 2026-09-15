@@ -130,25 +130,21 @@ export function renderLanding() {
                 <span><i>✓</i><b>Designed to scale</b><small>Support one pharmacy today and more branches tomorrow.</small></span>
               </div>
             </div>
-            <div class="solution-preview solution-preview-real" aria-label="Real SamMia Pharm inventory management screen">
+            <div class="solution-preview solution-preview-real" aria-label="SamMia Pharm inventory management preview">
               <div class="real-shot-browserbar">
                 <span class="real-shot-dots" aria-hidden="true"><i></i><i></i><i></i></span>
                 <span>Inventory Management</span>
-                <strong>Real system view</strong>
+                <strong>Sammia-pharmacy</strong>
               </div>
               <div class="inventory-real-shot-wrap">
                 <img
                   class="inventory-real-shot"
                   src="/brand/sammia-inventory-real.png"
-                  alt="Real SamMia Pharm inventory management page showing products, stock levels and status information"
+                  alt="SamMia Pharm inventory management page for Sammia-pharmacy showing products, stock levels, status, expiry and actions"
                   loading="lazy"
                 />
-                <div class="inventory-shot-brand" aria-label="Sammia-pharmacy">
-                  <img src="/brand/sammia-mark.png" alt="" aria-hidden="true" />
-                  <span>Sammia-pharmacy</span>
-                </div>
               </div>
-              <p class="real-shot-caption">Real inventory management screen from SamMia Pharm.</p>
+              <p class="real-shot-caption">Inventory management view for Sammia-pharmacy.</p>
             </div>
           </div>
         </section>
