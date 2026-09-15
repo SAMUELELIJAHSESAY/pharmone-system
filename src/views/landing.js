@@ -64,54 +64,31 @@ export function renderLanding() {
             </div>
           </div>
 
-          <div class="hero-product" aria-label="SamMia Pharm dashboard preview">
-            <div class="hero-window">
-              <div class="hero-window-bar">
+          <div class="hero-product hero-product-real" aria-label="Real SamMia Pharm dashboard and point of sale previews">
+            <figure class="hero-real-desktop">
+              <div class="hero-window-bar" aria-hidden="true">
                 <span class="window-dots"><i></i><i></i><i></i></span>
                 <span class="window-label">${BRAND.domain}</span>
               </div>
-              <div class="hero-dashboard">
-                <aside class="hero-dashboard-side">
-                  ${renderBrandLogo({ inverse: true, compact: true })}
-                  <span class="hero-side-item active">Overview</span>
-                  <span class="hero-side-item">POS</span>
-                  <span class="hero-side-item">Inventory</span>
-                  <span class="hero-side-item">Patients</span>
-                  <span class="hero-side-item">Reports</span>
-                </aside>
-                <div class="hero-dashboard-main">
-                  <div class="hero-dashboard-head">
-                    <div><small>Welcome back</small><strong>Dashboard</strong></div>
-                    <span class="hero-avatar">SM</span>
-                  </div>
-                  <div class="hero-stat-grid">
-                    <div><small>Total Sales</small><strong>Le 12,450</strong><em>+12%</em></div>
-                    <div><small>Products</small><strong>1,248</strong><em>+5%</em></div>
-                    <div><small>Low Stock</small><strong>8</strong><em class="warn">Needs action</em></div>
-                  </div>
-                  <div class="hero-analytics-grid">
-                    <div class="hero-chart-card">
-                      <span>Sales overview</span>
-                      <svg viewBox="0 0 280 100" aria-hidden="true"><path d="M4 82 C30 78 36 60 58 64 S90 36 112 50 S145 64 166 38 S205 48 226 24 S258 30 276 12" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><path d="M4 82 C30 78 36 60 58 64 S90 36 112 50 S145 64 166 38 S205 48 226 24 S258 30 276 12 L276 98 L4 98 Z" fill="currentColor" opacity=".08"/></svg>
-                    </div>
-                    <div class="hero-list-card">
-                      <span>Recent sales</span>
-                      <p><b>Paracetamol 500mg</b><em>Le 250</em></p>
-                      <p><b>Amoxicillin 250mg</b><em>Le 300</em></p>
-                      <p><b>Vitamin C</b><em>Le 120</em></p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-            <div class="hero-phone" aria-hidden="true">
-              <div class="hero-phone-notch"></div>
-              <div class="hero-phone-brand"><img src="/brand/sammia-mark.png" alt="" /> SamMia Pharm</div>
-              <small>Today</small>
-              <strong>Le 2,450</strong>
-              <div class="hero-mini-chart"></div>
-              <div class="hero-phone-nav"><span>⌂</span><span>▣</span><span>◇</span></div>
-            </div>
+              <img
+                class="hero-real-desktop-img"
+                src="/brand/sammia-dashboard-real.png"
+                alt="Real SamMia Pharm administrator dashboard showing sales, inventory, transactions and low stock alerts"
+                width="2048"
+                height="1279"
+                loading="eager"
+                fetchpriority="high"
+              />
+            </figure>
+            <figure class="hero-real-phone" aria-label="Real SamMia Pharm mobile point of sale screen">
+              <img
+                src="/brand/sammia-pos-mobile-real.png"
+                alt="Real SamMia Pharm mobile point of sale screen with product cards and cart"
+                width="818"
+                height="1668"
+                loading="eager"
+              />
+            </figure>
           </div>
         </section>
 

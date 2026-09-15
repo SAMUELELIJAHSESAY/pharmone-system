@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'v2.0.1';
+const CACHE_VERSION = 'v2.0.2';
 const CACHE_NAME = `sammia-pharm-shell-${CACHE_VERSION}`;
 const CACHE_PREFIX = 'sammia-pharm-shell-';
 const LEGACY_CACHE_PREFIX = 'pharmacare-shell-';
@@ -10,6 +10,8 @@ const CORE_ASSETS = [
   '/manifest.webmanifest',
   '/favicon.svg',
   '/brand/sammia-mark.png',
+  '/brand/sammia-dashboard-real.png',
+  '/brand/sammia-pos-mobile-real.png',
   '/icons/icon-192.png',
   '/icons/icon-512.png',
   '/icons/icon-maskable-512.png',

@@ -3266,6 +3266,7 @@ body {
 .brand-logo-mark {
   width: 38px;
   height: 38px;
+  object-fit: contain;
   flex: 0 0 auto;
 }
 
@@ -3284,7 +3285,7 @@ body {
 .brand-logo--inverse .brand-logo-wordmark strong:first-child { color: #fff; }
 .brand-logo--inverse .brand-logo-wordmark strong:last-child { color: #93c5fd; }
 .brand-logo--compact { gap: .42rem; }
-.brand-logo--compact .brand-logo-mark { width: 27px; height: 27px; }
+.brand-logo--compact .brand-logo-mark { width: 27px; height: 27px; object-fit: contain; }
 .brand-logo--compact .brand-logo-wordmark { font-size: .72rem; gap: .18rem; }
 
 /* Public landing page */
@@ -3694,7 +3695,7 @@ body {
 @media (max-width: 768px) {
   .shell-container { width: min(100% - 28px, 680px); }
   .public-nav { min-height: 66px; grid-template-columns: 1fr auto; }
-  .public-nav .brand-logo-mark { width: 34px; height: 34px; }
+  .public-nav .brand-logo-mark { width: 34px; height: 34px; object-fit: contain; }
   .public-nav .brand-logo-wordmark { font-size: 1.05rem; }
   .public-menu-btn { display: inline-flex; justify-self: end; }
   .public-nav-actions { display: none; }
@@ -3775,5 +3776,116 @@ body {
   .public-nav-links .public-mobile-auth-primary:hover {
     background: var(--sammia-blue-hover);
     color: #fff;
+  }
+}
+
+/* Real product screenshots in public landing hero */
+.hero-product-real {
+  position: relative;
+  min-width: 0;
+  padding: 1.25rem 2.4rem 3.6rem 0;
+  isolation: isolate;
+}
+
+.hero-real-desktop {
+  position: relative;
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid rgba(148, 163, 184, .30);
+  border-radius: 20px;
+  background: #fff;
+  box-shadow: 0 30px 80px rgba(15, 45, 91, .18), 0 10px 26px rgba(37, 99, 235, .08);
+}
+
+.hero-real-desktop .hero-window-bar {
+  min-height: 38px;
+  background: #fbfdff;
+}
+
+.hero-real-desktop-img {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 2048 / 1279;
+  object-fit: cover;
+  object-position: top left;
+}
+
+.hero-real-phone {
+  position: absolute;
+  z-index: 2;
+  right: -1.25rem;
+  bottom: .15rem;
+  width: clamp(130px, 24%, 190px);
+  margin: 0;
+  filter: drop-shadow(0 24px 30px rgba(15, 45, 91, .26));
+}
+
+.hero-real-phone img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+@media (max-width: 980px) {
+  .hero-product-real {
+    width: min(100%, 760px);
+    padding-right: 3.6rem;
+    padding-bottom: 4.2rem;
+  }
+
+  .hero-real-phone {
+    right: .1rem;
+    width: clamp(132px, 23vw, 178px);
+  }
+}
+
+@media (max-width: 768px) {
+  .hero-product-real {
+    padding: .5rem 2.3rem 3.4rem 0;
+  }
+
+  .hero-real-desktop {
+    border-radius: 14px;
+  }
+
+  .hero-real-desktop .hero-window-bar {
+    min-height: 30px;
+    padding-inline: .7rem;
+    font-size: .56rem;
+  }
+
+  .hero-real-phone {
+    right: -.1rem;
+    bottom: .1rem;
+    width: clamp(112px, 27vw, 150px);
+  }
+}
+
+@media (max-width: 540px) {
+  .hero-product-real {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 30%;
+    align-items: end;
+    gap: .7rem;
+    padding: .4rem 0 0;
+  }
+
+  .hero-real-desktop {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+
+  .hero-real-phone {
+    position: absolute;
+    right: .45rem;
+    bottom: -.5rem;
+    width: 28%;
+    min-width: 92px;
+    max-width: 122px;
+  }
+
+  .hero-real-desktop .hero-window-bar {
+    display: none;
   }
 }
