@@ -1,12 +1,15 @@
-const CACHE_VERSION = 'v1.2.2';
-const CACHE_NAME = `pharmacare-shell-${CACHE_VERSION}`;
-const CACHE_PREFIX = 'pharmacare-shell-';
+const CACHE_VERSION = 'v2.0.1';
+const CACHE_NAME = `sammia-pharm-shell-${CACHE_VERSION}`;
+const CACHE_PREFIX = 'sammia-pharm-shell-';
+const LEGACY_CACHE_PREFIX = 'pharmacare-shell-';
 const OFFLINE_URL = '/offline.html';
 
 const CORE_ASSETS = [
   '/',
   OFFLINE_URL,
   '/manifest.webmanifest',
+  '/favicon.svg',
+  '/brand/sammia-mark.png',
   '/icons/icon-192.png',
   '/icons/icon-512.png',
   '/icons/icon-maskable-512.png',
@@ -34,7 +37,7 @@ self.addEventListener('activate', (event) => {
     const cacheNames = await caches.keys();
     await Promise.all(
       cacheNames
-        .filter((name) => name.startsWith(CACHE_PREFIX) && name !== CACHE_NAME)
+        .filter((name) => (name.startsWith(CACHE_PREFIX) || name.startsWith(LEGACY_CACHE_PREFIX)) && name !== CACHE_NAME)
         .map((name) => caches.delete(name))
     );
     await self.clients.claim();

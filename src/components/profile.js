@@ -21,7 +21,7 @@ export async function showProfileModal(user) {
   }
 
   const { full_name, email, role } = user.profile || {};
-  const pharmacyName = user.profile?.pharmacies?.name || 'PharmaCare';
+  const pharmacyName = user.profile?.pharmacies?.name || 'SamMia Pharm';
   const userId = user.id;
   
   const roleLabel = {

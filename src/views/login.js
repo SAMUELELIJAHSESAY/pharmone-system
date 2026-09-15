@@ -1,59 +1,71 @@
 import { signIn } from '../auth.js';
-import { showToast } from '../utils.js';
+import { renderBrandLogo, BRAND } from '../components/brand.js';
 
 export function renderLogin() {
-  document.title = 'Sign In | PharmaCare';
+  document.title = `Sign In | ${BRAND.name}`;
   document.getElementById('app').innerHTML = `
-    <div class="auth-page">
-      <div class="auth-card">
-        <div class="auth-logo">
-          <div class="auth-logo-icon">&#x2695;</div>
-          <div class="auth-logo-text">
-            <h1>PharmaCare</h1>
-            <p>Pharmacy Management System</p>
+    <div class="auth-page sammia-auth-page">
+      <a class="auth-back-link" href="#" aria-label="Back to SamMia Pharm website">← Back to website</a>
+      <div class="sammia-auth-shell">
+        <section class="auth-brand-panel" aria-label="SamMia Pharm">
+          ${renderBrandLogo({ inverse: true })}
+          <div class="auth-brand-copy">
+            <span>Pharmacy Management Platform</span>
+            <h1>Smarter pharmacy management for your whole team.</h1>
+            <p>Run sales, stock, branches, patients and reporting from one secure workspace.</p>
           </div>
-        </div>
-        <h2 class="auth-title">Welcome back</h2>
-        <p class="auth-subtitle">Sign in to your account to continue</p>
+          <div class="auth-brand-points">
+            <span><i>✓</i> Secure role-based access</span>
+            <span><i>✓</i> Multi-branch ready</span>
+            <span><i>✓</i> Responsive on every device</span>
+          </div>
+        </section>
 
-        <div id="auth-error" class="alert alert-danger hidden"></div>
+        <section class="auth-card sammia-auth-card">
+          <div class="auth-mobile-brand">${renderBrandLogo()}</div>
+          <div class="auth-form-heading">
+            <span class="auth-eyebrow">Welcome back</span>
+            <h2>Sign in to ${BRAND.name}</h2>
+            <p>Enter your account details to continue to your pharmacy workspace.</p>
+          </div>
 
-        <form id="login-form">
-          <div class="form-group">
-            <label class="form-label">Email address</label>
-            <input type="email" class="form-input" id="email" placeholder="you@pharmacy.com" required autocomplete="email" />
-          </div>
-          <div class="form-group">
-            <label class="form-label">Password</label>
-            <input type="password" class="form-input" id="password" placeholder="Enter your password" required autocomplete="current-password" />
-          </div>
-          <button type="submit" class="btn btn-primary btn-full btn-lg" id="login-btn" style="margin-top:0.5rem">
-            Sign in
-          </button>
-        </form>
+          <div id="auth-error" class="alert alert-danger hidden"></div>
 
-        <div style="margin-top:1.5rem; padding-top:1.5rem; border-top:1px solid var(--gray-200)">
-          <p class="text-xs text-muted text-center" style="margin-bottom:0.75rem">Demo accounts:</p>
-          <div style="display:grid;gap:0.5rem">
-            <button class="btn btn-ghost btn-sm" onclick="fillDemo('super@pharma.com','demo123456')">
-              &#x1F451; Super Admin Demo
+          <form id="login-form">
+            <div class="form-group">
+              <label class="form-label" for="email">Email address</label>
+              <input type="email" class="form-input" id="email" placeholder="you@pharmacy.com" required autocomplete="email" />
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="password">Password</label>
+              <input type="password" class="form-input" id="password" placeholder="Enter your password" required autocomplete="current-password" />
+            </div>
+            <button type="submit" class="btn btn-primary btn-full btn-lg" id="login-btn">
+              Sign In
             </button>
-            <button class="btn btn-ghost btn-sm" onclick="fillDemo('admin@pharma.com','demo123456')">
-              &#x1F3EA; Admin Demo
-            </button>
-            <button class="btn btn-ghost btn-sm" onclick="fillDemo('salesman@pharma.com','demo123456')">
-              &#x1F464; Salesman Demo
-            </button>
-          </div>
-        </div>
+          </form>
+
+          <details class="demo-access">
+            <summary>Demo access</summary>
+            <div class="demo-access-grid">
+              <button class="btn btn-ghost btn-sm" type="button" data-demo-email="super@pharma.com" data-demo-password="demo123456">Super Admin</button>
+              <button class="btn btn-ghost btn-sm" type="button" data-demo-email="admin@pharma.com" data-demo-password="demo123456">Admin</button>
+              <button class="btn btn-ghost btn-sm" type="button" data-demo-email="salesman@pharma.com" data-demo-password="demo123456">Salesperson</button>
+            </div>
+          </details>
+
+          <p class="auth-security-note">Secure access · SamMia Pharm</p>
+        </section>
       </div>
     </div>
   `;
 
-  window.fillDemo = (email, password) => {
-    document.getElementById('email').value = email;
-    document.getElementById('password').value = password;
-  };
+  document.querySelectorAll('[data-demo-email]').forEach((button) => {
+    button.addEventListener('click', () => {
+      document.getElementById('email').value = button.dataset.demoEmail || '';
+      document.getElementById('password').value = button.dataset.demoPassword || '';
+    });
+  });
 
   document.getElementById('login-form').addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -61,7 +73,7 @@ export function renderLogin() {
     const errEl = document.getElementById('auth-error');
     errEl.classList.add('hidden');
     btn.disabled = true;
-    btn.textContent = 'Signing in...';
+    btn.textContent = 'Signing in…';
 
     try {
       const email = document.getElementById('email').value;
@@ -71,7 +83,7 @@ export function renderLogin() {
       errEl.textContent = err.message || 'Invalid credentials. Please try again.';
       errEl.classList.remove('hidden');
       btn.disabled = false;
-      btn.textContent = 'Sign in';
+      btn.textContent = 'Sign In';
     }
   });
 }

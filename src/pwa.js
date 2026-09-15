@@ -1,6 +1,6 @@
 import { showToast } from './utils.js';
 
-const INSTALL_DISMISS_KEY = 'pharmacare.pwa.installDismissedAt';
+const INSTALL_DISMISS_KEY = 'sammia-pharm.pwa.installDismissedAt';
 const INSTALL_DISMISS_MS = 7 * 24 * 60 * 60 * 1000;
 const UPDATE_BANNER_ID = 'pwa-update-banner';
 const INSTALL_BANNER_ID = 'pwa-install-banner';
@@ -97,15 +97,15 @@ function showIOSInstallInstructions() {
   overlay.innerHTML = `
     <div class="pwa-help-dialog" role="dialog" aria-modal="true" aria-labelledby="pwa-help-title">
       <button class="pwa-help-close" type="button" aria-label="Close install instructions">×</button>
-      <div class="pwa-help-icon" aria-hidden="true">⚕</div>
-      <h2 id="pwa-help-title">Install PharmaCare</h2>
-      <p>On iPhone or iPad, install PharmaCare from Safari:</p>
+      <div class="pwa-help-icon" aria-hidden="true"><img src="/brand/sammia-mark.png" alt="" /></div>
+      <h2 id="pwa-help-title">Install SamMia Pharm</h2>
+      <p>On iPhone or iPad, install SamMia Pharm from Safari:</p>
       <ol>
         <li>Tap the <strong>Share</strong> button in Safari.</li>
         <li>Scroll and tap <strong>Add to Home Screen</strong>.</li>
         <li>Tap <strong>Add</strong> to confirm.</li>
       </ol>
-      <p class="pwa-help-note">After installation, open PharmaCare from the Home Screen like a normal app.</p>
+      <p class="pwa-help-note">After installation, open SamMia Pharm from the Home Screen like a normal app.</p>
       <button class="btn btn-primary btn-full" type="button" data-pwa-help-done>Got it</button>
     </div>
   `;
@@ -122,7 +122,7 @@ function showIOSInstallInstructions() {
 
 async function promptInstall() {
   if (isStandalone()) {
-    showToast('PharmaCare is already installed on this device.', 'success');
+    showToast('SamMia Pharm is already installed on this device.', 'success');
     removeElement(INSTALL_BANNER_ID);
     return;
   }
@@ -156,9 +156,9 @@ function showInstallBanner() {
   createBanner({
     id: INSTALL_BANNER_ID,
     icon: '⬇',
-    title: 'Install PharmaCare',
+    title: 'Install SamMia Pharm',
     message: isIOS()
-      ? 'Add PharmaCare to your Home Screen for an app-like experience.'
+      ? 'Add SamMia Pharm to your Home Screen for an app-like experience.'
       : 'Install this pharmacy system on your device for faster app-style access.',
     primaryLabel: 'Install',
     onPrimary: promptInstall,
@@ -201,7 +201,7 @@ function showUpdateBanner(worker) {
     id: UPDATE_BANNER_ID,
     icon: '↻',
     title: 'Update available',
-    message: 'A newer PharmaCare version is ready. It will only reload when you choose Update now.',
+    message: 'A newer SamMia Pharm version is ready. It will only reload when you choose Update now.',
     primaryLabel: 'Update now',
     onPrimary: () => {
       const waiting = waitingServiceWorker || serviceWorkerRegistration?.waiting;
@@ -291,7 +291,7 @@ function setupInstallExperience() {
     localStorage.removeItem(INSTALL_DISMISS_KEY);
     removeElement(INSTALL_BANNER_ID);
     document.documentElement.classList.add('pwa-standalone');
-    showToast('PharmaCare was installed successfully.', 'success');
+    showToast('SamMia Pharm was installed successfully.', 'success');
   });
 
   // iOS does not emit beforeinstallprompt, so provide clear Home Screen guidance.
@@ -313,9 +313,10 @@ export function initPWA() {
 
   // Expose a small stable API so an explicit "Install App" action can be added later
   // without duplicating browser/PWA logic.
-  window.PharmaCarePWA = Object.freeze({
+  window.SamMiaPharmPWA = Object.freeze({
     promptInstall,
     isStandalone,
     isOnline: () => navigator.onLine
   });
+  window.PharmaCarePWA = window.SamMiaPharmPWA;
 }

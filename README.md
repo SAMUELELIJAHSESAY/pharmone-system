@@ -1,4 +1,4 @@
-# 💊 PharmaCare - Professional Pharmacy Management System
+# 💊 SamMia Pharm - Professional Pharmacy Management System
 
 A **fully functional, production-ready** pharmacy management SaaS application built with vanilla JavaScript, PostgreSQL, and Supabase. Manage inventory, process sales, track customers, and generate insights—all from a modern, responsive web interface.
 

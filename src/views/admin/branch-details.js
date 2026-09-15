@@ -222,7 +222,7 @@ async function loadBranchData(branchId, pharmacyId, lifecycleToken) {
     if (!isViewLifecycleActive(lifecycleToken)) return;
 
     document.getElementById('branch-name').textContent = branch.name;
-    document.title = `${branch.name} | Branch Details | PharmaCare`;
+    document.title = `${branch.name} | Branch Details | SamMia Pharm`;
     document.getElementById('branch-name-input').value = branch.name;
     document.getElementById('branch-location').value = branch.address || '';
     document.getElementById('branch-contact-person').value = branch.contact_person || '';

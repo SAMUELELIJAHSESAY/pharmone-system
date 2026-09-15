@@ -2,7 +2,7 @@ export function renderSidebar(user, features = null) {
   const role = user.profile?.role || 'salesman';
   const name = user.profile?.full_name || user.email || 'User';
   const initials = name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
-  const pharmacyName = user.profile?.pharmacies?.name || 'PharmaCare';
+  const pharmacyName = user.profile?.pharmacies?.name || 'Your pharmacy';
 
   let navItems = '';
 
@@ -192,10 +192,10 @@ export function renderSidebar(user, features = null) {
 
   return `
     <div class="sidebar-brand">
-      <div class="sidebar-brand-icon">&#x2695;</div>
+      <div class="sidebar-brand-icon"><img src="/brand/sammia-mark.png" alt="" aria-hidden="true" /></div>
       <div class="sidebar-brand-copy">
-        <div class="sidebar-brand-name">${pharmacyName}</div>
-        <div class="sidebar-brand-sub">${roleLabel}</div>
+        <div class="sidebar-brand-name"><span>SamMia</span> <strong>Pharm</strong></div>
+        <div class="sidebar-brand-sub" title="${pharmacyName} · ${roleLabel}">${pharmacyName} · ${roleLabel}</div>
       </div>
       <button class="sidebar-mobile-close" id="sidebar-mobile-close" type="button" aria-label="Close navigation menu">&#10005;</button>
     </div>

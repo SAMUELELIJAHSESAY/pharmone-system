@@ -1,7 +1,6 @@
 import { signOut } from '../auth.js';
 import { renderSidebar } from '../components/sidebar.js';
 import { getPharmacySettings, getSalesmanFeatures } from '../database.js';
-import { createThemeToggle, initThemeToggle } from '../components/theme-toggle.js';
 import { renderSuperAdminDashboard } from './super-admin/dashboard.js';
 import { renderAdminDashboard } from './admin/dashboard.js';
 import { renderInventory } from './admin/inventory.js';
@@ -74,7 +73,7 @@ function applyPageTitle(view, overrideTitle = '') {
   const title = overrideTitle || PAGE_TITLES[view] || 'Page Not Found';
   const titleEl = document.getElementById('topbar-title');
   if (titleEl) titleEl.textContent = title;
-  document.title = `${title} | PharmaCare`;
+  document.title = `${title} | SamMia Pharm`;
   return title;
 }
 
@@ -289,7 +288,6 @@ export function renderApp(user) {
               <span style="color:var(--gray-400);font-size:0.9rem">&#128269;</span>
               <input type="text" id="global-search" placeholder="Search..." />
             </div>
-            ${createThemeToggle()}
             <span id="impersonation-note" class="topbar-impersonation-note" style="display:none;align-self:center;font-size:0.9rem;color:var(--gray-700);"></span>
             <button class="btn btn-warning btn-sm" id="exit-impersonation-btn" aria-label="Exit pharmacy view" style="display:none;">Exit Pharmacy View</button>
             <button class="btn btn-ghost btn-sm topbar-action-btn" id="profile-btn" aria-label="My Account">
@@ -338,8 +336,6 @@ export function renderApp(user) {
     }
   });
 
-  // Initialize theme toggle
-  initThemeToggle();
   initResponsiveEnhancements();
 
   const sidebar = document.getElementById('sidebar');

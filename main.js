@@ -1,33 +1,55 @@
 import { getCurrentUser, getSession, onAuthStateChange } from './src/auth.js';
+import { renderLanding } from './src/views/landing.js';
 import { renderLogin } from './src/views/login.js';
 import { renderApp } from './src/views/app.js';
 import { initTheme } from './src/theme.js';
+import { initPWA } from './src/pwa.js';
 import { cleanupActiveView } from './src/view-lifecycle.js';
 
 let renderedMode = null;
 let renderedUserId = null;
 let authResolutionGeneration = 0;
+let currentUser = null;
 
-function showLogin() {
-  // Avoid rebuilding the login screen for duplicate auth events.
-  if (renderedMode === 'login') return;
+function isLoginRoute() {
+  return window.location.hash.toLowerCase() === '#login';
+}
+
+function showPublicEntry({ force = false } = {}) {
+  if (currentUser) {
+    showAuthenticatedApp(currentUser);
+    return;
+  }
+
+  const nextMode = isLoginRoute() ? 'login' : 'landing';
+  if (!force && renderedMode === nextMode) return;
 
   cleanupActiveView();
-  renderedMode = 'login';
+  renderedMode = nextMode;
   renderedUserId = null;
-  renderLogin();
+
+  if (nextMode === 'login') {
+    renderLogin();
+  } else {
+    renderLanding();
+  }
 }
 
 function showAuthenticatedApp(user) {
   if (!user?.id) {
-    showLogin();
+    currentUser = null;
+    showPublicEntry({ force: true });
     return;
   }
 
-  // Supabase may emit SIGNED_IN when an existing session is confirmed again
-  // (for example after the browser/tab becomes active). Re-rendering the whole
-  // application for the same user makes the SPA look as if the page refreshed
-  // and also repeats its initial database reads. Keep the current DOM/view alive.
+  currentUser = user;
+
+  // Remove the public login hash once an account is authenticated. This keeps
+  // the app URL clean and returns signed-out users to the public landing page.
+  if (isLoginRoute()) {
+    history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
+  }
+
   if (renderedMode === 'app' && renderedUserId === user.id) return;
 
   cleanupActiveView();
@@ -39,16 +61,12 @@ function showAuthenticatedApp(user) {
 function resolveSignedInSession(session) {
   const sessionUserId = session?.user?.id;
 
-  // The currently rendered user is already authenticated. A repeated SIGNED_IN
-  // event is session maintenance, not a reason to rebuild the application.
   if (sessionUserId && renderedMode === 'app' && renderedUserId === sessionUserId) {
     return;
   }
 
   const generation = ++authResolutionGeneration;
 
-  // Resolve profile/access outside the auth callback so the callback remains
-  // lightweight and duplicate auth events cannot race a newer transition.
   window.setTimeout(async () => {
     try {
       const user = await getCurrentUser();
@@ -57,34 +75,36 @@ function resolveSignedInSession(session) {
       if (user) {
         showAuthenticatedApp(user);
       } else {
-        showLogin();
+        currentUser = null;
+        showPublicEntry({ force: true });
       }
     } catch (error) {
       if (generation !== authResolutionGeneration) return;
       console.error('Failed to resolve authenticated user:', error);
-      showLogin();
+      currentUser = null;
+      showPublicEntry({ force: true });
     }
   }, 0);
 }
 
 async function init() {
-  // Initialize theme system on app load.
   initTheme();
+  initPWA();
 
   try {
     const user = await getCurrentUser();
     if (user) {
       showAuthenticatedApp(user);
     } else {
-      showLogin();
+      currentUser = null;
+      showPublicEntry({ force: true });
     }
   } catch (error) {
     console.error('Failed to initialize application session:', error);
-    showLogin();
+    currentUser = null;
+    showPublicEntry({ force: true });
   }
 
-  // Register auth handling once. SIGNED_IN can occur for an already signed-in
-  // user, so it must not be treated as a hard page/app refresh signal.
   onAuthStateChange((event, session) => {
     if (event === 'SIGNED_IN') {
       resolveSignedInSession(session);
@@ -92,18 +112,21 @@ async function init() {
     }
 
     if (event === 'SIGNED_OUT') {
-      // Invalidate any pending profile resolution before showing the login view.
       authResolutionGeneration += 1;
-      showLogin();
+      currentUser = null;
+      showPublicEntry({ force: true });
     }
-
-    // INITIAL_SESSION and TOKEN_REFRESHED intentionally do not rebuild the UI.
-    // The initial user was resolved above, and token refresh is transparent.
   });
 
-  // When the browser restores this page from its back/forward cache, keep the
-  // existing SPA DOM/view intact. Only replace it if the local auth session was
-  // actually removed or switched while the page was away.
+  window.addEventListener('hashchange', () => {
+    if (currentUser) return;
+
+    const wantsLogin = isLoginRoute();
+    if ((wantsLogin && renderedMode !== 'login') || (!wantsLogin && renderedMode === 'login')) {
+      showPublicEntry({ force: true });
+    }
+  });
+
   window.addEventListener('pageshow', (event) => {
     if (!event.persisted || renderedMode !== 'app') return;
 
@@ -114,7 +137,8 @@ async function init() {
 
         if (!sessionUserId) {
           authResolutionGeneration += 1;
-          showLogin();
+          currentUser = null;
+          showPublicEntry({ force: true });
           return;
         }
 

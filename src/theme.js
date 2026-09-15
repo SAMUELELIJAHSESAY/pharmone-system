@@ -1,84 +1,42 @@
 /**
- * Theme Management System
- * Handles light, dark, and pharmacy-specific themes
+ * SamMia Pharm uses one consistent light brand theme across public pages and
+ * authenticated workspaces. The API is kept stable for older components.
  */
+const THEME_KEY = 'sammia-pharm-theme';
+const THEMES = Object.freeze({ light: 'light' });
 
-const THEME_KEY = 'pharmacy-theme';
-const THEMES = {
-  light: 'light',
-  dark: 'dark',
-  pharmacy: 'pharmacy' // Custom pharmacy-themed (teal/green)
-};
-
-/**
- * Initialize theme system on page load
- */
 export function initTheme() {
-  const savedTheme = localStorage.getItem(THEME_KEY) || THEMES.light;
-  applyTheme(savedTheme);
-  return savedTheme;
+  localStorage.removeItem('pharmacy-theme');
+  applyTheme(THEMES.light);
+  return THEMES.light;
 }
 
-/**
- * Apply theme to the document
- */
-export function applyTheme(theme) {
-  // Remove all theme classes
-  document.documentElement.classList.remove('theme-light', 'theme-dark', 'theme-pharmacy');
-  
-  // Apply new theme class
-  document.documentElement.classList.add(`theme-${theme}`);
-  
-  // Save preference
-  localStorage.setItem(THEME_KEY, theme);
+export function applyTheme() {
+  document.documentElement.classList.remove('theme-dark', 'theme-pharmacy');
+  document.documentElement.classList.add('theme-light');
+  document.documentElement.style.colorScheme = 'light';
+  localStorage.setItem(THEME_KEY, THEMES.light);
 }
 
-/**
- * Get current theme
- */
 export function getCurrentTheme() {
-  return localStorage.getItem(THEME_KEY) || THEMES.light;
+  return THEMES.light;
 }
 
-/**
- * Toggle between themes
- */
 export function toggleTheme() {
-  const current = getCurrentTheme();
-  const themeList = Object.values(THEMES);
-  const currentIndex = themeList.indexOf(current);
-  const nextTheme = themeList[(currentIndex + 1) % themeList.length];
-  
-  applyTheme(nextTheme);
-  return nextTheme;
+  applyTheme();
+  return THEMES.light;
 }
 
-/**
- * Get all available themes
- */
 export function getAvailableThemes() {
-  return Object.values(THEMES);
+  return [THEMES.light];
 }
 
-/**
- * Get theme display name
- */
-export function getThemeDisplayName(theme) {
-  const names = {
-    [THEMES.light]: '☀️ Light',
-    [THEMES.dark]: '🌙 Dark',
-    [THEMES.pharmacy]: '🏥 Pharmacy'
-  };
-  return names[theme] || theme;
+export function getThemeDisplayName() {
+  return '☀️ SamMia Light';
 }
 
-/**
- * Set specific theme
- */
-export function setTheme(theme) {
-  if (Object.values(THEMES).includes(theme)) {
-    applyTheme(theme);
-  }
+export function setTheme() {
+  applyTheme();
 }
 
 export { THEMES };

@@ -434,7 +434,7 @@ function renderSalesHistoryView(container, sales, user, pharmacyId, branchId) {
         <html>
           <head>
             <meta charset="utf-8">
-            <title>Sales History | PharmaCare</title>
+            <title>Sales History | SamMia Pharm</title>
             <style>
               body { font-family: Arial, sans-serif; color: #111827; margin: 28px; }
               h1 { margin: 0 0 6px; font-size: 24px; }
