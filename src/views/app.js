@@ -51,17 +51,71 @@ function setMobileSidebarOpen(isOpen) {
   document.body.classList.toggle('mobile-nav-open', shouldOpen);
   menuButton?.setAttribute('aria-expanded', String(shouldOpen));
   menuButton?.setAttribute('aria-label', shouldOpen ? 'Close navigation menu' : 'Open navigation menu');
+
+  if (shouldOpen) {
+    requestAnimationFrame(() => document.getElementById('sidebar-mobile-close')?.focus());
+  }
 }
 
-function closeMobileSidebar() {
+function closeMobileSidebar({ restoreFocus = false } = {}) {
+  const wasOpen = document.getElementById('sidebar')?.classList.contains('open');
   setMobileSidebarOpen(false);
+  if (restoreFocus && wasOpen) document.getElementById('mobile-menu-btn')?.focus();
+}
+
+function enhanceResponsiveContent(root = document) {
+  const scope = root?.querySelectorAll ? root : document;
+  const rootElement = scope instanceof Element ? scope : null;
+
+  // Every data table gets its own horizontal scroll area instead of widening the page.
+  const tables = [
+    ...(rootElement?.matches('table') ? [rootElement] : []),
+    ...scope.querySelectorAll('table')
+  ];
+  tables.forEach((table) => {
+    if (table.closest('.table-container')) return;
+    const wrapper = document.createElement('div');
+    wrapper.className = 'table-container auto-table-container';
+    table.parentNode?.insertBefore(wrapper, table);
+    wrapper.appendChild(table);
+  });
+
+  // Normalize common inline layouts used throughout legacy views so mobile CSS can override them.
+  const styledElements = [
+    ...(rootElement?.matches('[style]') ? [rootElement] : []),
+    ...scope.querySelectorAll('[style]')
+  ];
+  styledElements.forEach((element) => {
+    const style = element.getAttribute('style') || '';
+    if (/grid-template-columns\s*:/i.test(style)) element.classList.add('responsive-inline-grid');
+    if (/display\s*:\s*flex/i.test(style) && /justify-content\s*:\s*(space-between|flex-end)/i.test(style)) {
+      element.classList.add('responsive-flex-row');
+    }
+    if (/min-width\s*:/i.test(style)) element.classList.add('mobile-min-width-reset');
+  });
+}
+
+let responsiveEnhancementObserver = null;
+function initResponsiveEnhancements() {
+  enhanceResponsiveContent(document);
+  if (responsiveEnhancementObserver) return;
+
+  responsiveEnhancementObserver = new MutationObserver((mutations) => {
+    mutations.forEach((mutation) => {
+      mutation.addedNodes.forEach((node) => {
+        if (!(node instanceof Element)) return;
+        enhanceResponsiveContent(node);
+      });
+    });
+  });
+
+  responsiveEnhancementObserver.observe(document.body, { childList: true, subtree: true });
 }
 
 // Global mobile-navigation safety. The module is evaluated once, so these listeners cannot stack.
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape' && document.getElementById('sidebar')?.classList.contains('open')) {
-    closeMobileSidebar();
-    document.getElementById('mobile-menu-btn')?.focus();
+    closeMobileSidebar({ restoreFocus: true });
   }
 });
 
@@ -161,7 +215,7 @@ export function renderApp(user) {
   document.getElementById('app').innerHTML = `
     <div class="app-shell">
       <div class="sidebar-backdrop" id="sidebar-backdrop"></div>
-      <aside class="sidebar" id="sidebar">
+      <aside class="sidebar" id="sidebar" aria-label="Primary navigation">
         ${renderSidebar(activeUser, null)}
       </aside>
       <div class="main-content">
@@ -227,6 +281,7 @@ export function renderApp(user) {
 
   // Initialize theme toggle
   initThemeToggle();
+  initResponsiveEnhancements();
 
   const sidebar = document.getElementById('sidebar');
   const sidebarBackdrop = document.getElementById('sidebar-backdrop');
@@ -236,7 +291,11 @@ export function renderApp(user) {
     setMobileSidebarOpen(!sidebar?.classList.contains('open'));
   });
 
-  sidebarBackdrop?.addEventListener('click', closeMobileSidebar);
+  document.getElementById('sidebar-mobile-close')?.addEventListener('click', () => {
+    closeMobileSidebar({ restoreFocus: true });
+  });
+
+  sidebarBackdrop?.addEventListener('click', () => closeMobileSidebar({ restoreFocus: true }));
 
   // A desktop sidebar preference must never leak into the mobile drawer.
   const desktopMediaQuery = window.matchMedia('(min-width: 769px)');

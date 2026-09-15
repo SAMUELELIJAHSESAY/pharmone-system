@@ -193,10 +193,11 @@ export function renderSidebar(user, features = null) {
   return `
     <div class="sidebar-brand">
       <div class="sidebar-brand-icon">&#x2695;</div>
-      <div>
+      <div class="sidebar-brand-copy">
         <div class="sidebar-brand-name">${pharmacyName}</div>
         <div class="sidebar-brand-sub">${roleLabel}</div>
       </div>
+      <button class="sidebar-mobile-close" id="sidebar-mobile-close" type="button" aria-label="Close navigation menu">&#10005;</button>
     </div>
     <nav class="sidebar-nav">
       ${navItems}
