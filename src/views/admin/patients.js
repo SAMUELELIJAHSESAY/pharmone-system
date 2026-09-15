@@ -1,6 +1,8 @@
 // Patient Management View
 import { getPatients, searchPatients, createPatient, updatePatient, getPatientDetails, getPatientVisits, createPatientVisit, getTreatmentPayments, createTreatmentPayment } from '../../database.js';
 import { supabase } from '../../config.js';
+import { createModal } from '../../components/modal.js';
+import { showToast } from '../../utils.js';
 
 // Global context for patient operations
 let currentPatientUser = null;
@@ -173,11 +175,11 @@ function renderView(container, patients, user, pharmacyId, branchId) {
         <h2 id="modal-patient-name">Patient Details</h2>
         
         <div class="tabs">
-          <button class="tab-btn active" onclick="switchPatientTab('overview')">📋 Overview</button>
-          <button class="tab-btn" onclick="switchPatientTab('visits')">👨‍⚕️ Visits</button>
-          <button class="tab-btn" onclick="switchPatientTab('treatments')">💉 Treatments</button>
-          <button class="tab-btn" onclick="switchPatientTab('prescriptions')">💊 Prescriptions</button>
-          <button class="tab-btn" onclick="switchPatientTab('payments')">💰 Payments</button>
+          <button type="button" class="tab-btn active" data-patient-tab="overview" onclick="switchPatientTab('overview', event)">📋 Overview</button>
+          <button type="button" class="tab-btn" data-patient-tab="visits" onclick="switchPatientTab('visits', event)">👨‍⚕️ Visits</button>
+          <button type="button" class="tab-btn" data-patient-tab="treatments" onclick="switchPatientTab('treatments', event)">💉 Treatments</button>
+          <button type="button" class="tab-btn" data-patient-tab="prescriptions" onclick="switchPatientTab('prescriptions', event)">💊 Prescriptions</button>
+          <button type="button" class="tab-btn" data-patient-tab="payments" onclick="switchPatientTab('payments', event)">💰 Payments</button>
         </div>
         
         <!-- Overview Tab -->
@@ -235,7 +237,7 @@ function renderView(container, patients, user, pharmacyId, branchId) {
               <span id="detail-medical-notes">-</span>
             </div>
           </div>
-          <button class="btn btn-primary" onclick="editPatient()">Edit Information</button>
+          <button type="button" class="btn btn-primary" onclick="editPatient()">Edit Information</button>
         </div>
         
         <!-- Visits Tab -->
@@ -553,6 +555,7 @@ async function openPatientDetails(patientId) {
     
     // Store patient ID for later use
     document.getElementById('patient-details-modal').dataset.patientId = patientId;
+    switchPatientTab('overview');
     
     // Load visits with doctor info
     if (visits.length > 0) {
@@ -747,21 +750,182 @@ async function savePatientVisit(event) {
   }
 }
 
-function switchPatientTab(tabName) {
-  document.querySelectorAll('.tab-content').forEach(tab => tab.style.display = 'none');
-  document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
-  document.getElementById(tabName + '-tab').style.display = 'block';
-  event.target.classList.add('active');
+function switchPatientTab(tabName, clickEvent = null) {
+  const modal = document.getElementById('patient-details-modal');
+  if (!modal) return;
+
+  modal.querySelectorAll('.tab-content').forEach(tab => { tab.style.display = 'none'; });
+  modal.querySelectorAll('[data-patient-tab]').forEach(btn => btn.classList.remove('active'));
+
+  const selectedTab = modal.querySelector(`#${tabName}-tab`);
+  if (selectedTab) selectedTab.style.display = 'block';
+
+  const trigger = clickEvent?.currentTarget || modal.querySelector(`[data-patient-tab="${tabName}"]`);
+  trigger?.classList.add('active');
 }
 
 function editPatient() {
-  alert('Open edit patient form');
-  // TODO: Implement edit functionality
+  const patientId = document.getElementById('patient-details-modal')?.dataset.patientId;
+  if (!patientId) {
+    showToast('Patient information is not available.', 'error');
+    return;
+  }
+  editPatientForm(patientId);
 }
 
-function editPatientForm(patientId) {
-  alert('Edit patient: ' + patientId);
-  // TODO: Implement edit patient modal
+function escapePatientField(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+async function editPatientForm(patientId) {
+  try {
+    const patient = currentPatientList.find(p => p.id === patientId) || await getPatientDetails(patientId);
+    if (!patient) throw new Error('Patient record not found');
+
+    const safe = (value) => escapePatientField(value);
+    const dob = String(patient.date_of_birth || '').slice(0, 10);
+
+    const { overlay, closeModal: closeEditModal } = createModal({
+      id: 'edit-patient',
+      title: `Edit Patient — ${safe(patient.name || 'Patient')}`,
+      size: 'modal-lg',
+      body: `
+        <form id="edit-patient-form">
+          <div class="grid-2">
+            <div class="form-group">
+              <label class="form-label" for="edit-patient-name">Full Name *</label>
+              <input type="text" id="edit-patient-name" class="form-control" value="${safe(patient.name)}" required>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="edit-patient-phone">Phone *</label>
+              <input type="tel" id="edit-patient-phone" class="form-control" value="${safe(patient.phone)}" required>
+            </div>
+          </div>
+          <div class="grid-2">
+            <div class="form-group">
+              <label class="form-label" for="edit-patient-email">Email</label>
+              <input type="email" id="edit-patient-email" class="form-control" value="${safe(patient.email)}">
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="edit-patient-gender">Gender</label>
+              <select id="edit-patient-gender" class="form-control">
+                <option value="">-- Select --</option>
+                <option value="Male" ${patient.gender === 'Male' ? 'selected' : ''}>Male</option>
+                <option value="Female" ${patient.gender === 'Female' ? 'selected' : ''}>Female</option>
+                <option value="Other" ${patient.gender === 'Other' ? 'selected' : ''}>Other</option>
+              </select>
+            </div>
+          </div>
+          <div class="grid-2">
+            <div class="form-group">
+              <label class="form-label" for="edit-patient-dob">Date of Birth</label>
+              <input type="date" id="edit-patient-dob" class="form-control" value="${safe(dob)}">
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="edit-patient-id-number">Patient ID Number</label>
+              <input type="text" id="edit-patient-id-number" class="form-control" value="${safe(patient.patient_id_number)}">
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="edit-patient-address">Address</label>
+            <input type="text" id="edit-patient-address" class="form-control" value="${safe(patient.address)}">
+          </div>
+          <div class="grid-2">
+            <div class="form-group">
+              <label class="form-label" for="edit-patient-insurance-provider">Insurance Provider</label>
+              <input type="text" id="edit-patient-insurance-provider" class="form-control" value="${safe(patient.insurance_provider)}">
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="edit-patient-insurance-number">Insurance Number</label>
+              <input type="text" id="edit-patient-insurance-number" class="form-control" value="${safe(patient.insurance_number)}">
+            </div>
+          </div>
+          <div class="grid-2">
+            <div class="form-group">
+              <label class="form-label" for="edit-patient-emergency-contact">Emergency Contact</label>
+              <input type="text" id="edit-patient-emergency-contact" class="form-control" value="${safe(patient.emergency_contact)}">
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="edit-patient-emergency-phone">Emergency Phone</label>
+              <input type="tel" id="edit-patient-emergency-phone" class="form-control" value="${safe(patient.emergency_phone)}">
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="edit-patient-allergies">Known Allergies</label>
+            <textarea id="edit-patient-allergies" class="form-control" rows="2">${safe(patient.allergies)}</textarea>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="edit-patient-medical-notes">Medical Notes</label>
+            <textarea id="edit-patient-medical-notes" class="form-control" rows="3">${safe(patient.medical_notes)}</textarea>
+          </div>
+          <div id="edit-patient-error" class="alert alert-danger hidden"></div>
+        </form>
+      `,
+      footer: `
+        <button type="button" class="btn btn-ghost" id="cancel-edit-patient">Cancel</button>
+        <button type="button" class="btn btn-primary" id="save-edit-patient">Save Changes</button>
+      `
+    });
+
+    overlay.querySelector('#cancel-edit-patient')?.addEventListener('click', closeEditModal);
+    overlay.querySelector('#save-edit-patient')?.addEventListener('click', async () => {
+      const saveBtn = overlay.querySelector('#save-edit-patient');
+      const errorEl = overlay.querySelector('#edit-patient-error');
+      const name = overlay.querySelector('#edit-patient-name')?.value.trim();
+      const phone = overlay.querySelector('#edit-patient-phone')?.value.trim();
+
+      if (!name || !phone) {
+        errorEl.textContent = 'Full name and phone are required.';
+        errorEl.classList.remove('hidden');
+        return;
+      }
+
+      saveBtn.disabled = true;
+      saveBtn.textContent = 'Saving...';
+      errorEl.classList.add('hidden');
+
+      try {
+        await updatePatient(patientId, {
+          name,
+          phone,
+          email: overlay.querySelector('#edit-patient-email')?.value.trim() || null,
+          gender: overlay.querySelector('#edit-patient-gender')?.value || null,
+          date_of_birth: overlay.querySelector('#edit-patient-dob')?.value || null,
+          patient_id_number: overlay.querySelector('#edit-patient-id-number')?.value.trim() || null,
+          address: overlay.querySelector('#edit-patient-address')?.value.trim() || null,
+          insurance_provider: overlay.querySelector('#edit-patient-insurance-provider')?.value.trim() || null,
+          insurance_number: overlay.querySelector('#edit-patient-insurance-number')?.value.trim() || null,
+          emergency_contact: overlay.querySelector('#edit-patient-emergency-contact')?.value.trim() || null,
+          emergency_phone: overlay.querySelector('#edit-patient-emergency-phone')?.value.trim() || null,
+          allergies: overlay.querySelector('#edit-patient-allergies')?.value.trim() || null,
+          medical_notes: overlay.querySelector('#edit-patient-medical-notes')?.value.trim() || null
+        });
+
+        showToast('Patient information updated successfully.', 'success');
+        closeEditModal();
+
+        currentPatientList = await getPatients(currentPatientPharmacyId, currentPatientBranchId);
+        displayPatients(currentPatientList);
+
+        const detailsModal = document.getElementById('patient-details-modal');
+        if (detailsModal?.dataset.patientId === patientId && detailsModal.style.display !== 'none') {
+          await openPatientDetails(patientId);
+        }
+      } catch (error) {
+        errorEl.textContent = error.message || 'Unable to update patient information.';
+        errorEl.classList.remove('hidden');
+        saveBtn.disabled = false;
+        saveBtn.textContent = 'Save Changes';
+      }
+    });
+  } catch (error) {
+    console.error('Error opening patient editor:', error);
+    showToast(error.message || 'Unable to open patient editor.', 'error');
+  }
 }
 
 function getCurrentPharmacyId() {

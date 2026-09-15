@@ -37,7 +37,7 @@ export async function renderAdminDashboard(container, user) {
             <div class="page-title">Good ${getGreeting()}, ${(user.profile?.full_name || 'Admin').split(' ')[0]}!</div>
             <div class="page-subtitle">Here's what's happening at your pharmacy today (Last updated: ${new Date().toLocaleTimeString()})</div>
           </div>
-          <button class="btn btn-primary" onclick="import('./src/views/app.js').then(m=>m.navigate('pos'))">
+          <button type="button" class="btn btn-primary" onclick="window.navigate('pos')">
             + New Sale
           </button>
         </div>
@@ -45,7 +45,7 @@ export async function renderAdminDashboard(container, user) {
         ${stats.lowStockCount > 0 ? `
           <div class="alert alert-warning">
             &#9888;&nbsp; <strong>${stats.lowStockCount} product(s)</strong> are low on stock and need restocking.
-            <a href="#" onclick="event.preventDefault();import('/src/views/app.js').then(m=>m.navigate('inventory'))" style="color:inherit;font-weight:600;margin-left:0.5rem;text-decoration:underline">View inventory</a>
+            <button type="button" class="alert-inline-link" onclick="window.navigate('inventory')">View inventory</button>
           </div>
         ` : ''}
 

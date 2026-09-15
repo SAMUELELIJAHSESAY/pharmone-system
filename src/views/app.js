@@ -40,6 +40,44 @@ let currentParams = {};
 let currentSalesmanFeatures = null; // Store salesman features globally
 let currentImpersonation = null;
 
+const PAGE_TITLES = {
+  'super-dashboard': 'Overview',
+  'pharmacies': 'Pharmacies',
+  'all-users': 'All Users',
+  'settings': 'Settings',
+  'admin-dashboard': 'Dashboard',
+  'inventory': 'Inventory',
+  'sales': 'Sales',
+  'customers': 'Customers',
+  'patients': 'Patients',
+  'expenses': 'Expenses',
+  'stock-transfers': 'Stock Transfers',
+  'suppliers': 'Suppliers',
+  'purchases': 'Purchase Orders',
+  'returns': 'Sales Returns',
+  'returns-management': 'Return Requests',
+  'alerts': 'Alerts & Notifications',
+  'reports': 'Reports',
+  'sales-reports': 'Sales Reports',
+  'daily-reports': 'Daily Records',
+  'staff': 'Staff Management',
+  'branches': 'Branches',
+  'branch-details': 'Branch Details',
+  'salesman-dashboard': 'Dashboard',
+  'pos': 'Point of Sale',
+  'sales-history': 'My Sales History',
+  'returns-request': 'Return Requests',
+  'salesman-features': 'Salesman Features'
+};
+
+function applyPageTitle(view, overrideTitle = '') {
+  const title = overrideTitle || PAGE_TITLES[view] || 'Page Not Found';
+  const titleEl = document.getElementById('topbar-title');
+  if (titleEl) titleEl.textContent = title;
+  document.title = `${title} | PharmaCare`;
+  return title;
+}
+
 function setMobileSidebarOpen(isOpen) {
   const sidebar = document.getElementById('sidebar');
   const backdrop = document.getElementById('sidebar-backdrop');
@@ -67,17 +105,37 @@ function enhanceResponsiveContent(root = document) {
   const scope = root?.querySelectorAll ? root : document;
   const rootElement = scope instanceof Element ? scope : null;
 
-  // Every data table gets its own horizontal scroll area instead of widening the page.
-  const tables = [
+  // Turn every data table into a responsive table. Desktop keeps normal columns;
+  // mobile uses labelled cards so the page never needs horizontal scrolling.
+  const tableSet = new Set([
     ...(rootElement?.matches('table') ? [rootElement] : []),
+    ...(rootElement?.closest('table') ? [rootElement.closest('table')] : []),
     ...scope.querySelectorAll('table')
-  ];
-  tables.forEach((table) => {
-    if (table.closest('.table-container')) return;
-    const wrapper = document.createElement('div');
-    wrapper.className = 'table-container auto-table-container';
-    table.parentNode?.insertBefore(wrapper, table);
-    wrapper.appendChild(table);
+  ].filter(Boolean));
+
+  tableSet.forEach((table) => {
+    table.classList.add('responsive-data-table');
+
+    const headers = [...table.querySelectorAll('thead th')].map((th) => th.textContent.trim());
+    table.querySelectorAll('tbody tr').forEach((row) => {
+      const cells = [...row.children].filter((cell) => cell.tagName === 'TD');
+      cells.forEach((cell, index) => {
+        if (cell.hasAttribute('colspan')) {
+          cell.dataset.label = '';
+          cell.classList.add('responsive-table-full-row');
+          return;
+        }
+        const label = headers[index] || '';
+        if (label) cell.dataset.label = label;
+      });
+    });
+
+    if (!table.closest('.table-container')) {
+      const wrapper = document.createElement('div');
+      wrapper.className = 'table-container auto-table-container';
+      table.parentNode?.insertBefore(wrapper, table);
+      wrapper.appendChild(table);
+    }
   });
 
   // Normalize common inline layouts used throughout legacy views so mobile CSS can override them.
@@ -88,10 +146,11 @@ function enhanceResponsiveContent(root = document) {
   styledElements.forEach((element) => {
     const style = element.getAttribute('style') || '';
     if (/grid-template-columns\s*:/i.test(style)) element.classList.add('responsive-inline-grid');
-    if (/display\s*:\s*flex/i.test(style) && /justify-content\s*:\s*(space-between|flex-end)/i.test(style)) {
+    if (/display\s*:\s*flex/i.test(style) && /justify-content\s*:\s*(space-between|flex-end|center)/i.test(style)) {
       element.classList.add('responsive-flex-row');
     }
     if (/min-width\s*:/i.test(style)) element.classList.add('mobile-min-width-reset');
+    if (/width\s*:\s*\d+(?:\.\d+)?(?:px|rem|em)/i.test(style)) element.classList.add('mobile-fixed-width-reset');
   });
 }
 
@@ -400,7 +459,6 @@ export function navigate(view, params = {}) {
   });
 
   const content = document.getElementById('page-content');
-  const titleEl = document.getElementById('topbar-title');
   if (!content) return;
 
   content.innerHTML = '<div class="loading-spinner"></div>';
@@ -428,14 +486,11 @@ export function navigate(view, params = {}) {
             <div style="font-size: 3rem; margin-bottom: 1rem">🔒</div>
             <div style="font-size: 1.5rem; font-weight: 600; margin-bottom: 0.5rem">Access Denied</div>
             <div style="color: var(--gray-600); margin-bottom: 2rem">This feature is not available for your account. Please contact your administrator.</div>
-            <button class="btn btn-primary" onclick="(async () => {
-              const { navigate } = await import('./app.js');
-              navigate('pos');
-            })()">Go to Point of Sale</button>
+            <button type="button" class="btn btn-primary" onclick="window.navigate('pos')">Go to Point of Sale</button>
           </div>
         </div>
       `;
-      if (titleEl) titleEl.textContent = 'Access Denied';
+      applyPageTitle(view, 'Access Denied');
       return;
     }
   }
@@ -449,48 +504,16 @@ export function navigate(view, params = {}) {
             <div style="font-size: 3rem; margin-bottom: 1rem">🔒</div>
             <div style="font-size: 1.5rem; font-weight: 600; margin-bottom: 0.5rem">Access Denied</div>
             <div style="color: var(--gray-600); margin-bottom: 2rem">You only have access to Inventory and Branches. Please contact your administrator for additional access.</div>
-            <button class="btn btn-primary" onclick="(async () => {
-              const { navigate } = await import('./app.js');
-              navigate('inventory');
-            })()">Go to Inventory</button>
+            <button type="button" class="btn btn-primary" onclick="window.navigate('inventory')">Go to Inventory</button>
           </div>
         </div>
       `;
-      if (titleEl) titleEl.textContent = 'Access Denied';
+      applyPageTitle(view, 'Access Denied');
       return;
     }
   }
 
-  const titles = {
-    'super-dashboard': 'Overview',
-    'pharmacies': 'Pharmacies',
-    'all-users': 'All Users',
-    'settings': 'Settings',
-    'admin-dashboard': 'Dashboard',
-    'inventory': 'Inventory',
-    'sales': 'Sales',
-    'customers': 'Customers',
-    'patients': 'Patients',
-    'expenses': 'Expenses',
-    'stock-transfers': 'Stock Transfers',
-    'suppliers': 'Suppliers',
-    'purchases': 'Purchase Orders',
-    'returns': 'Sales Returns',
-    'returns-management': 'Return Requests',
-    'alerts': 'Alerts & Notifications',
-    'reports': 'Reports',
-    'sales-reports': 'Sales Reports',
-    'staff': 'Staff',
-    'branches': 'Branches',
-    'branch-details': 'Branch Details',
-    'salesman-dashboard': 'Dashboard',
-    'pos': 'Point of Sale',
-    'sales-history': 'My Sales History',
-    'returns-request': 'Return Requests',
-    'salesman-features': 'Salesman Features',
-  };
-
-  if (titleEl) titleEl.textContent = titles[view] || 'Dashboard';
+  applyPageTitle(view);
 
   switch (view) {
     case 'super-dashboard': renderSuperAdminDashboard(content, activeUser); break;
@@ -524,7 +547,10 @@ export function navigate(view, params = {}) {
     case 'sales-history': renderSalesHistory(content, activeUser); break;
     case 'returns-request': renderSalesmanReturnsRequest(content, activeUser); break;
     case 'salesman-features': renderSalesmanFeatures(content, activeUser); break;
-    default: content.innerHTML = '<div class="empty-state"><div class="empty-state-icon">&#128269;</div><div class="empty-state-title">Page not found</div></div>';
+    default:
+      applyPageTitle(view, 'Page Not Found');
+      content.innerHTML = '<div class="empty-state"><div class="empty-state-icon">&#128269;</div><div class="empty-state-title">Page not found</div><div class="empty-state-desc">The requested page is not available.</div></div>';
+      break;
   }
 }
 
@@ -554,8 +580,7 @@ function handleGlobalSearch(query, user) {
   `;
 
   content.innerHTML = allSearchableContent;
-  const titleEl = document.getElementById('topbar-title');
-  if (titleEl) titleEl.textContent = 'Search Results';
+  applyPageTitle('', 'Search Results');
   
   document.getElementById('global-search').value = '';
 }

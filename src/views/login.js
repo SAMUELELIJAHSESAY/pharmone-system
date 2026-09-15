@@ -2,6 +2,7 @@ import { signIn } from '../auth.js';
 import { showToast } from '../utils.js';
 
 export function renderLogin() {
+  document.title = 'Sign In | PharmaCare';
   document.getElementById('app').innerHTML = `
     <div class="auth-page">
       <div class="auth-card">

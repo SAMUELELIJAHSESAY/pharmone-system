@@ -172,7 +172,7 @@ export async function showProfileModal(user) {
         // Sign out after password change and redirect to login
         setTimeout(async () => {
           await supabase.auth.signOut();
-          window.location.href = '/login.html';
+          window.location.replace('/');
         }, 1500);
       } catch (err) {
         errorEl.textContent = err.message || 'Error changing password. Please try again.';

@@ -288,6 +288,7 @@ window.removeTransferItemRow = removeTransferItemRow;
 window.viewTransferDetails = viewTransferDetails;
 window.saveStockTransfer = saveStockTransfer;
 window.changeTransferStatus = changeTransferStatus;
+window.processTransferAction = processTransferAction;
 
 async function loadFromBranchProducts() {
   try {
@@ -465,7 +466,7 @@ async function viewTransferDetails(transferId) {
     
     // Show process button if in_transit
     const processBtn = document.getElementById('process-transfer-btn');
-    processBtn.display = transfer.status === 'in_transit' ? 'block' : 'none';
+    processBtn.style.display = transfer.status === 'in_transit' ? 'inline-flex' : 'none';
     processBtn.dataset.transferId = transferId;
     
     document.getElementById('transfer-details-modal').style.display = 'block';

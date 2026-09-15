@@ -407,7 +407,59 @@ function renderSalesHistoryView(container, sales, user, pharmacyId, branchId) {
     };
 
     window.exportSalesAsPDF = () => {
-      showToast('PDF export coming soon', 'info');
+      const printWindow = window.open('', '_blank', 'width=1000,height=700');
+      if (!printWindow) {
+        showToast('Please allow pop-ups to export the sales report as PDF.', 'warning');
+        return;
+      }
+
+      const reportDate = new Date().toLocaleString();
+      const rows = filteredSales.map((sale) => {
+        const itemCount = (sale.sale_items || []).length;
+        return `
+          <tr>
+            <td>${sale.invoice_number || '-'}</td>
+            <td>${sale.customers?.name || 'Walk-in'}</td>
+            <td>${itemCount}</td>
+            <td>${formatCurrency(sale.total_amount || 0)}</td>
+            <td>${String(sale.payment_method || '-').replace('_', ' ')}</td>
+            <td>${sale.status || '-'}</td>
+            <td>${new Date(sale.created_at).toLocaleString()}</td>
+          </tr>
+        `;
+      }).join('');
+
+      printWindow.document.write(`
+        <!doctype html>
+        <html>
+          <head>
+            <meta charset="utf-8">
+            <title>Sales History | PharmaCare</title>
+            <style>
+              body { font-family: Arial, sans-serif; color: #111827; margin: 28px; }
+              h1 { margin: 0 0 6px; font-size: 24px; }
+              p { margin: 0 0 18px; color: #4b5563; }
+              table { width: 100%; border-collapse: collapse; font-size: 12px; }
+              th, td { border: 1px solid #d1d5db; padding: 7px; text-align: left; vertical-align: top; }
+              th { background: #f3f4f6; }
+              @media print { body { margin: 12mm; } }
+            </style>
+          </head>
+          <body>
+            <h1>Sales History</h1>
+            <p>Generated ${reportDate} • ${filteredSales.length} record(s)</p>
+            <table>
+              <thead>
+                <tr><th>Invoice</th><th>Customer</th><th>Items</th><th>Total</th><th>Payment</th><th>Status</th><th>Date</th></tr>
+              </thead>
+              <tbody>${rows || '<tr><td colspan="7">No sales match the current filters.</td></tr>'}</tbody>
+            </table>
+            <script>window.addEventListener('load', () => setTimeout(() => window.print(), 100));<\/script>
+          </body>
+        </html>
+      `);
+      printWindow.document.close();
+      printWindow.focus();
     };
   }
 

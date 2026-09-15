@@ -145,6 +145,11 @@ async function loadStaffManagementData(pharmacyId) {
     const branchSelect = document.getElementById('assign-branch-select');
     branchSelect.innerHTML = '<option value="">-- Choose Branch --</option>' + 
       branches.map(b => `<option value="${b.id}">${b.name}</option>`).join('');
+    const branchFilter = document.getElementById('branch-filter');
+    if (branchFilter) {
+      branchFilter.innerHTML = '<option value="">All Branches</option>' +
+        branches.map(b => `<option value="${b.id}">${b.name}</option>`).join('');
+    }
     
     // Load staff
     const profiles = await getProfiles(pharmacyId);
@@ -182,7 +187,7 @@ async function loadAllAssignments(branches) {
     }
     
     tbody.innerHTML = data.map(a => `
-      <tr>
+      <tr data-branch-id="${a.branch_id || ''}">
         <td>${a.profiles.full_name}</td>
         <td>${a.profiles.email}</td>
         <td>${a.branches.name}</td>
@@ -310,22 +315,38 @@ async function removeAssignment(assignmentId) {
   }
 }
 
+function applyStaffFilters() {
+  const branchId = document.getElementById('branch-filter')?.value || '';
+  const searchTerm = (document.getElementById('staff-search')?.value || '').trim().toLowerCase();
+  const rows = document.querySelectorAll('#staff-table tr[data-branch-id]');
+
+  rows.forEach(row => {
+    const matchesBranch = !branchId || row.dataset.branchId === branchId;
+    const matchesSearch = !searchTerm || row.textContent.toLowerCase().includes(searchTerm);
+    row.style.display = matchesBranch && matchesSearch ? '' : 'none';
+  });
+}
+
 function filterStaffByBranch() {
-  const branchFilter = document.getElementById('branch-filter').value;
-  alert('Filter by branch: ' + branchFilter);
-  // TODO: Implement branch filter
+  applyStaffFilters();
 }
 
 function filterStaff() {
-  const searchTerm = document.getElementById('staff-search').value.toLowerCase();
-  const rows = document.querySelectorAll('#staff-table tr');
-  
-  rows.forEach(row => {
-    const text = row.textContent.toLowerCase();
-    row.style.display = text.includes(searchTerm) ? '' : 'none';
-  });
+  applyStaffFilters();
 }
 
 async function loadStaffDetails() {
   // Optional: Load additional details when staff is selected
 }
+
+
+// Inline HTML handlers in this legacy view must be explicitly exposed from the ES module.
+window.openAddStaffModal = openAddStaffModal;
+window.closeModal = closeModal;
+window.saveStaffAssignment = saveStaffAssignment;
+window.openEditAssignmentModal = openEditAssignmentModal;
+window.updateAssignment = updateAssignment;
+window.removeAssignment = removeAssignment;
+window.filterStaffByBranch = filterStaffByBranch;
+window.filterStaff = filterStaff;
+window.loadStaffDetails = loadStaffDetails;

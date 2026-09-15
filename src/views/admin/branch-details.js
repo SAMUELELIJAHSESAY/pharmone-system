@@ -5,8 +5,13 @@ import { createModal } from '../../components/modal.js';
 import { showToast, formatUTCDate, formatUTCDateTime } from '../../utils.js';
 import { isViewLifecycleActive } from '../../view-lifecycle.js';
 
+let currentBranchSales = [];
+let currentBranchInventory = [];
+
 export function renderBranchDetailsView(branchId, pharmacyId, lifecycleToken) {
   const mainContent = document.getElementById('page-content');
+  currentBranchSales = [];
+  currentBranchInventory = [];
   
   // Store pharmacyId in a global variable for later access in functions
   window.currentPharmacyId = pharmacyId;
@@ -193,10 +198,15 @@ export function renderBranchDetailsView(branchId, pharmacyId, lifecycleToken) {
     btn.addEventListener('click', () => switchBranchTab(btn.dataset.tab));
   });
 
+  const inventorySearch = document.getElementById('inventory-search');
+  const stockFilter = document.getElementById('stock-filter');
+  inventorySearch?.addEventListener('input', filterBranchInventory);
+  stockFilter?.addEventListener('change', filterBranchInventory);
+
+  const salesDateFilter = document.getElementById('sales-date-filter');
   const filterBtn = document.getElementById('filter-sales-btn');
-  if (filterBtn) {
-    filterBtn.addEventListener('click', () => filterBranchSales());
-  }
+  if (filterBtn) filterBtn.addEventListener('click', filterBranchSales);
+  salesDateFilter?.addEventListener('change', filterBranchSales);
 
   // Load branch data. Async completion is guarded by the current view token.
   loadBranchData(branchId, pharmacyId, lifecycleToken);
@@ -212,6 +222,7 @@ async function loadBranchData(branchId, pharmacyId, lifecycleToken) {
     if (!isViewLifecycleActive(lifecycleToken)) return;
 
     document.getElementById('branch-name').textContent = branch.name;
+    document.title = `${branch.name} | Branch Details | PharmaCare`;
     document.getElementById('branch-name-input').value = branch.name;
     document.getElementById('branch-location').value = branch.address || '';
     document.getElementById('branch-contact-person').value = branch.contact_person || '';
@@ -247,27 +258,56 @@ async function loadBranchInventory(branchId) {
       .select('id, name, stock_boxes, stock_units, low_stock_threshold, expiry_date')
       .eq('branch_id', branchId)
       .eq('is_active', true);
-    
+
     if (error) throw error;
-    
-    const tbody = document.getElementById('inventory-table');
-    if (data.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="5">No products in this branch</td></tr>';
-      return;
-    }
-    
-    tbody.innerHTML = data.map(p => `
-      <tr>
-        <td>${p.name}</td>
-        <td>${p.stock_boxes}</td>
-        <td>${p.stock_units}</td>
-        <td>${p.stock_boxes <= p.low_stock_threshold ? '⚠️ Yes' : '✓ No'}</td>
-        <td>${p.expiry_date || 'N/A'}</td>
-      </tr>
-    `).join('');
+
+    currentBranchInventory = data || [];
+    displayBranchInventory(currentBranchInventory);
   } catch (error) {
     console.error('Error loading inventory:', error);
+    const tbody = document.getElementById('inventory-table');
+    if (tbody) tbody.innerHTML = '<tr><td colspan="5">Unable to load branch inventory</td></tr>';
   }
+}
+
+function displayBranchInventory(products) {
+  const tbody = document.getElementById('inventory-table');
+  if (!tbody) return;
+
+  if (!products.length) {
+    tbody.innerHTML = '<tr><td colspan="5">No matching products in this branch</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = products.map(p => `
+    <tr>
+      <td>${p.name}</td>
+      <td>${p.stock_boxes ?? 0}</td>
+      <td>${p.stock_units ?? 0}</td>
+      <td>${(p.stock_boxes ?? 0) <= (p.low_stock_threshold ?? 0) ? '⚠️ Yes' : '✓ No'}</td>
+      <td>${p.expiry_date || 'N/A'}</td>
+    </tr>
+  `).join('');
+}
+
+function filterBranchInventory() {
+  const query = (document.getElementById('inventory-search')?.value || '').trim().toLowerCase();
+  const stockFilter = document.getElementById('stock-filter')?.value || '';
+
+  const filtered = currentBranchInventory.filter((product) => {
+    const nameMatches = !query || String(product.name || '').toLowerCase().includes(query);
+    const boxes = Number(product.stock_boxes || 0);
+    const units = Number(product.stock_units || 0);
+    const threshold = Number(product.low_stock_threshold || 0);
+    const stockMatches = stockFilter === 'low'
+      ? boxes <= threshold
+      : stockFilter === 'out'
+        ? boxes <= 0 && units <= 0
+        : true;
+    return nameMatches && stockMatches;
+  });
+
+  displayBranchInventory(filtered);
 }
 
 async function loadBranchSales(branchId) {
@@ -278,28 +318,38 @@ async function loadBranchSales(branchId) {
       .eq('branch_id', branchId)
       .order('created_at', { ascending: false })
       .limit(50);
-    
+
     if (error) throw error;
-    
-    const tbody = document.getElementById('sales-table');
-    if (data.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="6">No sales in this branch</td></tr>';
-      return;
-    }
-    
-    tbody.innerHTML = data.map(s => `
-      <tr>
-        <td>${s.invoice_number}</td>
-        <td>Customer</td>
-        <td>$${s.total_amount.toFixed(2)}</td>
-        <td>${s.payment_method}</td>
-        <td>Staff</td>
-        <td>${formatUTCDate(s.created_at)}</td>
-      </tr>
-    `).join('');
+
+    currentBranchSales = data || [];
+    displayBranchSales(currentBranchSales);
   } catch (error) {
     console.error('Error loading sales:', error);
+    const tbody = document.getElementById('sales-table');
+    if (tbody) tbody.innerHTML = '<tr><td colspan="6">Unable to load branch sales</td></tr>';
   }
+}
+
+function displayBranchSales(sales) {
+  const tbody = document.getElementById('sales-table');
+  if (!tbody) return;
+
+  if (!sales.length) {
+    tbody.innerHTML = '<tr><td colspan="6">No sales match this filter</td></tr>';
+    return;
+  }
+
+  const currencySymbol = window.pharmacySettings?.currency_symbol || 'Le';
+  tbody.innerHTML = sales.map(s => `
+    <tr>
+      <td>${s.invoice_number}</td>
+      <td>Customer</td>
+      <td>${currencySymbol}${Number(s.total_amount || 0).toFixed(2)}</td>
+      <td>${String(s.payment_method || '-').replace('_', ' ')}</td>
+      <td>Staff</td>
+      <td>${formatUTCDate(s.created_at)}</td>
+    </tr>
+  `).join('');
 }
 
 async function loadBranchStaff(branchId, pharmacyId = window.currentPharmacyId) {
@@ -523,7 +573,8 @@ async function openAssignStaffModal() {
   }
 }
 
-// Make openAssignStaffModal globally accessible
+// Make inline form/action handlers globally accessible
+window.saveBranchDetails = saveBranchDetails;
 window.openAssignStaffModal = openAssignStaffModal;
 
 async function removeStaffFromBranch(assignmentId) {
@@ -541,9 +592,11 @@ async function removeStaffFromBranch(assignmentId) {
 }
 
 function filterBranchSales() {
-  const dateFilter = document.getElementById('sales-date-filter').value;
-  alert('Filter sales by date: ' + dateFilter);
-  // TODO: Implement date filter
+  const dateFilter = document.getElementById('sales-date-filter')?.value || '';
+  const filtered = dateFilter
+    ? currentBranchSales.filter((sale) => String(sale.created_at || '').slice(0, 10) === dateFilter)
+    : currentBranchSales;
+  displayBranchSales(filtered);
 }
 
 // Make functions globally accessible
