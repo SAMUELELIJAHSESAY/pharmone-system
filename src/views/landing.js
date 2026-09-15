@@ -130,16 +130,25 @@ export function renderLanding() {
                 <span><i>✓</i><b>Designed to scale</b><small>Support one pharmacy today and more branches tomorrow.</small></span>
               </div>
             </div>
-            <div class="solution-preview">
-              <div class="solution-preview-top"><span>Inventory overview</span><strong>Live status</strong></div>
-              <div class="solution-metrics"><div><small>Total Products</small><strong>1,248</strong></div><div><small>In Stock</small><strong>1,196</strong></div><div><small>Low Stock</small><strong>8</strong></div></div>
-              <div class="solution-table">
-                <div class="solution-row head"><span>Product</span><span>Stock</span><span>Status</span></div>
-                <div class="solution-row"><span>Paracetamol 500mg</span><span>240</span><span class="pill success">Healthy</span></div>
-                <div class="solution-row"><span>Amoxicillin 250mg</span><span>86</span><span class="pill success">Healthy</span></div>
-                <div class="solution-row"><span>Vitamin C 1000mg</span><span>12</span><span class="pill warning">Low</span></div>
-                <div class="solution-row"><span>ORS Sachets</span><span>118</span><span class="pill success">Healthy</span></div>
+            <div class="solution-preview solution-preview-real" aria-label="Real SamMia Pharm inventory management screen">
+              <div class="real-shot-browserbar">
+                <span class="real-shot-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+                <span>Inventory Management</span>
+                <strong>Real system view</strong>
               </div>
+              <div class="inventory-real-shot-wrap">
+                <img
+                  class="inventory-real-shot"
+                  src="/brand/sammia-inventory-real.png"
+                  alt="Real SamMia Pharm inventory management page showing products, stock levels and status information"
+                  loading="lazy"
+                />
+                <div class="inventory-shot-brand" aria-label="Sammia-pharmacy">
+                  <img src="/brand/sammia-mark.png" alt="" aria-hidden="true" />
+                  <span>Sammia-pharmacy</span>
+                </div>
+              </div>
+              <p class="real-shot-caption">Real inventory management screen from SamMia Pharm.</p>
             </div>
           </div>
         </section>

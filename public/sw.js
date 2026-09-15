@@ -138,3 +138,5 @@ self.addEventListener('fetch', (event) => {
     }
   })());
 });
+
+// Landing inventory screenshot cache refresh: v9
