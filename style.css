@@ -3112,3 +3112,67 @@ code {
     margin-top: 0.35rem;
   }
 }
+
+/* ======== DESKTOP/LAPTOP DIALOG WIDTH CORRECTION ======== */
+/*
+ * Mobile dialogs intentionally use the full available width. On screens wider
+ * than 768px, keep dialogs centered and readable instead of allowing the final
+ * overflow-hardening layer to stretch them across the application viewport.
+ */
+@media (min-width: 769px) {
+  .modal-overlay {
+    padding: clamp(1.25rem, 3vw, 3rem);
+  }
+
+  .modal-overlay > .modal {
+    width: min(100%, 540px) !important;
+    max-width: 540px !important;
+    max-height: min(88vh, 820px);
+    margin: auto;
+  }
+
+  .modal-overlay > .modal.modal-md {
+    width: min(100%, 560px) !important;
+    max-width: 560px !important;
+  }
+
+  .modal-overlay > .modal.modal-lg {
+    width: min(100%, 700px) !important;
+    max-width: 700px !important;
+  }
+
+  .modal-overlay > .modal.modal-xl {
+    width: min(100%, 820px) !important;
+    max-width: 820px !important;
+  }
+
+  /* Receipts should feel like a receipt, not a full-width page. */
+  #receipt-modal-overlay > .modal {
+    width: min(100%, 480px) !important;
+    max-width: 480px !important;
+  }
+
+  /* Admin sale details need a little more room for the item table. */
+  #sale-detail-overlay > .modal {
+    width: min(100%, 680px) !important;
+    max-width: 680px !important;
+  }
+}
+
+/* Keep large dialogs comfortable on smaller laptops without becoming full-screen. */
+@media (min-width: 769px) and (max-width: 1100px) {
+  .modal-overlay > .modal.modal-lg {
+    width: min(100%, 640px) !important;
+    max-width: 640px !important;
+  }
+
+  .modal-overlay > .modal.modal-xl {
+    width: min(100%, 740px) !important;
+    max-width: 740px !important;
+  }
+
+  #sale-detail-overlay > .modal {
+    width: min(100%, 620px) !important;
+    max-width: 620px !important;
+  }
+}
