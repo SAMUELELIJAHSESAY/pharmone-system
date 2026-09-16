@@ -2839,16 +2839,20 @@ export async function getExpensesPage(pharmacyId, {
   pageSize = 30,
   startDate = null,
   endDate = null,
-  categoryId = null
+  categoryId = null,
+  paymentMethod = null,
+  status = 'all',
+  search = ''
 } = {}) {
   const safePageSize = [25, 30, 50].includes(Number(pageSize)) ? Number(pageSize) : 30;
   const safePage = Math.max(1, Number(page) || 1);
   const from = (safePage - 1) * safePageSize;
   const to = from + safePageSize - 1;
+  const normalizedSearch = String(search || '').trim().replace(/[,%()]/g, ' ').replace(/\s+/g, ' ');
 
   let query = supabase
     .from('expenses')
-    .select('*, expense_categories(category_name, description)', { count: 'exact' })
+    .select('*, expense_categories(category_name, description), branches(name)', { count: 'exact' })
     .eq('pharmacy_id', pharmacyId)
     .order('expense_date', { ascending: false })
     .order('created_at', { ascending: false });
@@ -2857,6 +2861,13 @@ export async function getExpensesPage(pharmacyId, {
   if (startDate) query = query.gte('expense_date', startDate);
   if (endDate) query = query.lte('expense_date', endDate);
   if (categoryId) query = query.eq('category_id', categoryId);
+  if (paymentMethod) query = query.eq('payment_method', paymentMethod);
+  if (status === 'approved') query = query.eq('is_approved', true);
+  if (status === 'pending') query = query.eq('is_approved', false);
+  if (normalizedSearch) {
+    const pattern = `%${normalizedSearch}%`;
+    query = query.or(`description.ilike.${pattern},receipt_number.ilike.${pattern},notes.ilike.${pattern}`);
+  }
 
   const { data, error, count } = await query.range(from, to);
   if (error) throw error;
@@ -2869,6 +2880,127 @@ export async function getExpensesPage(pharmacyId, {
     pageSize: safePageSize,
     totalPages: Math.max(1, Math.ceil(total / safePageSize))
   };
+}
+
+/**
+ * Aggregate expense totals without loading the full expense rows into the UI.
+ * The helper requests only the narrow columns required for analytics and pages
+ * through them in 1,000-row chunks so large ledgers remain accurate.
+ */
+export async function getExpenseFilteredSummary(pharmacyId, {
+  branchId = null,
+  startDate = null,
+  endDate = null,
+  categoryId = null,
+  paymentMethod = null,
+  status = 'all',
+  search = ''
+} = {}) {
+  const normalizedSearch = String(search || '').trim().replace(/[,%()]/g, ' ').replace(/\s+/g, ' ');
+
+  const { data: rpcData, error: rpcError } = await supabase.rpc('get_expense_filtered_summary', {
+    p_pharmacy_id: pharmacyId,
+    p_branch_id: branchId || null,
+    p_start_date: startDate || null,
+    p_end_date: endDate || null,
+    p_category_id: categoryId || null,
+    p_payment_method: paymentMethod || null,
+    p_status: status || 'all',
+    p_search: normalizedSearch || null
+  });
+  if (!rpcError && rpcData) {
+    return {
+      totalAmount: Number(rpcData.totalAmount || 0),
+      approvedAmount: Number(rpcData.approvedAmount || 0),
+      pendingAmount: Number(rpcData.pendingAmount || 0),
+      count: Number(rpcData.count || 0),
+      approvedCount: Number(rpcData.approvedCount || 0),
+      pendingCount: Number(rpcData.pendingCount || 0),
+      paymentBreakdown: rpcData.paymentBreakdown || {},
+      categoryBreakdown: rpcData.categoryBreakdown || {}
+    };
+  }
+
+  const missingRpc = ['PGRST202', '42883'].includes(String(rpcError?.code || ''))
+    || String(rpcError?.message || '').toLowerCase().includes('get_expense_filtered_summary');
+  if (rpcError && !missingRpc) throw rpcError;
+
+  const chunkSize = 1000;
+  let offset = 0;
+  const rows = [];
+
+  while (true) {
+    let query = supabase
+      .from('expenses')
+      .select('amount,payment_method,is_approved,category_id,expense_categories(category_name)')
+      .eq('pharmacy_id', pharmacyId)
+      .order('expense_date', { ascending: false });
+
+    if (branchId) query = query.eq('branch_id', branchId);
+    if (startDate) query = query.gte('expense_date', startDate);
+    if (endDate) query = query.lte('expense_date', endDate);
+    if (categoryId) query = query.eq('category_id', categoryId);
+    if (paymentMethod) query = query.eq('payment_method', paymentMethod);
+    if (status === 'approved') query = query.eq('is_approved', true);
+    if (status === 'pending') query = query.eq('is_approved', false);
+    if (normalizedSearch) {
+      const pattern = `%${normalizedSearch}%`;
+      query = query.or(`description.ilike.${pattern},receipt_number.ilike.${pattern},notes.ilike.${pattern}`);
+    }
+
+    const { data, error } = await query.range(offset, offset + chunkSize - 1);
+    if (error) throw error;
+    const batch = data || [];
+    rows.push(...batch);
+    if (batch.length < chunkSize) break;
+    offset += chunkSize;
+  }
+
+  const paymentBreakdown = {};
+  const categoryBreakdown = {};
+  let totalAmount = 0;
+  let approvedAmount = 0;
+  let pendingAmount = 0;
+  let approvedCount = 0;
+  let pendingCount = 0;
+
+  rows.forEach((row) => {
+    const amount = Number(row.amount || 0);
+    totalAmount += amount;
+    if (row.is_approved) {
+      approvedAmount += amount;
+      approvedCount += 1;
+    } else {
+      pendingAmount += amount;
+      pendingCount += 1;
+    }
+    const method = row.payment_method || 'other';
+    paymentBreakdown[method] = (paymentBreakdown[method] || 0) + amount;
+    const category = row.expense_categories?.category_name || 'Uncategorized';
+    categoryBreakdown[category] = (categoryBreakdown[category] || 0) + amount;
+  });
+
+  return {
+    totalAmount,
+    approvedAmount,
+    pendingAmount,
+    count: rows.length,
+    approvedCount,
+    pendingCount,
+    paymentBreakdown,
+    categoryBreakdown
+  };
+}
+
+export async function getExpenseCreatorProfiles(userIds = []) {
+  const ids = [...new Set((userIds || []).filter(Boolean))];
+  if (!ids.length) return {};
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('id,full_name,email,role')
+    .in('id', ids);
+  if (error) throw error;
+  return Object.fromEntries((data || []).map((profile) => [profile.id, profile]));
 }
 
 export async function createExpense(payload) {
@@ -2890,6 +3022,136 @@ export async function updateExpense(expenseId, payload) {
     .single();
   if (error) throw error;
   return data;
+}
+
+export async function deleteExpense(expenseId) {
+  const { error } = await supabase
+    .from('expenses')
+    .delete()
+    .eq('id', expenseId);
+  if (error) throw error;
+  return true;
+}
+
+const isMissingExpenseFeature = (error) => {
+  const code = String(error?.code || '');
+  const message = String(error?.message || '').toLowerCase();
+  return ['42P01', '42703', 'PGRST202', 'PGRST205'].includes(code)
+    || message.includes('recurring_expenses')
+    || message.includes('expense_attachments')
+    || message.includes('expense-receipts');
+};
+
+export async function getRecurringExpenses(pharmacyId) {
+  const { data, error } = await supabase
+    .from('recurring_expenses')
+    .select('*, expense_categories(category_name), branches(name)')
+    .eq('pharmacy_id', pharmacyId)
+    .order('next_due_date', { ascending: true });
+  if (error) {
+    if (isMissingExpenseFeature(error)) return { supported: false, data: [] };
+    throw error;
+  }
+  return { supported: true, data: data || [] };
+}
+
+export async function createRecurringExpense(payload) {
+  const { data, error } = await supabase
+    .from('recurring_expenses')
+    .insert(payload)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function updateRecurringExpense(id, payload) {
+  const { data, error } = await supabase
+    .from('recurring_expenses')
+    .update(payload)
+    .eq('id', id)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function deleteRecurringExpense(id) {
+  const { error } = await supabase
+    .from('recurring_expenses')
+    .delete()
+    .eq('id', id);
+  if (error) throw error;
+  return true;
+}
+
+export async function getExpenseAttachments(expenseId) {
+  const { data, error } = await supabase
+    .from('expense_attachments')
+    .select('*')
+    .eq('expense_id', expenseId)
+    .order('created_at', { ascending: false });
+  if (error) {
+    if (isMissingExpenseFeature(error)) return { supported: false, data: [] };
+    throw error;
+  }
+  return { supported: true, data: data || [] };
+}
+
+export async function uploadExpenseAttachment({ expenseId, pharmacyId, file, userId }) {
+  if (!file) throw new Error('Choose a receipt file first.');
+  const safeName = String(file.name || 'receipt')
+    .replace(/[^a-zA-Z0-9._-]+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'receipt';
+  const filePath = `${pharmacyId}/${expenseId}/${Date.now()}-${safeName}`;
+  const { error: uploadError } = await supabase.storage
+    .from('expense-receipts')
+    .upload(filePath, file, { upsert: false, contentType: file.type || undefined });
+  if (uploadError) throw uploadError;
+
+  const { data, error } = await supabase
+    .from('expense_attachments')
+    .insert({
+      expense_id: expenseId,
+      pharmacy_id: pharmacyId,
+      file_path: filePath,
+      file_name: file.name || safeName,
+      mime_type: file.type || null,
+      size_bytes: Number(file.size || 0),
+      uploaded_by: userId || null
+    })
+    .select()
+    .single();
+
+  if (error) {
+    await supabase.storage.from('expense-receipts').remove([filePath]);
+    throw error;
+  }
+  return data;
+}
+
+export async function getExpenseAttachmentUrl(filePath, expiresIn = 300) {
+  const { data, error } = await supabase.storage
+    .from('expense-receipts')
+    .createSignedUrl(filePath, expiresIn);
+  if (error) throw error;
+  return data?.signedUrl || null;
+}
+
+export async function deleteExpenseAttachment(attachment) {
+  if (!attachment?.id) throw new Error('Attachment not found.');
+  if (attachment.file_path) {
+    const { error: storageError } = await supabase.storage
+      .from('expense-receipts')
+      .remove([attachment.file_path]);
+    if (storageError) throw storageError;
+  }
+  const { error } = await supabase
+    .from('expense_attachments')
+    .delete()
+    .eq('id', attachment.id);
+  if (error) throw error;
+  return true;
 }
 
 export async function approveExpense(expenseId, approvedBy) {
