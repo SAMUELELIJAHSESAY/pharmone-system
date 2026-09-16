@@ -2187,13 +2187,6 @@ export async function getBranchDetails(branchId) {
 }
 
 export async function getBranchDashboard(branchId, pharmacyId) {
-  const productsQuery = supabase
-    .from('products')
-    .select('id, stock_boxes, low_stock_threshold')
-    .eq('pharmacy_id', pharmacyId)
-    .eq('branch_id', branchId)
-    .eq('is_active', true);
-
   const alertsCountQuery = supabase
     .from('alerts')
     .select('id', { count: 'exact', head: true })
@@ -2201,24 +2194,42 @@ export async function getBranchDashboard(branchId, pharmacyId) {
     .eq('branch_id', branchId)
     .eq('is_read', false);
 
-  const [salesStats, productsResult, alertsResult] = await Promise.all([
+  // Keep the branch overview lightweight and reusable by both the Branches list
+  // and Branch Details. Sales totals are aggregated server-side, while inventory
+  // and staff/expense summaries return only the fields needed by the dashboard.
+  const staffCountQuery = supabase
+    .from('staff_branch_assignments')
+    .select('id', { count: 'exact', head: true })
+    .eq('pharmacy_id', pharmacyId)
+    .eq('branch_id', branchId)
+    .eq('is_active', true);
+
+  const [salesStats, inventorySummary, alertsResult, staffResult, expenseReport] = await Promise.all([
     getSalesStats(pharmacyId, branchId),
-    productsQuery,
-    alertsCountQuery
+    getInventorySummary(pharmacyId, branchId),
+    alertsCountQuery,
+    staffCountQuery,
+    getMonthlyExpenseReport(pharmacyId, branchId)
   ]);
 
-  if (productsResult.error) throw productsResult.error;
   if (alertsResult.error) throw alertsResult.error;
+  if (staffResult.error) throw staffResult.error;
 
-  const lowStockCount = (productsResult.data || [])
-    .filter(p => Number(p.stock_boxes || 0) <= Number(p.low_stock_threshold || 0))
-    .length;
-
+  const monthlyExpenses = Number(expenseReport?.totalExpenses || 0);
   return {
-    dailySales: salesStats.todayRevenue,
-    monthlyRevenue: salesStats.monthRevenue,
-    lowStockCount,
-    alertCount: alertsResult.count || 0
+    dailySales: Number(salesStats.todayRevenue || 0),
+    weeklyRevenue: Number(salesStats.weekRevenue || 0),
+    monthlyRevenue: Number(salesStats.monthRevenue || 0),
+    todayTransactions: Number(salesStats.todayTransactions || 0),
+    totalTransactions: Number(salesStats.totalTransactions || 0),
+    staffCount: Number(staffResult.count || 0),
+    totalProducts: Number(inventorySummary.totalProducts || 0),
+    lowStockCount: Number(inventorySummary.lowStockCount || 0),
+    expiredCount: Number(inventorySummary.expiredCount || 0),
+    expiringSoonCount: Number(inventorySummary.expiringSoonCount || 0),
+    alertCount: Number(alertsResult.count || 0),
+    monthlyExpenses,
+    operatingBalance: Number(salesStats.monthRevenue || 0) - monthlyExpenses
   };
 }
 
@@ -2310,7 +2321,7 @@ export async function getBranchAssignments(branchId) {
     const staffIds = data.map(d => d.staff_id);
     const { data: profiles, error: profileError } = await supabase
       .from('profiles')
-      .select('id, full_name, email')
+      .select('id, full_name, email, role, is_active')
       .in('id', staffIds);
     
     if (!profileError && profiles) {
@@ -2815,6 +2826,49 @@ export async function getExpenses(pharmacyId, branchId = null, startDate = null,
   const { data, error } = await query.order('expense_date', { ascending: false });
   if (error) throw error;
   return data;
+}
+
+/**
+ * Load a single page of branch/pharmacy expenses without downloading the full
+ * expense ledger. Used by Branch Details now and by the main Expense workspace
+ * upgrade later.
+ */
+export async function getExpensesPage(pharmacyId, {
+  branchId = null,
+  page = 1,
+  pageSize = 30,
+  startDate = null,
+  endDate = null,
+  categoryId = null
+} = {}) {
+  const safePageSize = [25, 30, 50].includes(Number(pageSize)) ? Number(pageSize) : 30;
+  const safePage = Math.max(1, Number(page) || 1);
+  const from = (safePage - 1) * safePageSize;
+  const to = from + safePageSize - 1;
+
+  let query = supabase
+    .from('expenses')
+    .select('*, expense_categories(category_name, description)', { count: 'exact' })
+    .eq('pharmacy_id', pharmacyId)
+    .order('expense_date', { ascending: false })
+    .order('created_at', { ascending: false });
+
+  if (branchId) query = query.eq('branch_id', branchId);
+  if (startDate) query = query.gte('expense_date', startDate);
+  if (endDate) query = query.lte('expense_date', endDate);
+  if (categoryId) query = query.eq('category_id', categoryId);
+
+  const { data, error, count } = await query.range(from, to);
+  if (error) throw error;
+
+  const total = Number(count || 0);
+  return {
+    data: data || [],
+    total,
+    page: safePage,
+    pageSize: safePageSize,
+    totalPages: Math.max(1, Math.ceil(total / safePageSize))
+  };
 }
 
 export async function createExpense(payload) {
