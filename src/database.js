@@ -715,7 +715,7 @@ export async function getDashboardStats(pharmacyId, branchId = null) {
   // handful of numbers instead of every sale from the current day/week.
   let productsQuery = supabase
     .from('products')
-    .select('id, name, category, stock_boxes, stock_units, units_per_box, price, low_stock_threshold')
+    .select('id, name, category, stock_boxes, stock_units, units_per_box, price, low_stock_threshold, expiry_date')
     .eq('pharmacy_id', pharmacyId)
     .eq('is_active', true);
 
@@ -733,6 +733,18 @@ export async function getDashboardStats(pharmacyId, branchId = null) {
   const allProducts = productsResult.data || [];
   const lowStockItems = allProducts.filter(p => Number(p.stock_boxes || 0) <= Number(p.low_stock_threshold || 0));
 
+  const todayKey = new Date().toISOString().slice(0, 10);
+  const expiryCutoff = new Date();
+  expiryCutoff.setUTCDate(expiryCutoff.getUTCDate() + 30);
+  const expiryCutoffKey = expiryCutoff.toISOString().slice(0, 10);
+
+  const expiredProducts = allProducts
+    .filter(p => p.expiry_date && p.expiry_date < todayKey)
+    .sort((a, b) => String(a.expiry_date).localeCompare(String(b.expiry_date)));
+  const expiringSoonProducts = allProducts
+    .filter(p => p.expiry_date && p.expiry_date >= todayKey && p.expiry_date <= expiryCutoffKey)
+    .sort((a, b) => String(a.expiry_date).localeCompare(String(b.expiry_date)));
+
   const inventoryWorth = allProducts.reduce((sum, p) => {
     const totalUnits = (Number(p.stock_boxes || 0) * Number(p.units_per_box || 1)) + Number(p.stock_units || 0);
     return sum + (totalUnits * Number(p.price || 0));
@@ -745,8 +757,91 @@ export async function getDashboardStats(pharmacyId, branchId = null) {
     totalProducts: allProducts.length,
     lowStockCount: lowStockItems.length,
     lowStockProducts: lowStockItems,
+    expiredCount: expiredProducts.length,
+    expiredProducts,
+    expiringSoonCount: expiringSoonProducts.length,
+    expiringSoonProducts,
     inventoryWorth,
     lastUpdated: new Date().toISOString()
+  };
+}
+
+/**
+ * Build the operational insight panels used by the Admin dashboard.
+ * The selected period is fetched directly from Supabase so the dashboard does
+ * not rely on the capped recent-sales list used by the transaction preview.
+ */
+export async function getDashboardInsights(pharmacyId, period = 'week', branchId = null) {
+  let range;
+  if (period === 'today') range = await getTodayDateRange(pharmacyId);
+  else if (period === 'month') range = await getMonthDateRange(pharmacyId);
+  else range = await getWeekDateRange(pharmacyId);
+
+  const [rawSales, salesmen] = await Promise.all([
+    getSalesForReport(pharmacyId, {
+      branchId,
+      start: range.start,
+      end: range.end
+    }),
+    getPharmacySalesmen(pharmacyId)
+  ]);
+
+  const sales = await enrichSalesWithItems(rawSales || []);
+  const totalRevenue = sales.reduce((sum, sale) => sum + Number(sale.total_amount || 0), 0);
+  const transactionCount = sales.length;
+  const averageSale = transactionCount ? totalRevenue / transactionCount : 0;
+
+  const productMap = new Map();
+  for (const sale of sales) {
+    for (const item of (sale.sale_items || [])) {
+      const key = item.product_id || item.product_name || 'unknown';
+      const current = productMap.get(key) || {
+        id: item.product_id || null,
+        name: item.product_name || 'Unknown product',
+        quantity: 0,
+        revenue: 0,
+        transactions: 0
+      };
+      current.quantity += Number(item.quantity || 0);
+      current.revenue += Number(item.total_price || 0);
+      current.transactions += 1;
+      productMap.set(key, current);
+    }
+  }
+
+  const topProducts = [...productMap.values()]
+    .sort((a, b) => b.quantity - a.quantity || b.revenue - a.revenue)
+    .slice(0, 5);
+
+  const staffMap = new Map((salesmen || []).map(person => [person.id, {
+    id: person.id,
+    name: person.full_name || person.email || 'Salesman',
+    email: person.email || '',
+    transactions: 0,
+    revenue: 0
+  }]));
+
+  for (const sale of sales) {
+    const staff = staffMap.get(sale.created_by);
+    if (!staff) continue;
+    staff.transactions += 1;
+    staff.revenue += Number(sale.total_amount || 0);
+  }
+
+  const staffPerformance = [...staffMap.values()]
+    .filter(person => person.transactions > 0)
+    .sort((a, b) => b.revenue - a.revenue || b.transactions - a.transactions)
+    .slice(0, 5);
+
+  return {
+    period,
+    start: range.start,
+    end: range.end,
+    totalRevenue,
+    transactionCount,
+    averageSale,
+    topProducts,
+    staffPerformance
   };
 }
 

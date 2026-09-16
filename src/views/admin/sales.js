@@ -120,7 +120,7 @@ export async function renderSales(container, user, lifecycleToken, initialSearch
           <button class="btn btn-primary" id="new-sale-btn">+ New Sale</button>
         </div>
 
-        <div class="stats-grid" style="grid-template-columns:repeat(auto-fill,minmax(180px,1fr))">
+        <div class="stats-grid sales-stats-grid">
           <div class="stat-card">
             <div class="stat-card-header">
               <span class="stat-card-label">Today's Revenue</span>
