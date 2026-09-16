@@ -7454,3 +7454,199 @@ body {
     text-align: left;
   }
 }
+
+/* =============================================================
+   Admin Sales Reports Upgrade
+   ============================================================= */
+.sales-report-controls-card {
+  margin-bottom: 1.5rem;
+}
+
+.sales-report-preset-row {
+  display: flex;
+  gap: .5rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+
+.sales-report-filter-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: .9rem;
+  align-items: end;
+}
+
+.sales-report-generate {
+  display: flex;
+  align-items: end;
+}
+
+.sales-report-generate .btn {
+  width: 100%;
+}
+
+.sales-report-summary-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.sales-report-top-actions {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  flex-shrink: 0;
+}
+
+.sales-report-two-column {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  align-items: start;
+}
+
+.sales-report-panel {
+  min-width: 0;
+}
+
+.sales-report-section-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: end;
+  margin-bottom: .85rem;
+}
+
+.sales-report-section-heading h3 {
+  margin: 0 0 .2rem;
+}
+
+.sales-report-section-heading p {
+  margin: 0;
+  color: var(--gray-500);
+  font-size: .84rem;
+}
+
+.sales-report-time-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: .65rem;
+}
+
+.sales-report-time-card,
+.sales-report-weekday-card {
+  min-width: 0;
+  border: 1px solid var(--gray-200);
+  border-radius: var(--radius-sm);
+  background: var(--gray-50);
+  padding: .75rem;
+}
+
+.sales-report-time-card.is-best,
+.sales-report-weekday-card.is-best {
+  border-color: rgba(37, 99, 235, .45);
+  background: rgba(37, 99, 235, .06);
+}
+
+.sales-report-time-label,
+.sales-report-weekday-card > span {
+  display: block;
+  font-size: .78rem;
+  color: var(--gray-600);
+  font-weight: 600;
+}
+
+.sales-report-time-card strong,
+.sales-report-weekday-card strong {
+  display: block;
+  margin-top: .35rem;
+  color: var(--sammia-navy, #0f2d5b);
+  overflow-wrap: anywhere;
+}
+
+.sales-report-time-card small,
+.sales-report-weekday-card small {
+  color: var(--gray-500);
+}
+
+.sales-report-time-bar {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--gray-200);
+  overflow: hidden;
+  margin: .5rem 0;
+}
+
+.sales-report-time-bar span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--sammia-blue, #2563eb);
+}
+
+.sales-report-weekday-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: .75rem;
+}
+
+.sales-report-daily-table {
+  max-height: 460px;
+  overflow: auto;
+}
+
+.sales-report-page-size {
+  min-width: 110px;
+}
+
+.sales-report-detail-pagination {
+  margin-top: .35rem;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+#sales-report-transactions[aria-busy="true"] {
+  opacity: .7;
+}
+
+@media (max-width: 1200px) {
+  .sales-report-filter-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .sales-report-time-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 900px) {
+  .sales-report-summary-grid,
+  .sales-report-two-column,
+  .sales-report-weekday-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .sales-report-time-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 768px) {
+  .sales-report-filter-grid,
+  .sales-report-summary-grid,
+  .sales-report-two-column,
+  .sales-report-time-grid,
+  .sales-report-weekday-grid {
+    grid-template-columns: 1fr;
+  }
+  .sales-report-preset-row .btn {
+    flex: 1 1 calc(50% - .5rem);
+  }
+  .sales-report-section-heading,
+  .employee-report-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .sales-report-top-actions .btn {
+    width: 100%;
+  }
+  .sales-report-page-size {
+    width: 100%;
+  }
+}

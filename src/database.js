@@ -1221,6 +1221,57 @@ export async function getSalesForReport(pharmacyId, {
 }
 
 
+/**
+ * Fetch one database page of completed sales for the detailed section of the
+ * Admin Sales Reports workspace. Aggregate report calculations can scan the
+ * requested period, while the UI only renders a small transaction page.
+ */
+export async function getSalesReportTransactionsPage(pharmacyId, {
+  branchId = null,
+  staffId = null,
+  start = null,
+  end = null,
+  page = 1,
+  pageSize = 30
+} = {}) {
+  const safePageSize = [25, 30, 50].includes(Number(pageSize)) ? Number(pageSize) : 30;
+  const safePage = Math.max(1, Number(page) || 1);
+  const from = (safePage - 1) * safePageSize;
+  const to = from + safePageSize - 1;
+
+  let query = supabase
+    .from('sales')
+    .select('id,invoice_number,total_amount,payment_method,status,branch_id,created_by,created_at,customers(name)', { count: 'exact' })
+    .eq('pharmacy_id', pharmacyId)
+    .eq('status', 'completed')
+    .order('created_at', { ascending: false });
+
+  if (branchId) query = query.eq('branch_id', branchId);
+  if (staffId) query = query.eq('created_by', staffId);
+  if (start) query = query.gte('created_at', start);
+  if (end) query = query.lt('created_at', end);
+
+  const { data, error, count } = await query.range(from, to);
+  if (error) throw error;
+
+  const total = Number(count || 0);
+  const totalPages = Math.max(1, Math.ceil(total / safePageSize));
+  if (safePage > totalPages && total > 0) {
+    return getSalesReportTransactionsPage(pharmacyId, {
+      branchId, staffId, start, end, page: totalPages, pageSize: safePageSize
+    });
+  }
+
+  return {
+    rows: data || [],
+    total,
+    page: safePage,
+    pageSize: safePageSize,
+    totalPages
+  };
+}
+
+
 export async function getSaleItems(saleId) {
   const { data, error } = await supabase
     .from('sale_items')
