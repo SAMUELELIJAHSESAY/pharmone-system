@@ -665,6 +665,166 @@ export async function deleteCustomer(id) {
   if (error) throw error;
 }
 
+function normalizeCustomerSearchTerm(value) {
+  return String(value || '')
+    .trim()
+    .replace(/[%_(),\\"']/g, ' ')
+    .replace(/\s+/g, ' ')
+    .slice(0, 80);
+}
+
+/**
+ * Fetch one Customer page from Supabase. Only the visible rows are returned so
+ * large customer lists do not have to be loaded into the browser at once.
+ */
+export async function getCustomersPage(pharmacyId, { page = 1, pageSize = 30, search = '' } = {}) {
+  const safePageSize = [25, 30, 50].includes(Number(pageSize)) ? Number(pageSize) : 30;
+  const safePage = Math.max(1, Number(page) || 1);
+  const from = (safePage - 1) * safePageSize;
+  const to = from + safePageSize - 1;
+  const term = normalizeCustomerSearchTerm(search);
+
+  let query = supabase
+    .from('customers')
+    .select('*', { count: 'exact' })
+    .eq('pharmacy_id', pharmacyId)
+    .order('name', { ascending: true });
+
+  if (term) {
+    query = query.or(`name.ilike.%${term}%,phone.ilike.%${term}%,email.ilike.%${term}%,address.ilike.%${term}%`);
+  }
+
+  const { data, error, count } = await query.range(from, to);
+  if (error) throw error;
+
+  const total = Number(count || 0);
+  return {
+    data: data || [],
+    total,
+    page: safePage,
+    pageSize: safePageSize,
+    totalPages: Math.max(1, Math.ceil(total / safePageSize))
+  };
+}
+
+/**
+ * Aggregate completed-sale activity for the customers currently visible in the
+ * paginated Customer table. The query contains only four lightweight columns.
+ */
+export async function getCustomerMetricsForIds(pharmacyId, customerIds = []) {
+  const ids = [...new Set((customerIds || []).filter(Boolean))];
+  if (!ids.length) return {};
+
+  const metrics = Object.fromEntries(ids.map((id) => [id, {
+    purchaseCount: 0, totalSpent: 0, lastPurchaseAt: null
+  }]));
+  const pageSize = 1000;
+  let from = 0;
+
+  while (true) {
+    const { data, error } = await supabase
+      .from('sales')
+      .select('customer_id,total_amount,status,created_at')
+      .eq('pharmacy_id', pharmacyId)
+      .in('customer_id', ids)
+      .order('created_at', { ascending: false })
+      .range(from, from + pageSize - 1);
+
+    if (error) throw error;
+    const batch = data || [];
+    for (const sale of batch) {
+      if (sale.status !== 'completed' || !metrics[sale.customer_id]) continue;
+      const metric = metrics[sale.customer_id];
+      metric.purchaseCount += 1;
+      metric.totalSpent += Number(sale.total_amount || 0);
+      if (!metric.lastPurchaseAt || new Date(sale.created_at) > new Date(metric.lastPurchaseAt)) {
+        metric.lastPurchaseAt = sale.created_at;
+      }
+    }
+
+    if (batch.length < pageSize) break;
+    from += pageSize;
+  }
+
+  Object.values(metrics).forEach((metric) => {
+    metric.averagePurchase = metric.purchaseCount ? metric.totalSpent / metric.purchaseCount : 0;
+  });
+  return metrics;
+}
+
+/** Fetch one page of a single customer's sales history. */
+export async function getCustomerSalesPage(pharmacyId, customerId, { page = 1, pageSize = 10 } = {}) {
+  const safePageSize = [10, 20, 30].includes(Number(pageSize)) ? Number(pageSize) : 10;
+  const safePage = Math.max(1, Number(page) || 1);
+  const from = (safePage - 1) * safePageSize;
+  const to = from + safePageSize - 1;
+
+  const { data, error, count } = await supabase
+    .from('sales')
+    .select('*', { count: 'exact' })
+    .eq('pharmacy_id', pharmacyId)
+    .eq('customer_id', customerId)
+    .order('created_at', { ascending: false })
+    .range(from, to);
+  if (error) throw error;
+
+  const sales = await enrichSalesWithItems(data || []);
+  const total = Number(count || 0);
+  return {
+    data: sales,
+    total,
+    page: safePage,
+    pageSize: safePageSize,
+    totalPages: Math.max(1, Math.ceil(total / safePageSize))
+  };
+}
+
+/** Lifetime completed-sale metrics for one customer. */
+export async function getCustomerSalesSummary(pharmacyId, customerId) {
+  const pageSize = 1000;
+  let from = 0;
+  let purchaseCount = 0;
+  let totalSpent = 0;
+  let lastPurchaseAt = null;
+  const paymentBreakdown = { cash: 0, mobile_money: 0, card: 0 };
+
+  while (true) {
+    const { data, error } = await supabase
+      .from('sales')
+      .select('total_amount,status,payment_method,created_at')
+      .eq('pharmacy_id', pharmacyId)
+      .eq('customer_id', customerId)
+      .order('created_at', { ascending: false })
+      .range(from, from + pageSize - 1);
+    if (error) throw error;
+
+    const batch = data || [];
+    for (const sale of batch) {
+      if (sale.status !== 'completed') continue;
+      const amount = Number(sale.total_amount || 0);
+      purchaseCount += 1;
+      totalSpent += amount;
+      if (Object.prototype.hasOwnProperty.call(paymentBreakdown, sale.payment_method)) {
+        paymentBreakdown[sale.payment_method] += amount;
+      }
+      if (!lastPurchaseAt || new Date(sale.created_at) > new Date(lastPurchaseAt)) {
+        lastPurchaseAt = sale.created_at;
+      }
+    }
+
+    if (batch.length < pageSize) break;
+    from += pageSize;
+  }
+
+  return {
+    purchaseCount,
+    totalSpent,
+    averagePurchase: purchaseCount ? totalSpent / purchaseCount : 0,
+    lastPurchaseAt,
+    paymentBreakdown
+  };
+}
+
 // ===================== SALES =====================
 export async function getSales(pharmacyId, limit = 50) {
   const { data, error } = await supabase

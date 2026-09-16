@@ -5214,3 +5214,349 @@ body {
     flex: 1 1 auto;
   }
 }
+
+/* ========================================================================== */
+/* Admin Customers Upgrade                                                    */
+/* ========================================================================== */
+
+.admin-customers-page,
+.admin-customers-page * {
+  min-width: 0;
+}
+
+.customers-card[aria-busy="true"] .customer-table-container,
+.customers-card[aria-busy="true"] .customer-pagination-wrap {
+  opacity: 0.62;
+}
+
+.customers-card-header {
+  gap: 1rem;
+}
+
+.customer-filter-panel {
+  display: grid;
+  grid-template-columns: minmax(280px, 1fr) 150px auto;
+  gap: 0.75rem;
+  align-items: center;
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid var(--gray-200);
+}
+
+.customer-search-box {
+  width: 100%;
+}
+
+.customer-page-size {
+  width: 100%;
+}
+
+.customer-table-container table {
+  min-width: 1120px;
+}
+
+.customer-table-container th,
+.customer-table-container td {
+  vertical-align: middle;
+}
+
+.customer-name,
+.customer-email,
+.customer-address {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.customer-address {
+  max-width: 220px;
+}
+
+.customer-money-value {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  font-variant-numeric: tabular-nums;
+}
+
+.customer-status-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.28rem 0.58rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.customer-status-new {
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.customer-status-returning {
+  background: #f5f3ff;
+  color: #6d28d9;
+}
+
+.customer-status-frequent {
+  background: #ecfdf5;
+  color: #15803d;
+}
+
+.customer-status-inactive {
+  background: #f1f5f9;
+  color: #64748b;
+}
+
+.customer-status-help {
+  margin-top: 0.35rem;
+  max-width: 150px;
+}
+
+.customer-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  min-width: 190px;
+}
+
+.customer-pagination-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.95rem 1.25rem;
+  border-top: 1px solid var(--gray-200);
+}
+
+.customer-pagination-info {
+  color: var(--gray-500);
+  font-size: 0.8rem;
+}
+
+.customer-pagination,
+.customer-page-numbers {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.customer-page-btn.active,
+.customer-history-page-numbers .btn.active {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+}
+
+.customer-page-ellipsis {
+  padding: 0 0.2rem;
+  color: var(--gray-400);
+}
+
+.customer-profile-shell {
+  display: grid;
+  gap: 1.1rem;
+}
+
+.customer-profile-identity {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-start;
+}
+
+.customer-profile-avatar {
+  width: 58px;
+  height: 58px;
+  flex: 0 0 58px;
+  display: grid;
+  place-items: center;
+  border-radius: 16px;
+  background: var(--primary-light);
+  color: var(--primary);
+  font-weight: 800;
+  font-size: 1.35rem;
+}
+
+.customer-profile-identity h3 {
+  margin: 0 0 0.3rem;
+  font-size: 1.15rem;
+  color: var(--gray-900);
+}
+
+.customer-profile-contact {
+  color: var(--gray-700);
+  margin-bottom: 0.25rem;
+  overflow-wrap: anywhere;
+}
+
+.customer-profile-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.6rem;
+  color: var(--gray-500);
+  font-size: 0.78rem;
+}
+
+.customer-profile-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.customer-profile-stats .stat-card {
+  padding: 1rem;
+  min-width: 0;
+}
+
+.customer-profile-stats .stat-card-value {
+  font-size: clamp(1.05rem, 1.8vw, 1.45rem);
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.customer-last-purchase {
+  font-size: 1.05rem !important;
+}
+
+.customer-payment-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.customer-payment-summary span {
+  min-width: 0;
+  padding: 0.9rem 1rem;
+  border-radius: 12px;
+  background: var(--gray-50);
+  border: 1px solid var(--gray-200);
+}
+
+.customer-payment-summary strong,
+.customer-payment-summary small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.customer-payment-summary strong {
+  color: var(--gray-900);
+  font-size: 0.98rem;
+}
+
+.customer-payment-summary small {
+  margin-top: 0.2rem;
+  color: var(--gray-500);
+}
+
+.customer-history-header,
+.customer-history-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.customer-history-header h4 {
+  margin: 0 0 0.2rem;
+}
+
+.customer-history-page-size {
+  width: auto;
+  min-width: 120px;
+}
+
+.customer-history-table {
+  margin-top: 0.75rem;
+  max-height: 430px;
+  overflow-y: auto;
+}
+
+.customer-history-table table {
+  min-width: 850px;
+}
+
+.customer-history-products {
+  max-width: 250px;
+  overflow-wrap: anywhere;
+}
+
+.customer-history-footer {
+  margin-top: 0.75rem;
+}
+
+.customer-history-pagination,
+.customer-history-page-numbers {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+@media (max-width: 1050px) {
+  .customer-profile-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 800px) {
+  .customer-filter-panel {
+    grid-template-columns: 1fr 140px;
+  }
+
+  .customer-search-box {
+    grid-column: 1 / -1;
+  }
+
+  .customer-pagination-wrap,
+  .customer-history-header,
+  .customer-history-footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .customer-pagination,
+  .customer-history-pagination {
+    width: 100%;
+    justify-content: space-between;
+  }
+}
+
+@media (max-width: 560px) {
+  .customer-filter-panel,
+  .customer-profile-stats,
+  .customer-payment-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .customer-search-box {
+    grid-column: auto;
+  }
+
+  .customer-profile-identity {
+    flex-direction: column;
+  }
+
+  .customer-row-actions {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .customer-row-actions .btn {
+    flex: 1 1 auto;
+  }
+
+  .customer-pagination,
+  .customer-history-pagination {
+    flex-direction: column;
+  }
+
+  .customer-page-numbers,
+  .customer-history-page-numbers {
+    justify-content: center;
+  }
+}
