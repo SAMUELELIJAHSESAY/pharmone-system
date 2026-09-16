@@ -298,6 +298,47 @@ export async function getSales(pharmacyId, limit = 50) {
   return data;
 }
 
+/**
+ * Fetch completed sales for reporting without the fixed getSales() history cap.
+ * Results are paged so daily/weekly/monthly employee reports remain complete even
+ * when the selected period contains more than Supabase's default row limit.
+ */
+export async function getSalesForReport(pharmacyId, {
+  branchId = null,
+  staffId = null,
+  start = null,
+  end = null
+} = {}) {
+  const pageSize = 1000;
+  const rows = [];
+  let from = 0;
+
+  while (true) {
+    let query = supabase
+      .from('sales')
+      .select('*, customers(name)')
+      .eq('pharmacy_id', pharmacyId)
+      .eq('status', 'completed')
+      .order('created_at', { ascending: true })
+      .range(from, from + pageSize - 1);
+
+    if (branchId) query = query.eq('branch_id', branchId);
+    if (staffId) query = query.eq('created_by', staffId);
+    if (start) query = query.gte('created_at', start);
+    if (end) query = query.lt('created_at', end);
+
+    const { data, error } = await query;
+    if (error) throw error;
+
+    const batch = data || [];
+    rows.push(...batch);
+    if (batch.length < pageSize) break;
+    from += pageSize;
+  }
+
+  return rows;
+}
+
 
 export async function getSaleItems(saleId) {
   const { data, error } = await supabase

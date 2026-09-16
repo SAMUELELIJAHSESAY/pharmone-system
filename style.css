@@ -3971,3 +3971,178 @@ body {
     object-position: left center;
   }
 }
+
+/* =============================================================
+   Employee Sales Reporting
+   ============================================================= */
+.employee-report-filter-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 1rem;
+  align-items: end;
+}
+
+.employee-report-generate {
+  display: flex;
+  align-items: flex-end;
+}
+
+.employee-report-generate .btn {
+  width: 100%;
+}
+
+.employee-report-card {
+  overflow: hidden;
+}
+
+.employee-report-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: flex-start;
+  margin-bottom: 1.25rem;
+}
+
+.employee-report-scope {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .5rem 1.25rem;
+  margin-top: .45rem;
+  color: var(--gray-600);
+  font-size: .9rem;
+}
+
+.staff-report-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: .9rem;
+  margin: 1rem 0 1.5rem;
+}
+
+.staff-report-summary-card {
+  min-width: 0;
+  padding: 1rem;
+  border: 1px solid var(--gray-200);
+  border-radius: var(--radius-sm);
+  background: var(--sammia-background, #f8fafc);
+}
+
+.staff-report-summary-card span {
+  display: block;
+  color: var(--gray-600);
+  font-size: .82rem;
+  margin-bottom: .35rem;
+}
+
+.staff-report-summary-card strong {
+  display: block;
+  color: var(--sammia-navy, #0f2d5b);
+  font-size: 1.2rem;
+  overflow-wrap: anywhere;
+}
+
+.employee-report-section {
+  border-top: 1px solid var(--gray-200);
+  padding-top: 1.25rem;
+  margin-top: 1.25rem;
+}
+
+.employee-report-section h3 {
+  margin: 0 0 .9rem;
+}
+
+.payment-report-list {
+  display: grid;
+  gap: .65rem;
+}
+
+.payment-report-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: .75rem .9rem;
+  background: var(--gray-50);
+  border: 1px solid var(--gray-200);
+  border-radius: var(--radius-sm);
+  text-transform: capitalize;
+}
+
+.employee-report-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: .65rem;
+  margin-top: 1.5rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--gray-200);
+}
+
+.branch-staff-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .4rem;
+}
+
+.staff-sales-history-controls {
+  display: grid;
+  grid-template-columns: minmax(160px, 1.1fr) repeat(2, minmax(150px, 1fr)) auto;
+  gap: .75rem;
+  align-items: end;
+  margin-bottom: 1.25rem;
+}
+
+.staff-sales-history-content {
+  min-width: 0;
+}
+
+.staff-history-summary {
+  margin-top: 0;
+}
+
+.staff-sales-daily-table {
+  margin-top: 1rem;
+  max-height: 430px;
+  overflow-y: auto;
+}
+
+@media (max-width: 1100px) {
+  .employee-report-filter-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .staff-sales-history-controls {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 768px) {
+  .employee-report-filter-grid,
+  .staff-sales-history-controls,
+  .staff-report-summary-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .employee-report-heading,
+  .payment-report-row {
+    flex-direction: column;
+  }
+
+  .employee-report-actions {
+    justify-content: stretch;
+  }
+
+  .employee-report-actions .btn,
+  .branch-staff-actions .btn,
+  .staff-sales-history-controls .btn {
+    width: 100%;
+  }
+
+  .branch-staff-actions {
+    flex-direction: column;
+  }
+
+  .staff-sales-daily-table {
+    max-height: none;
+    overflow-y: visible;
+  }
+}

@@ -1,8 +1,8 @@
 // Branch Details Dashboard
 import { supabase } from '../../config.js';
-import { getBranchDetails, getBranchDashboard, getBranchAssignments, getBranchStaffSalesStats, updateBranchDetails, getPharmacyStaff, assignStaffToBranch } from '../../database.js';
+import { getBranchDetails, getBranchDashboard, getBranchAssignments, getBranchStaffSalesStats, getSalesForReport, updateBranchDetails, getPharmacyStaff, assignStaffToBranch } from '../../database.js';
 import { createModal } from '../../components/modal.js';
-import { showToast, formatUTCDate, formatUTCDateTime } from '../../utils.js';
+import { showToast, formatCurrency, formatUTCDate, formatUTCDateTime } from '../../utils.js';
 import { isViewLifecycleActive } from '../../view-lifecycle.js';
 
 let currentBranchSales = [];
@@ -386,14 +386,244 @@ async function loadBranchStaff(branchId, pharmacyId = window.currentPharmacyId) 
         <td>${currencySymbol}${salesData.total.toFixed(2)}</td>
         <td>${salesData.count}</td>
         <td>
-          <button class="btn btn-small btn-danger" onclick="removeStaffFromBranch('${a.id}')">Remove</button>
+          <div class="branch-staff-actions">
+            <button
+              type="button"
+              class="btn btn-small btn-secondary staff-sales-history-btn"
+              data-staff-id="${a.staff_id}"
+              data-staff-name="${encodeURIComponent(a.profiles.full_name || 'Staff')}"
+            >Sales History</button>
+            <button class="btn btn-small btn-danger" onclick="removeStaffFromBranch('${a.id}')">Remove</button>
+          </div>
         </td>
       </tr>
     `;
     }).join('');
+
+    tbody.querySelectorAll('.staff-sales-history-btn').forEach(button => {
+      button.addEventListener('click', () => {
+        const staffId = button.dataset.staffId;
+        const staffName = decodeURIComponent(button.dataset.staffName || 'Staff');
+        showStaffSalesHistoryModal(staffId, staffName, branchId, pharmacyId);
+      });
+    });
   } catch (error) {
     console.error('Error loading staff:', error);
   }
+}
+
+function getStaffHistoryRange(period, customStart = '', customEnd = '') {
+  const now = new Date();
+  const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+
+  if (period === 'last-7') {
+    const start = new Date(today);
+    start.setUTCDate(start.getUTCDate() - 6);
+    const end = new Date(today);
+    end.setUTCDate(end.getUTCDate() + 1);
+    return { start, end };
+  }
+
+  if (period === 'last-30') {
+    const start = new Date(today);
+    start.setUTCDate(start.getUTCDate() - 29);
+    const end = new Date(today);
+    end.setUTCDate(end.getUTCDate() + 1);
+    return { start, end };
+  }
+
+  if (period === 'this-year') {
+    return {
+      start: new Date(Date.UTC(today.getUTCFullYear(), 0, 1)),
+      end: new Date(Date.UTC(today.getUTCFullYear() + 1, 0, 1))
+    };
+  }
+
+  if (period === 'custom') {
+    const [sy, sm, sd] = String(customStart || '').split('-').map(Number);
+    const [ey, em, ed] = String(customEnd || '').split('-').map(Number);
+    if (!sy || !sm || !sd || !ey || !em || !ed) throw new Error('Choose both custom dates.');
+    const start = new Date(Date.UTC(sy, sm - 1, sd));
+    const end = new Date(Date.UTC(ey, em - 1, ed + 1));
+    if (end <= start) throw new Error('End date must be on or after the start date.');
+    return { start, end };
+  }
+
+  return {
+    start: new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1)),
+    end: new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() + 1, 1))
+  };
+}
+
+function groupStaffSalesByDay(sales) {
+  const byDay = new Map();
+  for (const sale of sales || []) {
+    const key = new Date(sale.created_at).toISOString().slice(0, 10);
+    const current = byDay.get(key) || { date: key, transactions: 0, total: 0 };
+    current.transactions += 1;
+    current.total += Number(sale.total_amount || 0);
+    byDay.set(key, current);
+  }
+  return [...byDay.values()].sort((a, b) => b.date.localeCompare(a.date));
+}
+
+function formatStaffSalesDate(dateStr) {
+  return new Date(`${dateStr}T00:00:00Z`).toLocaleDateString('en-US', {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    timeZone: 'UTC'
+  });
+}
+
+async function showStaffSalesHistoryModal(staffId, staffName, branchId, pharmacyId) {
+  const today = new Date().toISOString().slice(0, 10);
+  const { overlay } = createModal({
+    id: 'staff-sales-history',
+    title: `${staffName} · Daily Sales`,
+    size: 'modal-xl',
+    body: `
+      <div class="staff-sales-history-controls">
+        <div class="form-group" style="margin:0">
+          <label class="form-label">Period</label>
+          <select id="staff-sales-period" class="form-control">
+            <option value="this-month">This Month</option>
+            <option value="last-7">Last 7 Days</option>
+            <option value="last-30">Last 30 Days</option>
+            <option value="this-year">This Year</option>
+            <option value="custom">Custom Range</option>
+          </select>
+        </div>
+        <div class="form-group staff-sales-custom-date" style="margin:0;display:none">
+          <label class="form-label">Start Date</label>
+          <input type="date" id="staff-sales-start" class="form-control" value="${today}">
+        </div>
+        <div class="form-group staff-sales-custom-date" style="margin:0;display:none">
+          <label class="form-label">End Date</label>
+          <input type="date" id="staff-sales-end" class="form-control" value="${today}">
+        </div>
+        <div class="form-group" style="margin:0;display:flex;align-items:flex-end">
+          <button type="button" class="btn btn-primary" id="load-staff-sales-history">Load</button>
+        </div>
+      </div>
+
+      <div id="staff-sales-history-content" class="staff-sales-history-content">
+        <div style="padding:2rem;text-align:center;color:var(--gray-500)">Loading sales history...</div>
+      </div>
+    `,
+    footer: `
+      <button type="button" class="btn btn-secondary" id="export-staff-sales-history">Export CSV</button>
+    `
+  });
+
+  const periodSelect = overlay.querySelector('#staff-sales-period');
+  const customFields = overlay.querySelectorAll('.staff-sales-custom-date');
+  const loadButton = overlay.querySelector('#load-staff-sales-history');
+  const exportButton = overlay.querySelector('#export-staff-sales-history');
+  let currentRows = [];
+
+  const toggleCustomFields = () => {
+    const isCustom = periodSelect.value === 'custom';
+    customFields.forEach(field => { field.style.display = isCustom ? '' : 'none'; });
+  };
+
+  const loadHistory = async () => {
+    const content = overlay.querySelector('#staff-sales-history-content');
+    loadButton.disabled = true;
+    loadButton.textContent = 'Loading...';
+    content.innerHTML = '<div style="padding:2rem;text-align:center;color:var(--gray-500)">Loading sales history...</div>';
+
+    try {
+      const { start, end } = getStaffHistoryRange(
+        periodSelect.value,
+        overlay.querySelector('#staff-sales-start')?.value,
+        overlay.querySelector('#staff-sales-end')?.value
+      );
+      const sales = await getSalesForReport(pharmacyId, {
+        branchId,
+        staffId,
+        start: start.toISOString(),
+        end: end.toISOString()
+      });
+      currentRows = groupStaffSalesByDay(sales);
+      const totalSales = currentRows.reduce((sum, row) => sum + row.total, 0);
+      const totalTransactions = currentRows.reduce((sum, row) => sum + row.transactions, 0);
+      const averagePerSalesDay = currentRows.length ? totalSales / currentRows.length : 0;
+
+      content.innerHTML = `
+        <div class="staff-report-summary-grid staff-history-summary">
+          <div class="staff-report-summary-card">
+            <span>Total Sales</span>
+            <strong>${formatCurrency(totalSales)}</strong>
+          </div>
+          <div class="staff-report-summary-card">
+            <span>Transactions</span>
+            <strong>${totalTransactions}</strong>
+          </div>
+          <div class="staff-report-summary-card">
+            <span>Sales Days</span>
+            <strong>${currentRows.length}</strong>
+          </div>
+          <div class="staff-report-summary-card">
+            <span>Average / Sales Day</span>
+            <strong>${formatCurrency(averagePerSalesDay)}</strong>
+          </div>
+        </div>
+
+        <div class="table-responsive staff-sales-daily-table">
+          <table class="data-table responsive-data-table">
+            <thead>
+              <tr><th>Date</th><th>Transactions</th><th>Total Sales</th></tr>
+            </thead>
+            <tbody>
+              ${currentRows.length ? currentRows.map(row => `
+                <tr>
+                  <td>${formatStaffSalesDate(row.date)}</td>
+                  <td>${row.transactions}</td>
+                  <td><strong>${formatCurrency(row.total)}</strong></td>
+                </tr>
+              `).join('') : '<tr><td colspan="3" style="text-align:center">No sales found for this period.</td></tr>'}
+            </tbody>
+          </table>
+        </div>
+      `;
+    } catch (error) {
+      console.error('Failed to load staff sales history:', error);
+      content.innerHTML = `<div class="alert alert-danger">${error.message || 'Failed to load employee sales history.'}</div>`;
+    } finally {
+      loadButton.disabled = false;
+      loadButton.textContent = 'Load';
+    }
+  };
+
+  periodSelect.addEventListener('change', toggleCustomFields);
+  loadButton.addEventListener('click', loadHistory);
+  exportButton.addEventListener('click', () => {
+    if (!currentRows.length) {
+      showToast('No employee sales data to export', 'warning');
+      return;
+    }
+    const rows = [
+      [`Employee Sales History - ${staffName}`],
+      ['Date', 'Transactions', 'Total Sales'],
+      ...currentRows.map(row => [row.date, row.transactions, row.total.toFixed(2)])
+    ];
+    const csv = rows.map(row => row.map(cell => {
+      const value = String(cell ?? '').replaceAll('"', '""');
+      return /[",\n]/.test(value) ? `"${value}"` : value;
+    }).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${staffName.replace(/[^a-z0-9]+/gi, '_')}_daily_sales.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  });
+
+  toggleCustomFields();
+  loadHistory();
 }
 
 async function loadRecentActivity(branchId) {
