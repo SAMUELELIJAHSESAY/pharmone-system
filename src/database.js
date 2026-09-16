@@ -2662,6 +2662,147 @@ export async function generateDailySalesReport(pharmacyId, branchId, reportDate)
   return true;
 }
 
+function isDailyClosingSchemaMissing(error) {
+  const code = String(error?.code || '');
+  const message = String(error?.message || '').toLowerCase();
+  return code === '42703' || code === 'PGRST204' || message.includes('closing_status') || message.includes('total_transactions');
+}
+
+function applyDailyReportFilters(query, { branchId = null, startDate = null, endDate = null } = {}) {
+  let next = query;
+  if (branchId) next = next.eq('branch_id', branchId);
+  if (startDate) next = next.gte('report_date', startDate);
+  if (endDate) next = next.lte('report_date', endDate);
+  return next;
+}
+
+/**
+ * Load a lightweight page of daily records without downloading sales_data JSON
+ * for every day. Full transaction detail is fetched only when View Details is
+ * opened, which keeps this workspace fast even after years of reports.
+ */
+export async function getDailyReportsPage(pharmacyId, {
+  branchId = null,
+  page = 1,
+  pageSize = 30,
+  startDate = null,
+  endDate = null
+} = {}) {
+  const safePageSize = [25, 30, 50].includes(Number(pageSize)) ? Number(pageSize) : 30;
+  const safePage = Math.max(1, Number(page) || 1);
+  const from = (safePage - 1) * safePageSize;
+  const to = from + safePageSize - 1;
+
+  const richColumns = [
+    'id','pharmacy_id','branch_id','report_date','total_sales','total_items_sold',
+    'payment_breakdown','created_at','updated_at','total_transactions',
+    'approved_expenses','recorded_returns','return_count','closing_status','closed_at'
+  ].join(',');
+  const legacyColumns = 'id,pharmacy_id,branch_id,report_date,total_sales,total_items_sold,payment_breakdown,created_at,updated_at';
+
+  const run = async (columns) => {
+    let query = supabase
+      .from('daily_sales_reports')
+      .select(columns, { count: 'exact' })
+      .eq('pharmacy_id', pharmacyId)
+      .order('report_date', { ascending: false })
+      .order('created_at', { ascending: false });
+    query = applyDailyReportFilters(query, { branchId, startDate, endDate });
+    return query.range(from, to);
+  };
+
+  let result = await run(richColumns);
+  let closingReady = true;
+  if (result.error && isDailyClosingSchemaMissing(result.error)) {
+    closingReady = false;
+    result = await run(legacyColumns);
+  }
+  if (result.error) throw result.error;
+
+  const total = Number(result.count || 0);
+  return {
+    data: (result.data || []).map((row) => ({
+      ...row,
+      total_transactions: Number(row.total_transactions ?? 0),
+      approved_expenses: Number(row.approved_expenses ?? 0),
+      recorded_returns: Number(row.recorded_returns ?? 0),
+      return_count: Number(row.return_count ?? 0),
+      closing_status: row.closing_status || 'open'
+    })),
+    total,
+    page: safePage,
+    pageSize: safePageSize,
+    totalPages: Math.max(1, Math.ceil(total / safePageSize)),
+    closingReady
+  };
+}
+
+/**
+ * Aggregate the filtered daily-record range using narrow columns only. The
+ * fallback remains compatible with installations that have not yet applied the
+ * daily-closing migration.
+ */
+export async function getDailyReportsSummary(pharmacyId, {
+  branchId = null,
+  startDate = null,
+  endDate = null
+} = {}) {
+  const chunkSize = 1000;
+
+  const loadRows = async (rich = true) => {
+    const columns = rich
+      ? 'total_sales,total_items_sold,total_transactions,approved_expenses,recorded_returns,closing_status,report_date'
+      : 'total_sales,total_items_sold,report_date';
+    const rows = [];
+    let offset = 0;
+
+    while (true) {
+      let query = supabase
+        .from('daily_sales_reports')
+        .select(columns)
+        .eq('pharmacy_id', pharmacyId)
+        .order('report_date', { ascending: false });
+      query = applyDailyReportFilters(query, { branchId, startDate, endDate });
+      const { data, error } = await query.range(offset, offset + chunkSize - 1);
+      if (error) return { rows: [], error };
+      const batch = data || [];
+      rows.push(...batch);
+      if (batch.length < chunkSize) return { rows, error: null };
+      offset += chunkSize;
+    }
+  };
+
+  let result = await loadRows(true);
+  let closingReady = true;
+  if (result.error && isDailyClosingSchemaMissing(result.error)) {
+    closingReady = false;
+    result = await loadRows(false);
+  }
+  if (result.error) throw result.error;
+
+  return result.rows.reduce((summary, row) => {
+    summary.totalReports += 1;
+    summary.totalRevenue += Number(row.total_sales || 0);
+    summary.totalItems += Number(row.total_items_sold || 0);
+    summary.totalTransactions += Number(row.total_transactions || 0);
+    summary.approvedExpenses += Number(row.approved_expenses || 0);
+    summary.recordedReturns += Number(row.recorded_returns || 0);
+    if (row.closing_status === 'closed') summary.closedDays += 1;
+    else summary.openDays += 1;
+    return summary;
+  }, {
+    totalReports: 0,
+    totalRevenue: 0,
+    totalItems: 0,
+    totalTransactions: 0,
+    approvedExpenses: 0,
+    recordedReturns: 0,
+    closedDays: 0,
+    openDays: 0,
+    closingReady
+  });
+}
+
 export async function getDailyReports(pharmacyId, branchId = null, limit = 30, offset = 0) {
   const { data, error } = await supabase.rpc('get_daily_reports', {
     p_pharmacy_id: pharmacyId,
@@ -2678,11 +2819,11 @@ export async function getDailyReportsByDateRange(pharmacyId, branchId = null, st
     .from('daily_sales_reports')
     .select('*')
     .eq('pharmacy_id', pharmacyId);
-  
+
   if (branchId) query = query.eq('branch_id', branchId);
   if (startDate) query = query.gte('report_date', startDate);
   if (endDate) query = query.lte('report_date', endDate);
-  
+
   const { data, error } = await query.order('report_date', { ascending: false });
   if (error) throw error;
   return data || [];
@@ -2697,6 +2838,42 @@ export async function getDailyReportDetail(reportId) {
   if (error) throw error;
   return data;
 }
+
+export async function getDailyClosingCapability() {
+  const { error } = await supabase
+    .from('daily_sales_reports')
+    .select('closing_status')
+    .limit(1);
+  if (!error) return { ready: true };
+  if (isDailyClosingSchemaMissing(error)) return { ready: false };
+  throw error;
+}
+
+export async function saveDailyCashClosing(reportId, {
+  openingCash = 0,
+  actualCash = 0,
+  notes = ''
+} = {}) {
+  const { data, error } = await supabase.rpc('close_daily_sales_report', {
+    p_report_id: reportId,
+    p_opening_cash: Number(openingCash || 0),
+    p_actual_cash: Number(actualCash || 0),
+    p_notes: notes || null
+  });
+
+  if (error) {
+    const missingRpc = ['PGRST202', '42883'].includes(String(error.code || ''))
+      || /close_daily_sales_report/i.test(String(error.message || ''));
+    if (missingRpc) {
+      const migrationError = new Error('Daily cash closing requires the latest Supabase daily-records migration.');
+      migrationError.code = 'DAILY_CLOSING_MIGRATION_REQUIRED';
+      throw migrationError;
+    }
+    throw error;
+  }
+  return data;
+}
+
 
 // ===================== PRESCRIPTIONS =====================
 export async function getPrescriptions(pharmacyId, patientId = null, status = 'active') {
