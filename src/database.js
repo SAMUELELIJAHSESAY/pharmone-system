@@ -3410,6 +3410,312 @@ export async function calculateNetProfit(pharmacyId, branchId = null, startDate,
   };
 }
 
+
+// ===================== MANAGEMENT REPORTS & ANALYTICS =====================
+
+/**
+ * Build a period-based management report from completed sales and approved
+ * expenses. COGS is explicitly an estimate because sale_items do not yet store
+ * the historical cost-at-sale; the current product cost_price is used instead.
+ */
+export async function getManagementReportAnalytics(pharmacyId, {
+  branchId = null,
+  salesStart = null,
+  salesEnd = null,
+  expenseStart = null,
+  expenseEnd = null
+} = {}) {
+  const rawSales = await getSalesForReport(pharmacyId, {
+    branchId,
+    start: salesStart,
+    end: salesEnd
+  });
+  const sales = await enrichSalesWithItems(rawSales || []);
+
+  const productIds = [...new Set(
+    sales.flatMap((sale) => sale.sale_items || [])
+      .map((item) => item.product_id)
+      .filter(Boolean)
+  )];
+
+  const productCostById = {};
+  const productMetaById = {};
+  const batchSize = 200;
+  for (let i = 0; i < productIds.length; i += batchSize) {
+    const batch = productIds.slice(i, i + batchSize);
+    const { data, error } = await supabase
+      .from('products')
+      .select('id,name,cost_price,price,units_per_box')
+      .eq('pharmacy_id', pharmacyId)
+      .in('id', batch);
+    if (error) throw error;
+    (data || []).forEach((product) => {
+      productCostById[product.id] = Number(product.cost_price || 0) / Math.max(1, Number(product.units_per_box || 1));
+      productMetaById[product.id] = product;
+    });
+  }
+
+  let revenue = 0;
+  let estimatedCogs = 0;
+  let itemUnits = 0;
+  let totalDiscount = 0;
+  const paymentBreakdown = {};
+  const productSales = {};
+  const dailyRevenue = {};
+
+  for (const sale of sales) {
+    const amount = Number(sale.total_amount || 0);
+    revenue += amount;
+    totalDiscount += Number(sale.discount || 0);
+    const method = sale.payment_method || 'other';
+    paymentBreakdown[method] = (paymentBreakdown[method] || 0) + amount;
+
+    const dayKey = String(sale.created_at || '').slice(0, 10);
+    if (dayKey) dailyRevenue[dayKey] = (dailyRevenue[dayKey] || 0) + amount;
+
+    for (const item of sale.sale_items || []) {
+      const qty = Number(item.quantity || 0);
+      itemUnits += qty;
+      const itemRevenue = Number(item.total_price || 0);
+      const name = item.product_name || productMetaById[item.product_id]?.name || 'Unknown product';
+      if (!productSales[name]) productSales[name] = { quantity: 0, revenue: 0 };
+      productSales[name].quantity += qty;
+      productSales[name].revenue += itemRevenue;
+
+      // NOTE: This is only an estimate until cost-at-sale is persisted per line.
+      // Sale quantities are treated as individual units, so current container cost
+      // is prorated by units_per_box before applying quantity.
+      estimatedCogs += qty * Number(productCostById[item.product_id] || 0);
+    }
+  }
+
+  const expenseSummary = await getExpenseFilteredSummary(pharmacyId, {
+    branchId,
+    startDate: expenseStart,
+    endDate: expenseEnd,
+    status: 'approved'
+  });
+  const approvedExpenses = Number(expenseSummary.approvedAmount || 0);
+  const estimatedGrossProfit = revenue - estimatedCogs;
+  const estimatedNetResult = estimatedGrossProfit - approvedExpenses;
+
+  const topProducts = Object.entries(productSales)
+    .map(([name, values]) => ({ name, ...values }))
+    .sort((a, b) => b.revenue - a.revenue)
+    .slice(0, 10);
+
+  return {
+    revenue,
+    transactions: sales.length,
+    averageSale: sales.length ? revenue / sales.length : 0,
+    itemUnits,
+    totalDiscount,
+    paymentBreakdown,
+    dailyRevenue,
+    topProducts,
+    estimatedCogs,
+    estimatedGrossProfit,
+    approvedExpenses,
+    estimatedNetResult,
+    estimatedGrossMargin: revenue ? (estimatedGrossProfit / revenue) * 100 : 0,
+    estimatedNetMargin: revenue ? (estimatedNetResult / revenue) * 100 : 0,
+    cogsMethod: 'current_product_cost'
+  };
+}
+
+/**
+ * Inventory analytics using only the columns required for management reporting.
+ * Values are estimates based on the current product cost/selling-price model.
+ */
+export async function getInventoryReportAnalytics(pharmacyId, branchId = null) {
+  const rows = [];
+  const pageSize = 1000;
+  let from = 0;
+  while (true) {
+    let query = supabase
+      .from('products')
+      .select('id,name,category,price,cost_price,stock_boxes,stock_units,units_per_box,low_stock_threshold,expiry_date,branch_id,is_active')
+      .eq('pharmacy_id', pharmacyId)
+      .eq('is_active', true)
+      .order('name', { ascending: true })
+      .range(from, from + pageSize - 1);
+    if (branchId) query = query.eq('branch_id', branchId);
+    const { data, error } = await query;
+    if (error) throw error;
+    const batch = data || [];
+    rows.push(...batch);
+    if (batch.length < pageSize) break;
+    from += pageSize;
+  }
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  let lowStockCount = 0;
+  let expiredCount = 0;
+  let expiring30Count = 0;
+  let expiring90Count = 0;
+  let noExpiryCount = 0;
+  let estimatedCostValue = 0;
+  let estimatedRetailValue = 0;
+  let lowStockCostValue = 0;
+  let expiredCostExposure = 0;
+  const categoryValues = {};
+
+  for (const product of rows) {
+    const boxes = Number(product.stock_boxes || 0);
+    const looseUnits = Number(product.stock_units || 0);
+    const unitsPerBox = Math.max(1, Number(product.units_per_box || 1));
+    const costPerContainer = Number(product.cost_price || 0);
+    const pricePerContainer = Number(product.price || 0);
+    const estimatedCost = (boxes * costPerContainer) + (looseUnits * (costPerContainer / unitsPerBox));
+    const estimatedRetail = (boxes * pricePerContainer) + (looseUnits * (pricePerContainer / unitsPerBox));
+    estimatedCostValue += estimatedCost;
+    estimatedRetailValue += estimatedRetail;
+
+    const category = product.category || 'Uncategorized';
+    categoryValues[category] = (categoryValues[category] || 0) + estimatedCost;
+
+    const lowStock = boxes <= Number(product.low_stock_threshold || 0);
+    if (lowStock) {
+      lowStockCount += 1;
+      lowStockCostValue += estimatedCost;
+    }
+
+    if (!product.expiry_date) {
+      noExpiryCount += 1;
+      continue;
+    }
+    const expiry = new Date(`${product.expiry_date}T00:00:00`);
+    const days = Math.floor((expiry - today) / 86400000);
+    if (days < 0) {
+      expiredCount += 1;
+      expiredCostExposure += estimatedCost;
+    } else if (days <= 30) {
+      expiring30Count += 1;
+    } else if (days <= 90) {
+      expiring90Count += 1;
+    }
+  }
+
+  const topCategories = Object.entries(categoryValues)
+    .map(([name, value]) => ({ name, value }))
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 8);
+
+  return {
+    totalProducts: rows.length,
+    lowStockCount,
+    expiredCount,
+    expiring30Count,
+    expiring90Count,
+    noExpiryCount,
+    estimatedCostValue,
+    estimatedRetailValue,
+    estimatedPotentialMargin: estimatedRetailValue - estimatedCostValue,
+    lowStockCostValue,
+    expiredCostExposure,
+    topCategories
+  };
+}
+
+/**
+ * Compare active branches for a selected period using one paged sales scan,
+ * one paged approved-expense scan, and one lightweight inventory scan.
+ */
+export async function getBranchComparisonReport(pharmacyId, {
+  salesStart = null,
+  salesEnd = null,
+  expenseStart = null,
+  expenseEnd = null
+} = {}) {
+  const branches = await getBranches(pharmacyId);
+  const activeBranches = (branches || []).filter((branch) => branch.is_active !== false);
+  const byId = Object.fromEntries(activeBranches.map((branch) => [branch.id, {
+    id: branch.id,
+    name: branch.name,
+    revenue: 0,
+    transactions: 0,
+    approvedExpenses: 0,
+    products: 0,
+    lowStock: 0
+  }]));
+
+  const chunkSize = 1000;
+  let offset = 0;
+  while (true) {
+    let query = supabase
+      .from('sales')
+      .select('branch_id,total_amount,status,created_at')
+      .eq('pharmacy_id', pharmacyId)
+      .eq('status', 'completed')
+      .order('created_at', { ascending: true })
+      .range(offset, offset + chunkSize - 1);
+    if (salesStart) query = query.gte('created_at', salesStart);
+    if (salesEnd) query = query.lt('created_at', salesEnd);
+    const { data, error } = await query;
+    if (error) throw error;
+    const batch = data || [];
+    batch.forEach((sale) => {
+      const row = byId[sale.branch_id];
+      if (!row) return;
+      row.revenue += Number(sale.total_amount || 0);
+      row.transactions += 1;
+    });
+    if (batch.length < chunkSize) break;
+    offset += chunkSize;
+  }
+
+  offset = 0;
+  while (true) {
+    let query = supabase
+      .from('expenses')
+      .select('branch_id,amount,is_approved,expense_date')
+      .eq('pharmacy_id', pharmacyId)
+      .eq('is_approved', true)
+      .order('expense_date', { ascending: true })
+      .range(offset, offset + chunkSize - 1);
+    if (expenseStart) query = query.gte('expense_date', expenseStart);
+    if (expenseEnd) query = query.lte('expense_date', expenseEnd);
+    const { data, error } = await query;
+    if (error) throw error;
+    const batch = data || [];
+    batch.forEach((expense) => {
+      const row = byId[expense.branch_id];
+      if (row) row.approvedExpenses += Number(expense.amount || 0);
+    });
+    if (batch.length < chunkSize) break;
+    offset += chunkSize;
+  }
+
+  offset = 0;
+  while (true) {
+    const { data, error } = await supabase
+      .from('products')
+      .select('branch_id,stock_boxes,low_stock_threshold')
+      .eq('pharmacy_id', pharmacyId)
+      .eq('is_active', true)
+      .range(offset, offset + chunkSize - 1);
+    if (error) throw error;
+    const batch = data || [];
+    batch.forEach((product) => {
+      const row = byId[product.branch_id];
+      if (!row) return;
+      row.products += 1;
+      if (Number(product.stock_boxes || 0) <= Number(product.low_stock_threshold || 0)) row.lowStock += 1;
+    });
+    if (batch.length < chunkSize) break;
+    offset += chunkSize;
+  }
+
+  return Object.values(byId)
+    .map((row) => ({
+      ...row,
+      averageSale: row.transactions ? row.revenue / row.transactions : 0,
+      operatingBalance: row.revenue - row.approvedExpenses
+    }))
+    .sort((a, b) => b.revenue - a.revenue);
+}
+
 // ===================== SALESMAN FEATURES =====================
 /**
  * Get salesman feature visibility settings for a pharmacy
