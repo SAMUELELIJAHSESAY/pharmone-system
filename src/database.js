@@ -677,6 +677,177 @@ export async function getSales(pharmacyId, limit = 50) {
   return data;
 }
 
+// Normalize free-text filters before embedding them in PostgREST filter expressions.
+function normalizeSalesSearchTerm(value) {
+  return String(value || '')
+    .trim()
+    .replace(/[%_(),\\"']/g, ' ')
+    .replace(/\s+/g, ' ')
+    .slice(0, 80);
+}
+
+async function resolveSalesCustomerMatches(pharmacyId, searchTerm) {
+  const term = normalizeSalesSearchTerm(searchTerm);
+  if (!term) return { term: '', customerIds: [] };
+
+  const { data, error } = await supabase
+    .from('customers')
+    .select('id')
+    .eq('pharmacy_id', pharmacyId)
+    .ilike('name', `%${term}%`)
+    .limit(50);
+
+  if (error) throw error;
+  return { term, customerIds: (data || []).map((row) => row.id).filter(Boolean) };
+}
+
+function applySalesFilters(query, {
+  branchId = null,
+  paymentMethod = null,
+  staffId = null,
+  start = null,
+  end = null,
+  searchTerm = '',
+  customerIds = []
+} = {}) {
+  let next = query;
+  if (branchId) next = next.eq('branch_id', branchId);
+  if (paymentMethod) next = next.eq('payment_method', paymentMethod);
+  if (staffId) next = next.eq('created_by', staffId);
+  if (start) next = next.gte('created_at', start);
+  if (end) next = next.lt('created_at', end);
+
+  if (searchTerm) {
+    if (customerIds.length) {
+      next = next.or(`invoice_number.ilike.%${searchTerm}%,customer_id.in.(${customerIds.join(',')})`);
+    } else {
+      next = next.ilike('invoice_number', `%${searchTerm}%`);
+    }
+  }
+  return next;
+}
+
+/**
+ * Fetch one Admin Sales page from Supabase. Only the visible page is hydrated
+ * with line items, preventing large pharmacies from loading their entire sales
+ * history into the browser just to render the transaction table.
+ */
+export async function getSalesPage(pharmacyId, {
+  page = 1,
+  pageSize = 30,
+  branchId = null,
+  paymentMethod = null,
+  staffId = null,
+  start = null,
+  end = null,
+  search = ''
+} = {}) {
+  const safePageSize = [25, 30, 50].includes(Number(pageSize)) ? Number(pageSize) : 30;
+  const safePage = Math.max(1, Number(page) || 1);
+  const from = (safePage - 1) * safePageSize;
+  const to = from + safePageSize - 1;
+  const { term, customerIds } = await resolveSalesCustomerMatches(pharmacyId, search);
+
+  let query = supabase
+    .from('sales')
+    .select('*, customers(name)', { count: 'exact' })
+    .eq('pharmacy_id', pharmacyId)
+    .order('created_at', { ascending: false });
+
+  query = applySalesFilters(query, {
+    branchId, paymentMethod, staffId, start, end, searchTerm: term, customerIds
+  }).range(from, to);
+
+  const { data, error, count } = await query;
+  if (error) throw error;
+
+  const sales = await enrichSalesWithItems(data || []);
+  const creatorIds = [...new Set(sales.map((sale) => sale.created_by).filter(Boolean))];
+  let staffById = {};
+  if (creatorIds.length) {
+    const { data: staffRows, error: staffError } = await supabase
+      .from('profiles')
+      .select('id, full_name, role')
+      .eq('pharmacy_id', pharmacyId)
+      .in('id', creatorIds);
+    if (staffError) throw staffError;
+    staffById = Object.fromEntries((staffRows || []).map((row) => [row.id, row]));
+  }
+
+  const total = Number(count || 0);
+  return {
+    data: sales.map((sale) => ({
+      ...sale,
+      staff_name: staffById[sale.created_by]?.full_name || 'Unknown staff',
+      staff_role: staffById[sale.created_by]?.role || ''
+    })),
+    total,
+    page: safePage,
+    pageSize: safePageSize,
+    totalPages: Math.max(1, Math.ceil(total / safePageSize))
+  };
+}
+
+/**
+ * Calculate lightweight summary metrics for the active Sales filters. The query
+ * fetches only the numeric/payment columns required for the cards, in pages,
+ * instead of downloading full sales and item records. Revenue metrics count only
+ * completed sales.
+ */
+export async function getSalesFilteredSummary(pharmacyId, {
+  branchId = null,
+  paymentMethod = null,
+  staffId = null,
+  start = null,
+  end = null,
+  search = ''
+} = {}) {
+  const { term, customerIds } = await resolveSalesCustomerMatches(pharmacyId, search);
+  const pageSize = 1000;
+  let from = 0;
+  const completed = [];
+
+  while (true) {
+    let query = supabase
+      .from('sales')
+      .select('id, total_amount, discount, payment_method, status, created_at')
+      .eq('pharmacy_id', pharmacyId)
+      .order('created_at', { ascending: false });
+
+    query = applySalesFilters(query, {
+      branchId, paymentMethod, staffId, start, end, searchTerm: term, customerIds
+    }).range(from, from + pageSize - 1);
+
+    const { data, error } = await query;
+    if (error) throw error;
+
+    const batch = data || [];
+    completed.push(...batch.filter((sale) => sale.status === 'completed'));
+    if (batch.length < pageSize) break;
+    from += pageSize;
+  }
+
+  const paymentBreakdown = { cash: 0, mobile_money: 0, card: 0 };
+  let totalRevenue = 0;
+  let totalDiscount = 0;
+  for (const sale of completed) {
+    const amount = Number(sale.total_amount || 0);
+    totalRevenue += amount;
+    totalDiscount += Number(sale.discount || 0);
+    if (Object.prototype.hasOwnProperty.call(paymentBreakdown, sale.payment_method)) {
+      paymentBreakdown[sale.payment_method] += amount;
+    }
+  }
+
+  return {
+    totalRevenue,
+    totalTransactions: completed.length,
+    averageSale: completed.length ? totalRevenue / completed.length : 0,
+    totalDiscount,
+    paymentBreakdown
+  };
+}
+
 /**
  * Fetch completed sales for reporting without the fixed getSales() history cap.
  * Results are paged so daily/weekly/monthly employee reports remain complete even

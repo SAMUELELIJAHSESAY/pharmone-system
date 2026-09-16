@@ -1,479 +1,401 @@
-import { getSales, enrichSalesWithItems, getBranches, getSalesStats, createSalesReturn, supabase } from '../../database.js';
+import { getSalesPage, getSalesFilteredSummary, getBranches, getPharmacyStaff, createSalesReturn, supabase } from '../../database.js';
 import { formatCurrency, formatDateTime, showToast } from '../../utils.js';
 import { createModal } from '../../components/modal.js';
-import { isViewLifecycleActive, registerViewCleanup, registerViewInterval } from '../../view-lifecycle.js';
+import { isViewLifecycleActive, registerViewCleanup } from '../../view-lifecycle.js';
 
-// Helper function to get the next period reset time
-function getNextPeriodResets() {
-  const now = new Date();
-  
-  // Next daily reset: tomorrow at 00:00
-  const nextDaily = new Date(now);
-  nextDaily.setDate(nextDaily.getDate() + 1);
-  nextDaily.setHours(0, 0, 0, 0);
-  
-  // Next weekly reset: next Monday at 00:00
-  const nextWeekly = new Date(now);
-  const day = nextWeekly.getDay();
-  const daysUntilMonday = day === 0 ? 1 : (8 - day);
-  nextWeekly.setDate(nextWeekly.getDate() + daysUntilMonday);
-  nextWeekly.setHours(0, 0, 0, 0);
-  
-  // Next monthly reset: 1st of next month at 00:00
-  const nextMonthly = new Date(now.getFullYear(), now.getMonth() + 1, 1, 0, 0, 0, 0);
-  
-  // Next yearly reset: January 1st of next year at 00:00
-  const nextYearly = new Date(now.getFullYear() + 1, 0, 1, 0, 0, 0, 0);
-  
-  return { nextDaily, nextWeekly, nextMonthly, nextYearly };
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
 }
 
-// Helper function to format time remaining until reset
-function getTimeUntilReset(resetDate) {
-  const now = new Date();
-  const diff = resetDate - now;
-  
-  if (diff <= 0) return 'Resetting now...';
-  
-  const hours = Math.floor(diff / (1000 * 60 * 60));
-  const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-  
-  if (hours > 24) {
-    const days = Math.floor(hours / 24);
-    return `Resets in ${days}d`;
-  } else if (hours > 0) {
-    return `Resets in ${hours}h ${minutes}m`;
-  } else {
-    return `Resets in ${minutes}m`;
+function utcStartOfDay(date = new Date()) {
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), 0, 0, 0, 0));
+}
+
+function getSalesDateRange(state) {
+  const today = utcStartOfDay();
+  const tomorrow = new Date(today.getTime() + 86400000);
+
+  switch (state.datePreset) {
+    case 'today':
+      return { start: today.toISOString(), end: tomorrow.toISOString(), label: 'Today' };
+    case 'yesterday': {
+      const start = new Date(today.getTime() - 86400000);
+      return { start: start.toISOString(), end: today.toISOString(), label: 'Yesterday' };
+    }
+    case 'last7': {
+      const start = new Date(today.getTime() - (6 * 86400000));
+      return { start: start.toISOString(), end: tomorrow.toISOString(), label: 'Last 7 Days' };
+    }
+    case 'this_month': {
+      const start = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1));
+      const end = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() + 1, 1));
+      return { start: start.toISOString(), end: end.toISOString(), label: 'This Month' };
+    }
+    case 'custom': {
+      const start = state.dateFrom ? new Date(`${state.dateFrom}T00:00:00.000Z`) : null;
+      const endBase = state.dateTo ? new Date(`${state.dateTo}T00:00:00.000Z`) : null;
+      const end = endBase ? new Date(endBase.getTime() + 86400000) : null;
+      const label = state.dateFrom || state.dateTo
+        ? `${state.dateFrom || 'Start'} → ${state.dateTo || 'Now'}`
+        : 'Custom Range';
+      return { start: start?.toISOString() || null, end: end?.toISOString() || null, label };
+    }
+    default:
+      return { start: null, end: null, label: 'All Time' };
   }
 }
 
-// Helper function to get current period info
-function getPeriodInfo() {
-  const now = new Date();
-  const day = now.getDay();
-  
-  // Weekly info (Monday to Sunday, 7 days total)
-  const weekStart = new Date(now);
-  const daysToMonday = day === 0 ? 6 : (day - 1);
-  weekStart.setDate(weekStart.getDate() - daysToMonday);
-  weekStart.setHours(0, 0, 0, 0);
-  const weekEnd = new Date(weekStart);
-  weekEnd.setDate(weekEnd.getDate() + 6); // 6 days after Monday = Sunday
-  
-  // Monthly info
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-  const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-  
-  // Yearly info
-  const yearStart = new Date(now.getFullYear(), 0, 1);
-  const yearEnd = new Date(now.getFullYear(), 11, 31);
-  
-  return {
-    weekStart: weekStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-    weekEnd: weekEnd.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-    monthStart: monthStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-    monthEnd: monthEnd.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-    yearStart: yearStart.toLocaleDateString('en-US', { year: 'numeric' }),
-    yearEnd: yearEnd.toLocaleDateString('en-US', { year: 'numeric' })
-  };
+function renderSalesPagination(page, totalPages) {
+  const current = Math.max(1, Number(page) || 1);
+  const total = Math.max(1, Number(totalPages) || 1);
+  const pages = new Set([1, total, current - 2, current - 1, current, current + 1, current + 2]);
+  const valid = [...pages].filter((n) => n >= 1 && n <= total).sort((a, b) => a - b);
+  const parts = [];
+  let previous = 0;
+  valid.forEach((number) => {
+    if (previous && number - previous > 1) parts.push('<span class="sales-page-ellipsis">…</span>');
+    parts.push(`<button type="button" class="btn btn-ghost btn-sm sales-page-btn ${number === current ? 'active' : ''}" data-sales-page="${number}">${number}</button>`);
+    previous = number;
+  });
+
+  return `
+    <div class="sales-pagination">
+      <button type="button" class="btn btn-ghost btn-sm" data-sales-page="${current - 1}" ${current <= 1 ? 'disabled' : ''}>← Previous</button>
+      <div class="sales-page-numbers">${parts.join('')}</div>
+      <button type="button" class="btn btn-ghost btn-sm" data-sales-page="${current + 1}" ${current >= total ? 'disabled' : ''}>Next →</button>
+    </div>
+  `;
 }
 
 export async function renderSales(container, user, lifecycleToken, initialSearch = '') {
   const pharmacyId = user.profile?.pharmacy_id;
-  if (!pharmacyId) { container.innerHTML = `<div class="alert alert-warning">No pharmacy linked.</div>`; return; }
+  if (!pharmacyId) {
+    container.innerHTML = '<div class="alert alert-warning">No pharmacy linked.</div>';
+    return;
+  }
+
+  const state = {
+    page: 1,
+    pageSize: 30,
+    search: initialSearch || '',
+    branchId: '',
+    paymentMethod: '',
+    staffId: '',
+    datePreset: initialSearch ? 'all' : 'this_month',
+    dateFrom: '',
+    dateTo: ''
+  };
 
   try {
-    const [salesData, branches, stats] = await Promise.all([
-      getSales(pharmacyId, 200),
+    const [branches, staff] = await Promise.all([
       getBranches(pharmacyId),
-      getSalesStats(pharmacyId)
+      getPharmacyStaff(pharmacyId)
     ]);
-
     if (!isViewLifecycleActive(lifecycleToken)) return;
 
-    const sales = await enrichSalesWithItems(salesData);
-    if (!isViewLifecycleActive(lifecycleToken)) return;
-
-    // Extract calculated values from server-side stats
-    const todayRevenue = stats.todayRevenue;
-    const weekRevenue = stats.weekRevenue;
-    const monthRevenue = stats.monthRevenue;
-    const yearRevenue = stats.yearRevenue;
-    const totalRevenue = stats.totalRevenue;
-    
-    // Get period information
-    const resets = getNextPeriodResets();
-    const periods = getPeriodInfo();
-    const todayReset = getTimeUntilReset(resets.nextDaily);
-    const weekReset = getTimeUntilReset(resets.nextWeekly);
-    const monthReset = getTimeUntilReset(resets.nextMonthly);
-    const yearReset = getTimeUntilReset(resets.nextYearly);
+    const branchMap = new Map((branches || []).map((branch) => [branch.id, branch.name]));
+    let currentSales = [];
+    let searchTimer = null;
+    let loadSequence = 0;
 
     container.innerHTML = `
-      <div class="animate-in">
+      <div class="animate-in admin-sales-page">
         <div class="page-header">
           <div>
             <div class="page-title">Sales</div>
-            <div class="page-subtitle">View and manage all sales transactions</div>
+            <div class="page-subtitle">Review transactions, payment mix and staff activity without loading the full sales history.</div>
           </div>
           <button class="btn btn-primary" id="new-sale-btn">+ New Sale</button>
         </div>
 
-        <div class="stats-grid sales-stats-grid">
-          <div class="stat-card">
-            <div class="stat-card-header">
-              <span class="stat-card-label">Today's Revenue</span>
-              <div class="stat-card-icon teal">&#128176;</div>
-            </div>
-            <div class="stat-card-value" id="today-revenue">${formatCurrency(todayRevenue)}</div>
-            <div class="stat-card-change" title="Resets daily at midnight">${todayReset}</div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-card-header">
-              <span class="stat-card-label">Weekly Revenue</span>
-              <div class="stat-card-icon blue">&#128200;</div>
-            </div>
-            <div class="stat-card-value" id="week-revenue" data-stat="week-revenue">${formatCurrency(weekRevenue)}</div>
-            <div class="stat-card-change" title="${periods.weekStart} - ${periods.weekEnd} | Resets every Monday">${periods.weekStart} - ${periods.weekEnd} | ${weekReset}</div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-card-header">
-              <span class="stat-card-label">Monthly Revenue</span>
-              <div class="stat-card-icon purple">&#128181;</div>
-            </div>
-            <div class="stat-card-value" id="month-revenue" data-stat="month-revenue">${formatCurrency(monthRevenue)}</div>
-            <div class="stat-card-change" title="${periods.monthStart} - ${periods.monthEnd} | Resets on the 1st">${periods.monthStart} - ${periods.monthEnd} | ${monthReset}</div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-card-header">
-              <span class="stat-card-label">Yearly Revenue</span>
-              <div class="stat-card-icon green">&#128202;</div>
-            </div>
-            <div class="stat-card-value" id="year-revenue" data-stat="year-revenue">${formatCurrency(yearRevenue)}</div>
-            <div class="stat-card-change" title="${periods.yearStart} - ${periods.yearEnd} | Resets on Jan 1st">${periods.yearStart} - ${periods.yearEnd} | ${yearReset}</div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-card-header">
-              <span class="stat-card-label">Total Transactions</span>
-              <div class="stat-card-icon orange">&#128179;</div>
-            </div>
-            <div class="stat-card-value" id="total-transactions">${stats.totalTransactions}</div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-card-header">
-              <span class="stat-card-label">Total Revenue</span>
-              <div class="stat-card-icon darkgreen">&#128200;</div>
-            </div>
-            <div class="stat-card-value" id="total-revenue" data-stat="total-revenue">${formatCurrency(totalRevenue)}</div>
-            <div class="stat-card-change">All time</div>
-          </div>
+        <div class="stats-grid sales-stats-grid sales-filtered-stats">
+          <div class="stat-card"><div class="stat-card-header"><span class="stat-card-label">Revenue</span><div class="stat-card-icon teal">&#128176;</div></div><div class="stat-card-value" id="sales-summary-revenue">—</div><div class="stat-card-change" id="sales-period-label">This Month</div></div>
+          <div class="stat-card"><div class="stat-card-header"><span class="stat-card-label">Completed Sales</span><div class="stat-card-icon orange">&#128179;</div></div><div class="stat-card-value" id="sales-summary-transactions">—</div><div class="stat-card-change">Transactions in current filter</div></div>
+          <div class="stat-card"><div class="stat-card-header"><span class="stat-card-label">Average Sale</span><div class="stat-card-icon blue">&#128200;</div></div><div class="stat-card-value" id="sales-summary-average">—</div><div class="stat-card-change">Revenue ÷ completed sales</div></div>
+          <div class="stat-card"><div class="stat-card-header"><span class="stat-card-label">Cash</span><div class="stat-card-icon green">&#128181;</div></div><div class="stat-card-value" id="sales-summary-cash">—</div><div class="stat-card-change">Cash payments</div></div>
+          <div class="stat-card"><div class="stat-card-header"><span class="stat-card-label">Mobile Money</span><div class="stat-card-icon purple">&#128241;</div></div><div class="stat-card-value" id="sales-summary-mobile">—</div><div class="stat-card-change">Mobile money payments</div></div>
+          <div class="stat-card"><div class="stat-card-header"><span class="stat-card-label">Card</span><div class="stat-card-icon darkgreen">&#128179;</div></div><div class="stat-card-value" id="sales-summary-card">—</div><div class="stat-card-change" id="sales-summary-discount">Discounts: —</div></div>
         </div>
 
-        <div class="card">
-          <div class="card-header">
-            <span class="card-title">All Sales</span>
-            <div style="display:flex;gap:0.75rem;flex-wrap:wrap">
-              <select class="form-select" id="branch-filter" style="width:auto">
-                <option value="">All Branches</option>
-                ${branches.map(b => `<option value="${b.id}">${b.name}</option>`).join('')}
-              </select>
-              <div class="search-box" style="min-width:220px">
-                <span style="color:var(--gray-400)">&#128269;</span>
-                <input type="text" id="sales-search" placeholder="Search invoice..." />
-              </div>
-              <select class="form-select" id="payment-filter" style="width:auto">
-                <option value="">All Payments</option>
-                <option value="cash">Cash</option>
-                <option value="mobile_money">Mobile Money</option>
-                <option value="card">Card</option>
-              </select>
-              <input type="date" id="date-filter-from" class="form-input" style="width:140px" />
-              <input type="date" id="date-filter-to" class="form-input" style="width:140px" />
+        <div class="card sales-transactions-card">
+          <div class="card-header sales-card-header">
+            <div>
+              <span class="card-title">Transactions</span>
+              <div class="text-xs text-muted sales-result-summary" id="sales-result-summary">Loading sales…</div>
             </div>
+            <button type="button" class="btn btn-ghost btn-sm" id="sales-refresh-btn">Refresh</button>
           </div>
-          <div class="table-container">
+
+          <div class="sales-filter-panel">
+            <div class="search-box sales-search-box">
+              <span style="color:var(--gray-400)">&#128269;</span>
+              <input type="text" id="sales-search" placeholder="Search invoice or customer…" value="${escapeHtml(state.search)}" />
+            </div>
+            <select class="form-select" id="sales-date-preset">
+              <option value="today">Today</option>
+              <option value="yesterday">Yesterday</option>
+              <option value="last7">Last 7 Days</option>
+              <option value="this_month" ${state.datePreset === 'this_month' ? 'selected' : ''}>This Month</option>
+              <option value="all" ${state.datePreset === 'all' ? 'selected' : ''}>All Time</option>
+              <option value="custom">Custom Range</option>
+            </select>
+            <select class="form-select" id="branch-filter">
+              <option value="">All Branches</option>
+              ${(branches || []).map((branch) => `<option value="${branch.id}">${escapeHtml(branch.name)}</option>`).join('')}
+            </select>
+            <select class="form-select" id="staff-filter">
+              <option value="">All Staff</option>
+              ${(staff || []).map((person) => `<option value="${person.id}">${escapeHtml(person.full_name || person.email || 'Staff')} · ${escapeHtml(person.role || '')}</option>`).join('')}
+            </select>
+            <select class="form-select" id="payment-filter">
+              <option value="">All Payments</option>
+              <option value="cash">Cash</option>
+              <option value="mobile_money">Mobile Money</option>
+              <option value="card">Card</option>
+            </select>
+            <select class="form-select sales-page-size" id="sales-page-size" title="Sales per page">
+              <option value="25">25 / page</option>
+              <option value="30" selected>30 / page</option>
+              <option value="50">50 / page</option>
+            </select>
+            <button type="button" class="btn btn-ghost btn-sm" id="sales-reset-filters">Reset</button>
+          </div>
+
+          <div class="sales-custom-date-row" id="sales-custom-date-row" hidden>
+            <div class="form-group"><label class="form-label" for="date-filter-from">From</label><input type="date" id="date-filter-from" class="form-input" /></div>
+            <div class="form-group"><label class="form-label" for="date-filter-to">To</label><input type="date" id="date-filter-to" class="form-input" /></div>
+          </div>
+
+          <div class="table-container sales-table-container">
             <table>
-              <thead>
-                <tr>
-                  <th>Invoice</th>
-                  <th>Customer</th>
-                  <th>Items</th>
-                  <th>Total</th>
-                  <th>Payment</th>
-                  <th>Staff</th>
-                  <th>Date</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody id="sales-tbody">
-                ${renderRows(sales)}
-              </tbody>
+              <thead><tr><th>Invoice</th><th>Customer</th><th>Items</th><th>Total</th><th>Payment</th><th>Staff</th><th>Branch</th><th>Date</th><th>Status</th><th>Actions</th></tr></thead>
+              <tbody id="sales-tbody"><tr><td colspan="10"><div class="empty-state"><div class="empty-state-title">Loading sales…</div></div></td></tr></tbody>
             </table>
           </div>
+          <div class="sales-pagination-wrap" id="sales-pagination-wrap"></div>
         </div>
       </div>
     `;
 
-    document.getElementById('new-sale-btn').addEventListener('click', () => {
-      import('../app.js').then(m => m.navigate('pos'));
+    const setLoading = (loading) => {
+      const card = container.querySelector('.sales-transactions-card');
+      if (card) card.setAttribute('aria-busy', loading ? 'true' : 'false');
+      const refresh = document.getElementById('sales-refresh-btn');
+      if (refresh) refresh.disabled = loading;
+    };
+
+    const loadSales = async ({ keepPage = true } = {}) => {
+      if (!keepPage) state.page = 1;
+      const requestId = ++loadSequence;
+      setLoading(true);
+      const range = getSalesDateRange(state);
+
+      try {
+        const filters = {
+          page: state.page,
+          pageSize: state.pageSize,
+          branchId: state.branchId || null,
+          paymentMethod: state.paymentMethod || null,
+          staffId: state.staffId || null,
+          start: range.start,
+          end: range.end,
+          search: state.search
+        };
+
+        const [pageResult, summary] = await Promise.all([
+          getSalesPage(pharmacyId, filters),
+          getSalesFilteredSummary(pharmacyId, filters)
+        ]);
+
+        if (!isViewLifecycleActive(lifecycleToken) || requestId !== loadSequence) return;
+
+        if (state.page > pageResult.totalPages) {
+          state.page = pageResult.totalPages;
+          return loadSales({ keepPage: true });
+        }
+
+        currentSales = pageResult.data || [];
+        document.getElementById('sales-tbody').innerHTML = renderRows(currentSales, branchMap);
+        bindViewActions(currentSales, branchMap);
+
+        const startIndex = pageResult.total ? ((pageResult.page - 1) * pageResult.pageSize) + 1 : 0;
+        const endIndex = Math.min(pageResult.total, pageResult.page * pageResult.pageSize);
+        document.getElementById('sales-result-summary').textContent = pageResult.total
+          ? `Showing ${startIndex.toLocaleString()}–${endIndex.toLocaleString()} of ${pageResult.total.toLocaleString()} matching sales`
+          : 'No matching sales';
+        document.getElementById('sales-pagination-wrap').innerHTML = `
+          <div class="sales-pagination-info">Page ${pageResult.page} of ${pageResult.totalPages} · ${pageResult.pageSize} sales per page</div>
+          ${renderSalesPagination(pageResult.page, pageResult.totalPages)}
+        `;
+
+        document.getElementById('sales-summary-revenue').textContent = formatCurrency(summary.totalRevenue);
+        document.getElementById('sales-summary-transactions').textContent = Number(summary.totalTransactions || 0).toLocaleString();
+        document.getElementById('sales-summary-average').textContent = formatCurrency(summary.averageSale);
+        document.getElementById('sales-summary-cash').textContent = formatCurrency(summary.paymentBreakdown?.cash || 0);
+        document.getElementById('sales-summary-mobile').textContent = formatCurrency(summary.paymentBreakdown?.mobile_money || 0);
+        document.getElementById('sales-summary-card').textContent = formatCurrency(summary.paymentBreakdown?.card || 0);
+        document.getElementById('sales-summary-discount').textContent = `Discounts: ${formatCurrency(summary.totalDiscount || 0)}`;
+        document.getElementById('sales-period-label').textContent = range.label;
+      } catch (err) {
+        if (!isViewLifecycleActive(lifecycleToken) || requestId !== loadSequence) return;
+        console.error('Failed to load paged sales:', err);
+        document.getElementById('sales-tbody').innerHTML = `<tr><td colspan="10"><div class="alert alert-danger">Failed to load sales: ${escapeHtml(err.message)}</div></td></tr>`;
+      } finally {
+        if (requestId === loadSequence) setLoading(false);
+      }
+    };
+
+    document.getElementById('new-sale-btn')?.addEventListener('click', () => {
+      import('../app.js').then((module) => module.navigate('pos'));
     });
 
-    const applyFilters = () => {
-      const searchQuery = document.getElementById('sales-search')?.value.toLowerCase() || '';
-      const paymentFilter = document.getElementById('payment-filter')?.value || '';
-      const branchFilter = document.getElementById('branch-filter')?.value || '';
-      const dateFrom = document.getElementById('date-filter-from')?.value ? new Date(document.getElementById('date-filter-from').value) : null;
-      const dateTo = document.getElementById('date-filter-to')?.value ? new Date(document.getElementById('date-filter-to').value) : null;
-      
-      const filtered = sales.filter(s => {
-        // Search filter
-        const matchesSearch = !searchQuery || 
-          s.invoice_number.toLowerCase().includes(searchQuery) ||
-          (s.customers?.name || '').toLowerCase().includes(searchQuery);
-        
-        // Branch filter
-        const matchesBranch = !branchFilter || s.branch_id === branchFilter;
-        
-        // Payment method filter
-        const matchesPayment = !paymentFilter || s.payment_method === paymentFilter;
-        
-        // Date range filter
-        const saleDate = new Date(s.created_at);
-        const matchesDate = (!dateFrom || saleDate >= dateFrom) && (!dateTo || saleDate <= dateTo);
-        
-        return matchesSearch && matchesBranch && matchesPayment && matchesDate;
-      });
-      
-      // Recalculate displayed totals based on filtered sales
-      const filteredCompletedSales = filtered.filter(s => s.status === 'completed');
-      const filteredRevenue = filteredCompletedSales.reduce((sum, s) => sum + parseFloat(s.total_amount || 0), 0);
-      
-      // Helper to properly compare dates with timestamps
-      const isBetweenDates = (dateStr, startDate, endDate) => {
-        const saleDate = new Date(dateStr);
-        return saleDate >= startDate && saleDate <= endDate;
+    document.getElementById('sales-search')?.addEventListener('input', (event) => {
+      state.search = event.target.value.trim();
+      if (searchTimer) window.clearTimeout(searchTimer);
+      searchTimer = window.setTimeout(() => void loadSales({ keepPage: false }), 350);
+    });
+
+    document.getElementById('sales-date-preset')?.addEventListener('change', (event) => {
+      state.datePreset = event.target.value;
+      const customRow = document.getElementById('sales-custom-date-row');
+      if (customRow) customRow.hidden = state.datePreset !== 'custom';
+      void loadSales({ keepPage: false });
+    });
+
+    document.getElementById('branch-filter')?.addEventListener('change', (event) => {
+      state.branchId = event.target.value;
+      void loadSales({ keepPage: false });
+    });
+    document.getElementById('staff-filter')?.addEventListener('change', (event) => {
+      state.staffId = event.target.value;
+      void loadSales({ keepPage: false });
+    });
+    document.getElementById('payment-filter')?.addEventListener('change', (event) => {
+      state.paymentMethod = event.target.value;
+      void loadSales({ keepPage: false });
+    });
+    document.getElementById('sales-page-size')?.addEventListener('change', (event) => {
+      state.pageSize = Number(event.target.value) || 30;
+      void loadSales({ keepPage: false });
+    });
+
+    const onCustomDateChange = () => {
+      state.dateFrom = document.getElementById('date-filter-from')?.value || '';
+      state.dateTo = document.getElementById('date-filter-to')?.value || '';
+      if (state.dateFrom || state.dateTo) void loadSales({ keepPage: false });
+    };
+    document.getElementById('date-filter-from')?.addEventListener('change', onCustomDateChange);
+    document.getElementById('date-filter-to')?.addEventListener('change', onCustomDateChange);
+
+    document.getElementById('sales-reset-filters')?.addEventListener('click', () => {
+      state.page = 1;
+      state.pageSize = 30;
+      state.search = '';
+      state.branchId = '';
+      state.paymentMethod = '';
+      state.staffId = '';
+      state.datePreset = 'this_month';
+      state.dateFrom = '';
+      state.dateTo = '';
+      const values = {
+        'sales-search': '', 'branch-filter': '', 'payment-filter': '', 'staff-filter': '',
+        'sales-date-preset': 'this_month', 'sales-page-size': '30', 'date-filter-from': '', 'date-filter-to': ''
       };
-      
-      // Calculate week range for current week (Monday to Sunday)
-      const now = new Date();
-      const currentDay = now.getDay();
-      const daysToMondayOffset = currentDay === 0 ? 6 : (currentDay - 1);
-      const currentWeekStart = new Date(now);
-      currentWeekStart.setDate(currentWeekStart.getDate() - daysToMondayOffset);
-      currentWeekStart.setHours(0, 0, 0, 0);
-      const currentWeekEnd = new Date(currentWeekStart);
-      currentWeekEnd.setDate(currentWeekStart.getDate() + 6);
-      currentWeekEnd.setHours(23, 59, 59, 999);
-      
-      // Calculate month range
-      const monthStartDate = new Date(now.getFullYear(), now.getMonth(), 1);
-      monthStartDate.setHours(0, 0, 0, 0);
-      const monthEndDate = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-      monthEndDate.setHours(23, 59, 59, 999);
-      
-      // Calculate year range
-      const yearStartDate = new Date(now.getFullYear(), 0, 1);
-      yearStartDate.setHours(0, 0, 0, 0);
-      const yearEndDate = new Date(now.getFullYear(), 11, 31);
-      yearEndDate.setHours(23, 59, 59, 999);
-      
-      // Recalculate period-based revenues using corrected date ranges
-      const filteredWeekRevenue = filteredCompletedSales.filter(s => isBetweenDates(s.created_at, currentWeekStart, currentWeekEnd))
-        .reduce((sum, s) => sum + parseFloat(s.total_amount || 0), 0);
-      const filteredMonthRevenue = filteredCompletedSales.filter(s => isBetweenDates(s.created_at, monthStartDate, monthEndDate))
-        .reduce((sum, s) => sum + parseFloat(s.total_amount || 0), 0);
-      const filteredYearRevenue = filteredCompletedSales.filter(s => isBetweenDates(s.created_at, yearStartDate, yearEndDate))
-        .reduce((sum, s) => sum + parseFloat(s.total_amount || 0), 0);
-      
-      // Update the revenue displays
-      const weekCard = document.querySelector('[data-stat="week-revenue"]');
-      if (weekCard) {
-        weekCard.textContent = formatCurrency(filteredWeekRevenue);
-      }
-      const monthCard = document.querySelector('[data-stat="month-revenue"]');
-      if (monthCard) {
-        monthCard.textContent = formatCurrency(filteredMonthRevenue);
-      }
-      const yearCard = document.querySelector('[data-stat="year-revenue"]');
-      if (yearCard) {
-        yearCard.textContent = formatCurrency(filteredYearRevenue);
-      }
-      const revenueCard = document.querySelector('[data-stat="total-revenue"]');
-      if (revenueCard) {
-        revenueCard.textContent = formatCurrency(filteredRevenue);
-      }
-      const transactionsCard = document.getElementById('total-transactions');
-      if (transactionsCard) {
-        transactionsCard.textContent = filteredCompletedSales.length;
-      }
-      
-      document.getElementById('sales-tbody').innerHTML = renderRows(filtered);
-      bindViewActions(filtered);
+      Object.entries(values).forEach(([id, value]) => { const el = document.getElementById(id); if (el) el.value = value; });
+      const customRow = document.getElementById('sales-custom-date-row');
+      if (customRow) customRow.hidden = true;
+      void loadSales({ keepPage: true });
+    });
+
+    document.getElementById('sales-refresh-btn')?.addEventListener('click', () => void loadSales({ keepPage: true }));
+
+    document.getElementById('sales-pagination-wrap')?.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-sales-page]');
+      if (!button || button.disabled) return;
+      const nextPage = Number(button.dataset.salesPage);
+      if (!nextPage || nextPage === state.page) return;
+      state.page = nextPage;
+      void loadSales({ keepPage: true });
+      container.querySelector('.sales-transactions-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+
+    let realtimeTimer = null;
+    const queueRealtimeRefresh = () => {
+      if (!isViewLifecycleActive(lifecycleToken) || document.visibilityState !== 'visible') return;
+      if (realtimeTimer) window.clearTimeout(realtimeTimer);
+      realtimeTimer = window.setTimeout(() => {
+        realtimeTimer = null;
+        void loadSales({ keepPage: true });
+      }, 1800);
     };
 
-    const salesSearchInput = document.getElementById('sales-search');
-    salesSearchInput.addEventListener('input', applyFilters);
-    if (initialSearch) {
-      salesSearchInput.value = initialSearch;
-      applyFilters();
-    }
-    if (document.getElementById('branch-filter')) {
-      document.getElementById('branch-filter').addEventListener('change', applyFilters);
-    }
-    if (document.getElementById('payment-filter')) {
-      document.getElementById('payment-filter').addEventListener('change', applyFilters);
-    }
-    if (document.getElementById('date-filter-from')) {
-      document.getElementById('date-filter-from').addEventListener('change', applyFilters);
-    }
-    if (document.getElementById('date-filter-to')) {
-      document.getElementById('date-filter-to').addEventListener('change', applyFilters);
-    }
-
-    bindViewActions(sales);
-
-    // Keep headline totals current primarily from database change events instead of polling.
-    // A slow safety interval remains as a fallback in case Realtime is unavailable.
-    let statsRefreshInFlight = false;
-    let realtimeRefreshTimer = null;
-    const SALES_STATS_SAFETY_REFRESH_MS = 15 * 60 * 1000;
-    const SALES_STATS_EVENT_DEBOUNCE_MS = 2500;
-
-    const hasActiveFilters = () => Boolean(
-      document.getElementById('sales-search')?.value ||
-      document.getElementById('payment-filter')?.value ||
-      document.getElementById('branch-filter')?.value ||
-      document.getElementById('date-filter-from')?.value ||
-      document.getElementById('date-filter-to')?.value
-    );
-
-    async function refreshSalesStats() {
-      if (statsRefreshInFlight || document.visibilityState !== 'visible' || hasActiveFilters()) return;
-      if (!isViewLifecycleActive(lifecycleToken)) return;
-
-      statsRefreshInFlight = true;
-      try {
-        const freshStats = await getSalesStats(pharmacyId);
-        if (!isViewLifecycleActive(lifecycleToken)) return;
-
-        const todayCard = document.getElementById('today-revenue');
-        if (todayCard) todayCard.textContent = formatCurrency(freshStats.todayRevenue);
-
-        const weekCard = document.getElementById('week-revenue');
-        if (weekCard) weekCard.textContent = formatCurrency(freshStats.weekRevenue);
-
-        const monthCard = document.getElementById('month-revenue');
-        if (monthCard) monthCard.textContent = formatCurrency(freshStats.monthRevenue);
-
-        const yearCard = document.getElementById('year-revenue');
-        if (yearCard) yearCard.textContent = formatCurrency(freshStats.yearRevenue);
-
-        const totalCard = document.getElementById('total-revenue');
-        if (totalCard) totalCard.textContent = formatCurrency(freshStats.totalRevenue);
-
-        const transactionsCard = document.getElementById('total-transactions');
-        if (transactionsCard) transactionsCard.textContent = freshStats.totalTransactions;
-      } catch (err) {
-        console.error('Error refreshing sales stats:', err);
-      } finally {
-        statsRefreshInFlight = false;
-      }
-    }
-
-    // Batch closely-spaced sales/return events into one tiny aggregate RPC.
-    // This prevents a burst of transactions from causing a burst of stats queries.
-    const queueEventDrivenStatsRefresh = () => {
-      if (!isViewLifecycleActive(lifecycleToken) || document.visibilityState !== 'visible' || hasActiveFilters()) return;
-
-      if (realtimeRefreshTimer) {
-        window.clearTimeout(realtimeRefreshTimer);
-      }
-
-      realtimeRefreshTimer = window.setTimeout(() => {
-        realtimeRefreshTimer = null;
-        void refreshSalesStats();
-      }, SALES_STATS_EVENT_DEBOUNCE_MS);
-    };
-
-    // While the Sales view is active, listen only for sales/return mutations for this pharmacy.
-    // Realtime updates the small revenue cards; the heavier sales table is intentionally not
-    // re-downloaded automatically. Reopening Sales or using normal navigation refreshes the list.
-    const salesStatsChannel = supabase
-      .channel(`sales-stats-${pharmacyId}-${lifecycleToken}`)
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'sales', filter: `pharmacy_id=eq.${pharmacyId}` },
-        queueEventDrivenStatsRefresh
-      )
-      .on(
-        'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'sales', filter: `pharmacy_id=eq.${pharmacyId}` },
-        queueEventDrivenStatsRefresh
-      )
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'sales_returns', filter: `pharmacy_id=eq.${pharmacyId}` },
-        queueEventDrivenStatsRefresh
-      )
-      .subscribe((status) => {
-        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-          console.warn('Sales stats Realtime unavailable; using 15-minute safety refresh.');
-        }
-      });
+    const salesChannel = supabase
+      .channel(`admin-sales-page-${pharmacyId}-${lifecycleToken}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'sales', filter: `pharmacy_id=eq.${pharmacyId}` }, queueRealtimeRefresh)
+      .subscribe();
 
     registerViewCleanup(lifecycleToken, () => {
-      if (realtimeRefreshTimer) {
-        window.clearTimeout(realtimeRefreshTimer);
-        realtimeRefreshTimer = null;
-      }
-      void supabase.removeChannel(salesStatsChannel);
+      if (searchTimer) window.clearTimeout(searchTimer);
+      if (realtimeTimer) window.clearTimeout(realtimeTimer);
+      void supabase.removeChannel(salesChannel);
     });
 
-    // Safety fallback only: four tiny aggregate requests per hour while Sales stays open.
-    // This is 93% less idle polling than the former 60-second refresh.
-    registerViewInterval(lifecycleToken, refreshSalesStats, SALES_STATS_SAFETY_REFRESH_MS);
+    await loadSales({ keepPage: true });
   } catch (err) {
     if (!isViewLifecycleActive(lifecycleToken)) return;
-    container.innerHTML = `<div class="alert alert-danger">Failed to load sales: ${err.message}</div>`;
+    container.innerHTML = `<div class="alert alert-danger">Failed to load sales: ${escapeHtml(err.message)}</div>`;
   }
 }
 
-function renderRows(sales) {
-  if (!sales.length) return `<tr><td colspan="8"><div class="empty-state"><div class="empty-state-icon">&#128176;</div><div class="empty-state-title">No sales yet</div></div></td></tr>`;
+function renderRows(sales, branchMap) {
+  if (!sales.length) {
+    return '<tr><td colspan="10"><div class="empty-state"><div class="empty-state-icon">&#128176;</div><div class="empty-state-title">No sales found</div><div class="empty-state-desc">Try changing the date, branch, staff or payment filters.</div></div></td></tr>';
+  }
 
   const paymentColors = { cash: 'badge-success', mobile_money: 'badge-info', card: 'badge-primary' };
+  const statusColors = { completed: 'badge-success', pending: 'badge-warning', cancelled: 'badge-danger' };
 
-  return sales.map(s => `
+  return sales.map((sale) => `
     <tr>
-      <td class="font-semibold text-sm">${s.invoice_number}</td>
-      <td class="text-sm">${s.customers?.name || 'Walk-in'}</td>
-      <td class="text-sm text-muted">${(s.sale_items || []).length} item(s)</td>
-      <td class="font-semibold" style="color:var(--success)">${formatCurrency(s.total_amount)}</td>
-      <td><span class="badge ${paymentColors[s.payment_method] || 'badge-gray'}">${s.payment_method?.replace('_', ' ')}</span></td>
-      <td class="text-sm text-muted">—</td>
-      <td class="text-xs text-muted">${formatDateTime(s.created_at)}</td>
-      <td>
-        <button class="btn btn-ghost btn-sm view-sale-btn" data-id="${s.id}">View</button>
-      </td>
+      <td class="font-semibold text-sm">${escapeHtml(sale.invoice_number)}</td>
+      <td class="text-sm">${escapeHtml(sale.customers?.name || 'Walk-in')}</td>
+      <td class="text-sm text-muted">${(sale.sale_items || []).length} item(s)</td>
+      <td class="font-semibold sales-money-cell">${formatCurrency(sale.total_amount)}</td>
+      <td><span class="badge ${paymentColors[sale.payment_method] || 'badge-gray'}">${escapeHtml((sale.payment_method || 'unknown').replace('_', ' '))}</span></td>
+      <td class="text-sm"><div class="font-semibold">${escapeHtml(sale.staff_name || 'Unknown staff')}</div><div class="text-xs text-muted">${escapeHtml(sale.staff_role || '')}</div></td>
+      <td class="text-sm text-muted">${escapeHtml(branchMap.get(sale.branch_id) || 'Unassigned')}</td>
+      <td class="text-xs text-muted">${formatDateTime(sale.created_at)}</td>
+      <td><span class="badge ${statusColors[sale.status] || 'badge-gray'}">${escapeHtml(sale.status || 'unknown')}</span></td>
+      <td><button class="btn btn-ghost btn-sm view-sale-btn" data-id="${sale.id}">View</button></td>
     </tr>
   `).join('');
 }
 
-function bindViewActions(sales) {
-  document.querySelectorAll('.view-sale-btn').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      const saleId = btn.dataset.id;
+function bindViewActions(sales, branchMap) {
+  const currentById = new Map(sales.map((sale) => [sale.id, sale]));
+  document.querySelectorAll('.view-sale-btn').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const saleId = button.dataset.id;
       try {
-        // Fetch fresh sale data from database to ensure we have latest items
         const { data: freshSale, error } = await supabase
           .from('sales')
-          .select('*, sale_items(*)')
+          .select('*, customers(name), sale_items(*)')
           .eq('id', saleId)
           .single();
-        
         if (error) throw error;
-        if (freshSale) showSaleDetail(freshSale);
+        if (!freshSale) return;
+        const context = currentById.get(saleId) || {};
+        showSaleDetail({
+          ...freshSale,
+          staff_name: context.staff_name || 'Unknown staff',
+          staff_role: context.staff_role || '',
+          branch_name: branchMap.get(freshSale.branch_id) || 'Unassigned'
+        });
       } catch (error) {
         console.error('Error fetching sale:', error);
         showToast('Error loading receipt', 'error');
@@ -483,67 +405,44 @@ function bindViewActions(sales) {
 }
 
 function showSaleDetail(sale) {
-  // Filter out items with 0 or negative quantity (returned items)
-  const validItems = (sale.sale_items || []).filter(item => item.quantity > 0);
-  
-  const itemsHtml = validItems.map(item => `
+  const validItems = (sale.sale_items || []).filter((item) => Number(item.quantity || 0) > 0);
+  const itemsSubtotal = validItems.reduce((sum, item) => sum + Number(item.total_price || 0), 0);
+  const discount = Number(sale.discount || 0);
+  const itemsHtml = validItems.map((item) => `
     <tr>
-      <td>${item.product_name}</td>
-      <td class="text-center">${item.quantity}</td>
+      <td>${escapeHtml(item.product_name)}</td>
+      <td class="text-center">${Number(item.quantity || 0).toLocaleString()}</td>
       <td>${formatCurrency(item.unit_price)}</td>
       <td class="font-semibold">${formatCurrency(item.total_price)}</td>
     </tr>
   `).join('');
 
   const body = `
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem;margin-bottom:1.25rem">
-      <div>
-        <div class="text-xs text-muted">Customer</div>
-        <div class="font-semibold">${sale.customers?.name || 'Walk-in Customer'}</div>
-      </div>
-      <div>
-        <div class="text-xs text-muted">Payment Method</div>
-        <div class="font-semibold">${sale.payment_method?.replace('_', ' ')}</div>
-      </div>
-      <div>
-        <div class="text-xs text-muted">Date</div>
-        <div class="font-semibold">${formatDateTime(sale.created_at)}</div>
-      </div>
-      <div>
-        <div class="text-xs text-muted">Status</div>
-        <div class="font-semibold"><span class="badge ${sale.status === 'cancelled' ? 'bg-red' : 'bg-emerald'}">${sale.status?.toUpperCase() || 'COMPLETED'}</span></div>
-      </div>
+    <div class="sales-receipt-meta">
+      <div><span class="text-xs text-muted">Customer</span><strong>${escapeHtml(sale.customers?.name || 'Walk-in Customer')}</strong></div>
+      <div><span class="text-xs text-muted">Staff</span><strong>${escapeHtml(sale.staff_name || 'Unknown staff')}</strong><small>${escapeHtml(sale.staff_role || '')}</small></div>
+      <div><span class="text-xs text-muted">Branch</span><strong>${escapeHtml(sale.branch_name || 'Unassigned')}</strong></div>
+      <div><span class="text-xs text-muted">Payment</span><strong>${escapeHtml((sale.payment_method || 'unknown').replace('_', ' '))}</strong></div>
+      <div><span class="text-xs text-muted">Date</span><strong>${formatDateTime(sale.created_at)}</strong></div>
+      <div><span class="text-xs text-muted">Status</span><strong>${escapeHtml((sale.status || 'completed').toUpperCase())}</strong></div>
     </div>
     <div class="table-container">
-      <table>
-        <thead><tr><th>Product</th><th>Qty</th><th>Unit Price</th><th>Total</th></tr></thead>
-        <tbody>${itemsHtml || '<tr><td colspan="4" class="text-center text-muted">No items</td></tr>'}</tbody>
-      </table>
+      <table><thead><tr><th>Product</th><th>Qty</th><th>Unit Price</th><th>Total</th></tr></thead><tbody>${itemsHtml || '<tr><td colspan="4" class="text-center text-muted">No items</td></tr>'}</tbody></table>
     </div>
-    <div style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--gray-200)">
-      <div class="cart-summary-total">
-        <span>Total Amount</span>
-        <span style="color:var(--success)">${formatCurrency(sale.total_amount)}</span>
-      </div>
-      <div style="margin-top:0.5rem;font-size:0.9rem;color:var(--gray-600)">
-        <em>Current sale amount after returns (if any)</em>
-      </div>
+    <div class="sales-receipt-totals">
+      <div><span>Line items subtotal</span><strong>${formatCurrency(itemsSubtotal)}</strong></div>
+      ${discount ? `<div><span>Recorded discount</span><strong>-${formatCurrency(discount)}</strong></div>` : ''}
+      <div class="sales-receipt-grand-total"><span>Stored sale total</span><strong>${formatCurrency(sale.total_amount)}</strong></div>
+      ${sale.notes ? `<div class="sales-receipt-notes"><span class="text-xs text-muted">Notes</span><p>${escapeHtml(sale.notes)}</p></div>` : ''}
     </div>
   `;
 
   const footer = `
     <button class="btn btn-ghost" id="close-sale-detail">Close</button>
-    <button class="btn btn-warning" id="return-sale-btn">↩️ Return Sale</button>
+    ${sale.status === 'completed' ? '<button class="btn btn-warning" id="return-sale-btn">↩️ Return Sale</button>' : ''}
   `;
 
-  const modal = createModal({
-    id: 'sale-detail',
-    title: `Receipt - ${sale.invoice_number}`,
-    body,
-    footer
-  });
-
-  // Attach event listeners after modal is created
+  const modal = createModal({ id: 'sale-detail', title: `Receipt - ${escapeHtml(sale.invoice_number)}`, body, footer, size: 'modal-lg' });
   document.getElementById('close-sale-detail')?.addEventListener('click', modal.closeModal);
   document.getElementById('return-sale-btn')?.addEventListener('click', () => {
     modal.closeModal();
