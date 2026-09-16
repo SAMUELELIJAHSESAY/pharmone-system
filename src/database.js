@@ -325,6 +325,252 @@ export async function getProducts(pharmacyId, branchId = null) {
   return data;
 }
 
+
+/**
+ * Load a single inventory page directly from Supabase instead of downloading
+ * the whole product catalogue into the browser.
+ */
+export async function getProductsPage(pharmacyId, options = {}) {
+  const {
+    branchId = null,
+    page = 1,
+    pageSize = 30,
+    search = '',
+    category = '',
+    filterType = '',
+    sortType = ''
+  } = options;
+
+  const safePage = Math.max(1, Number(page) || 1);
+  const safePageSize = Math.min(100, Math.max(1, Number(pageSize) || 30));
+  const normalizedSearch = String(search || '').trim().replace(/[,%()]/g, ' ').replace(/\s+/g, ' ');
+  const normalizedFilter = filterType === 'expiring' ? 'expiring-30' : filterType;
+  const today = new Date().toISOString().slice(0, 10);
+
+  const cutoffDate = (days) => {
+    const value = new Date(`${today}T00:00:00Z`);
+    value.setUTCDate(value.getUTCDate() + days);
+    return value.toISOString().slice(0, 10);
+  };
+
+  const applyCommonFilters = (query) => {
+    let q = query
+      .eq('pharmacy_id', pharmacyId)
+      .eq('is_active', true);
+
+    if (branchId) q = q.eq('branch_id', branchId);
+    if (category) q = q.eq('category', category);
+    if (normalizedSearch) {
+      const pattern = `%${normalizedSearch}%`;
+      q = q.or(`name.ilike.${pattern},category.ilike.${pattern},description.ilike.${pattern}`);
+    }
+
+    if (normalizedFilter === 'expired') {
+      q = q.lt('expiry_date', today);
+    } else if (['expiring-30', 'expiring-60', 'expiring-90'].includes(normalizedFilter)) {
+      const days = Number(normalizedFilter.split('-')[1]) || 30;
+      q = q.gte('expiry_date', today).lte('expiry_date', cutoffDate(days));
+    } else if (normalizedFilter === 'no-expiry') {
+      q = q.is('expiry_date', null);
+    }
+
+    return q;
+  };
+
+  // Filters/sorts that compare two columns or use a calculated value cannot be
+  // expressed safely with the existing REST schema. For those explicit views,
+  // fetch only lightweight candidate fields, calculate the matching ids, then
+  // request the 30 full rows required for the visible page.
+  const needsCandidatePass = normalizedFilter === 'low-stock' || normalizedFilter === 'duplicates' || sortType.startsWith('margin-');
+
+  if (needsCandidatePass) {
+    const candidates = [];
+    const chunkSize = 1000;
+    let offset = 0;
+
+    while (true) {
+      let candidateQuery = supabase
+        .from('products')
+        .select('id,name,category,description,price,cost_price,stock_boxes,low_stock_threshold,expiry_date');
+      candidateQuery = applyCommonFilters(candidateQuery)
+        .order('name', { ascending: true })
+        .range(offset, offset + chunkSize - 1);
+
+      const { data, error } = await candidateQuery;
+      if (error) throw error;
+      const batch = data || [];
+      candidates.push(...batch);
+      if (batch.length < chunkSize) break;
+      offset += chunkSize;
+    }
+
+    let filtered = candidates;
+    if (normalizedFilter === 'low-stock') {
+      filtered = filtered.filter((product) => Number(product.stock_boxes || 0) <= Number(product.low_stock_threshold || 0));
+    } else if (normalizedFilter === 'duplicates') {
+      const counts = new Map();
+      filtered.forEach((product) => {
+        const key = String(product.name || '').trim().toLowerCase();
+        counts.set(key, (counts.get(key) || 0) + 1);
+      });
+      filtered = filtered.filter((product) => counts.get(String(product.name || '').trim().toLowerCase()) > 1);
+    }
+
+    const sorter = {
+      'selling-asc': (a, b) => Number(a.price || 0) - Number(b.price || 0),
+      'selling-desc': (a, b) => Number(b.price || 0) - Number(a.price || 0),
+      'cost-asc': (a, b) => Number(a.cost_price || 0) - Number(b.cost_price || 0),
+      'cost-desc': (a, b) => Number(b.cost_price || 0) - Number(a.cost_price || 0),
+      'margin-asc': (a, b) => (Number(a.price || 0) - Number(a.cost_price || 0)) - (Number(b.price || 0) - Number(b.cost_price || 0)),
+      'margin-desc': (a, b) => (Number(b.price || 0) - Number(b.cost_price || 0)) - (Number(a.price || 0) - Number(a.cost_price || 0)),
+      'stock-asc': (a, b) => Number(a.stock_boxes || 0) - Number(b.stock_boxes || 0),
+      'stock-desc': (a, b) => Number(b.stock_boxes || 0) - Number(a.stock_boxes || 0),
+      'expiry-asc': (a, b) => String(a.expiry_date || '9999-12-31').localeCompare(String(b.expiry_date || '9999-12-31'))
+    }[sortType];
+
+    if (sorter) filtered = [...filtered].sort(sorter);
+    else filtered = [...filtered].sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+
+    const count = filtered.length;
+    const from = (safePage - 1) * safePageSize;
+    const pageCandidates = filtered.slice(from, from + safePageSize);
+    const pageIds = pageCandidates.map((product) => product.id);
+
+    if (!pageIds.length) return { products: [], count, page: safePage, pageSize: safePageSize };
+
+    const { data: fullRows, error } = await supabase
+      .from('products')
+      .select('*')
+      .in('id', pageIds);
+    if (error) throw error;
+
+    const byId = new Map((fullRows || []).map((product) => [product.id, product]));
+    const products = pageIds.map((id) => byId.get(id)).filter(Boolean);
+    return { products, count, page: safePage, pageSize: safePageSize };
+  }
+
+  let query = supabase
+    .from('products')
+    .select('*', { count: 'exact' });
+  query = applyCommonFilters(query);
+
+  if (sortType === 'selling-asc') query = query.order('price', { ascending: true });
+  else if (sortType === 'selling-desc') query = query.order('price', { ascending: false });
+  else if (sortType === 'cost-asc') query = query.order('cost_price', { ascending: true });
+  else if (sortType === 'cost-desc') query = query.order('cost_price', { ascending: false });
+  else if (sortType === 'stock-asc') query = query.order('stock_boxes', { ascending: true });
+  else if (sortType === 'stock-desc') query = query.order('stock_boxes', { ascending: false });
+  else if (sortType === 'expiry-asc') query = query.order('expiry_date', { ascending: true, nullsFirst: false });
+  else query = query.order('name', { ascending: true });
+
+  const from = (safePage - 1) * safePageSize;
+  const to = from + safePageSize - 1;
+  const { data, error, count } = await query.range(from, to);
+  if (error) throw error;
+
+  return {
+    products: data || [],
+    count: count || 0,
+    page: safePage,
+    pageSize: safePageSize
+  };
+}
+
+export async function getInventorySummary(pharmacyId, branchId = null) {
+  const today = new Date().toISOString().slice(0, 10);
+  const cutoff = new Date(`${today}T00:00:00Z`);
+  cutoff.setUTCDate(cutoff.getUTCDate() + 30);
+  const cutoffKey = cutoff.toISOString().slice(0, 10);
+
+  const scopedCount = (configure) => {
+    let query = supabase
+      .from('products')
+      .select('*', { count: 'exact', head: true })
+      .eq('pharmacy_id', pharmacyId)
+      .eq('is_active', true);
+    if (branchId) query = query.eq('branch_id', branchId);
+    return configure ? configure(query) : query;
+  };
+
+  const [totalResult, expiredResult, expiringResult] = await Promise.all([
+    scopedCount(),
+    scopedCount((query) => query.lt('expiry_date', today)),
+    scopedCount((query) => query.gte('expiry_date', today).lte('expiry_date', cutoffKey))
+  ]);
+
+  if (totalResult.error) throw totalResult.error;
+  if (expiredResult.error) throw expiredResult.error;
+  if (expiringResult.error) throw expiringResult.error;
+
+  // Low-stock uses a per-product threshold, so retrieve only the two numeric
+  // columns needed for the comparison instead of every product field.
+  let lowStockCount = 0;
+  const chunkSize = 1000;
+  let offset = 0;
+  while (true) {
+    let query = supabase
+      .from('products')
+      .select('stock_boxes,low_stock_threshold')
+      .eq('pharmacy_id', pharmacyId)
+      .eq('is_active', true)
+      .range(offset, offset + chunkSize - 1);
+    if (branchId) query = query.eq('branch_id', branchId);
+    const { data, error } = await query;
+    if (error) throw error;
+    const batch = data || [];
+    lowStockCount += batch.filter((product) => Number(product.stock_boxes || 0) <= Number(product.low_stock_threshold || 0)).length;
+    if (batch.length < chunkSize) break;
+    offset += chunkSize;
+  }
+
+  return {
+    totalProducts: totalResult.count || 0,
+    lowStockCount,
+    expiredCount: expiredResult.count || 0,
+    expiringSoonCount: expiringResult.count || 0
+  };
+}
+
+export async function getProductCategories(pharmacyId, branchId = null) {
+  const categories = new Set();
+  const chunkSize = 1000;
+  let offset = 0;
+
+  while (true) {
+    let query = supabase
+      .from('products')
+      .select('category')
+      .eq('pharmacy_id', pharmacyId)
+      .eq('is_active', true)
+      .order('category', { ascending: true })
+      .range(offset, offset + chunkSize - 1);
+    if (branchId) query = query.eq('branch_id', branchId);
+
+    const { data, error } = await query;
+    if (error) throw error;
+    const batch = data || [];
+    batch.forEach((row) => {
+      if (row.category) categories.add(row.category);
+    });
+    if (batch.length < chunkSize) break;
+    offset += chunkSize;
+  }
+
+  return [...categories].sort((a, b) => a.localeCompare(b));
+}
+
+export async function getProductStockLogs(pharmacyId, productId, limit = 100) {
+  const { data, error } = await supabase
+    .from('stock_logs')
+    .select('*')
+    .eq('pharmacy_id', pharmacyId)
+    .eq('product_id', productId)
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return data || [];
+}
+
 export async function getLowStockProducts(pharmacyId) {
   const { data, error } = await supabase
     .from('products')

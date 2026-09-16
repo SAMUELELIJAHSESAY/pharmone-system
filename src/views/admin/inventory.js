@@ -1,83 +1,173 @@
-import { getProducts, createProduct, updateProduct, deleteProduct, addStock, getStockLogs, getBranches, getPharmacySettings } from '../../database.js';
-import { formatCurrency, formatDate, showToast, showConfirm, isExpired, isExpiringSoon, debounce } from '../../utils.js';
+import {
+  getProductsPage,
+  getInventorySummary,
+  getProductCategories,
+  getProductStockLogs,
+  createProduct,
+  updateProduct,
+  deleteProduct,
+  addStock,
+  getStockLogs,
+  getBranches,
+  getPharmacySettings
+} from '../../database.js';
+import { formatCurrency, formatDate, formatDateTime, showToast, showConfirm, isExpired, isExpiringSoon, debounce } from '../../utils.js';
 import { createModal } from '../../components/modal.js';
 
-let allProducts = [];
+let allProducts = []; // Current visible page only.
 let branches = [];
 let selectedBranchId = null;
-let currentFilterType = null; // For pre-filtering from dashboard
-let currentSearchTerm = ''; // Optional search handed off from global search
-let containerRef = null; // Module-level reference to container for updateView callbacks
+let currentFilterType = null;
+let currentSearchTerm = '';
+let containerRef = null;
+
+const inventoryState = {
+  page: 1,
+  pageSize: 30,
+  totalCount: 0,
+  search: '',
+  category: '',
+  filterType: '',
+  sortType: '',
+  categories: [],
+  summary: {
+    totalProducts: 0,
+    lowStockCount: 0,
+    expiredCount: 0,
+    expiringSoonCount: 0
+  }
+};
+
+function escapeHtml(value = '') {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+function normalizeFilterType(value) {
+  return value === 'expiring' ? 'expiring-30' : (value || '');
+}
+
+function getInventoryQueryOptions() {
+  return {
+    branchId: selectedBranchId,
+    page: inventoryState.page,
+    pageSize: inventoryState.pageSize,
+    search: inventoryState.search,
+    category: inventoryState.category,
+    filterType: inventoryState.filterType,
+    sortType: inventoryState.sortType
+  };
+}
+
+async function fetchInventoryData(user, { refreshMeta = false } = {}) {
+  const pharmacyId = user.profile.pharmacy_id;
+  const pagePromise = getProductsPage(pharmacyId, getInventoryQueryOptions());
+
+  if (refreshMeta) {
+    const [pageResult, summary, categories] = await Promise.all([
+      pagePromise,
+      getInventorySummary(pharmacyId, selectedBranchId),
+      getProductCategories(pharmacyId, selectedBranchId)
+    ]);
+    inventoryState.summary = summary;
+    inventoryState.categories = categories;
+    inventoryState.totalCount = pageResult.count;
+    allProducts = pageResult.products;
+  } else {
+    const pageResult = await pagePromise;
+    inventoryState.totalCount = pageResult.count;
+    allProducts = pageResult.products;
+  }
+
+  const totalPages = Math.max(1, Math.ceil(inventoryState.totalCount / inventoryState.pageSize));
+  if (inventoryState.page > totalPages) {
+    inventoryState.page = totalPages;
+    const corrected = await getProductsPage(pharmacyId, getInventoryQueryOptions());
+    inventoryState.totalCount = corrected.count;
+    allProducts = corrected.products;
+  }
+}
+
+async function refreshInventory(container, user, branchList, options = {}) {
+  const { refreshMeta = false, focusSearch = false } = options;
+  try {
+    await fetchInventoryData(user, { refreshMeta });
+    renderView(container, allProducts, user, branchList);
+    if (focusSearch) {
+      const input = document.getElementById('product-search');
+      if (input) {
+        input.focus();
+        const end = input.value.length;
+        input.setSelectionRange(end, end);
+      }
+    }
+  } catch (err) {
+    showToast(`Failed to load inventory: ${err.message}`, 'error');
+  }
+}
 
 export async function renderInventory(container, user, filterType = null, initialSearch = '', initialBranchId = null) {
-  // Store filter/search state for use in rendering
-  currentFilterType = filterType;
+  currentFilterType = normalizeFilterType(filterType);
   currentSearchTerm = String(initialSearch || '').trim();
+
   if (!user) {
     container.innerHTML = `<div class="alert alert-warning">User not authenticated. Please refresh the page.</div>`;
     return;
   }
-  
+
   const pharmacyId = user.profile?.pharmacy_id;
-  if (!pharmacyId) { container.innerHTML = `<div class="alert alert-warning">No pharmacy linked to your account.</div>`; return; }
+  if (!pharmacyId) {
+    container.innerHTML = `<div class="alert alert-warning">No pharmacy linked to your account.</div>`;
+    return;
+  }
 
   try {
-    // Ensure pharmacy settings are loaded globally
     if (!window.pharmacySettings?.currency_symbol) {
       const settings = await getPharmacySettings(pharmacyId);
       window.pharmacySettings = settings || { currency_symbol: 'Le', currency_code: 'NLE' };
     }
-    
-    // Load branches for this pharmacy
+
     branches = await getBranches(pharmacyId);
-    
-    // Set initial selected branch to the first branch (or null for overview)
-    selectedBranchId = initialBranchId && branches.some(branch => branch.id === initialBranchId)
+    selectedBranchId = initialBranchId && branches.some((branch) => branch.id === initialBranchId)
       ? initialBranchId
       : (branches.length > 0 ? branches[0].id : null);
-    
-    // Load products - if branch selected, get branch-specific products
-    allProducts = await getProducts(pharmacyId, selectedBranchId);
+
+    inventoryState.page = 1;
+    inventoryState.pageSize = 30;
+    inventoryState.search = currentSearchTerm;
+    inventoryState.category = '';
+    inventoryState.filterType = currentFilterType;
+    inventoryState.sortType = '';
+
+    await fetchInventoryData(user, { refreshMeta: true });
     renderView(container, allProducts, user, branches);
   } catch (err) {
-    container.innerHTML = `<div class="alert alert-danger">Failed to load inventory: ${err.message}</div>`;
+    container.innerHTML = `<div class="alert alert-danger">Failed to load inventory: ${escapeHtml(err.message)}</div>`;
   }
 }
 
 function renderView(container, products, user, branchList) {
-  // Store container reference for use in callbacks
   containerRef = container;
-  
-  const lowStockCount = products.filter(p => p.stock_boxes <= p.low_stock_threshold).length;
-  const expiredCount = products.filter(p => isExpired(p.expiry_date)).length;
-  
-  // Detect duplicate products by name
-  const productNames = {};
-  const duplicates = new Set();
-  products.forEach(p => {
-    const nameKey = p.name.toLowerCase().trim();
-    if (productNames[nameKey]) {
-      duplicates.add(nameKey);
-      productNames[nameKey].count++;
-      productNames[nameKey].ids.push(p.id);
-    } else {
-      productNames[nameKey] = { count: 1, ids: [p.id], names: [] };
-    }
-  });
-  
-  const duplicateCount = duplicates.size;
-  const branchName = selectedBranchId 
-    ? branchList.find(b => b.id === selectedBranchId)?.name || 'Branch'
+  const summary = inventoryState.summary;
+  const branchName = selectedBranchId
+    ? branchList.find((branch) => branch.id === selectedBranchId)?.name || 'Branch'
     : 'All Branches';
+  const totalPages = Math.max(1, Math.ceil(inventoryState.totalCount / inventoryState.pageSize));
+  const fromItem = inventoryState.totalCount === 0 ? 0 : ((inventoryState.page - 1) * inventoryState.pageSize) + 1;
+  const toItem = Math.min(inventoryState.page * inventoryState.pageSize, inventoryState.totalCount);
 
   container.innerHTML = `
     <div class="animate-in">
       <div class="page-header">
         <div>
           <div class="page-title">Inventory</div>
-          <div class="page-subtitle">Manage drugs and products in your pharmacy</div>
+          <div class="page-subtitle">Manage products, stock, expiry and movement history without loading the entire catalogue at once.</div>
         </div>
-        <div class="flex gap-2" style="display:flex;gap:0.5rem">
+        <div class="flex gap-2 inventory-header-actions">
           <button class="btn btn-ghost" id="stock-log-btn">Stock History</button>
           <button class="btn btn-ghost" id="download-template-btn">⬇️ Download Template</button>
           <button class="btn btn-ghost" id="import-csv-btn">📥 Import CSV/Excel</button>
@@ -85,88 +175,97 @@ function renderView(container, products, user, branchList) {
           <button class="btn btn-primary" id="add-product-btn">+ Add Product</button>
         </div>
       </div>
+
       <input type="file" id="csv-import-input" accept=".csv,.xlsx,.xls" style="display:none;" />
       <div id="import-progress" style="display:none;margin-bottom:1rem;padding:1rem;background:var(--info-light);border-radius:var(--radius);">
         <div class="text-sm font-semibold">Importing products...</div>
         <div id="import-status" class="text-xs text-muted" style="margin-top:0.5rem;"></div>
       </div>
 
-      <!-- Branch Selector -->
-      <div class="card" style="margin-bottom: 1rem;">
-        <div class="form-group" style="margin: 0;">
-          <label class="form-label">Select Branch</label>
-          <select class="form-select" id="branch-selector">
-            ${branchList.map(b => `<option value="${b.id}" ${selectedBranchId === b.id ? 'selected' : ''}>${b.name}</option>`).join('')}
+      <div class="card inventory-branch-card">
+        <div class="inventory-branch-row">
+          <div class="form-group" style="margin:0;min-width:240px;">
+            <label class="form-label">Select Branch</label>
+            <select class="form-select" id="branch-selector">
+              ${branchList.map((branch) => `<option value="${branch.id}" ${selectedBranchId === branch.id ? 'selected' : ''}>${escapeHtml(branch.name)}</option>`).join('')}
+            </select>
+          </div>
+          <div class="inventory-branch-context">
+            <span class="text-xs text-muted">Currently viewing</span>
+            <strong>${escapeHtml(branchName)}</strong>
+          </div>
+        </div>
+      </div>
+
+      <div class="stats-grid inventory-stats-grid">
+        <button type="button" class="stat-card stat-card-clickable inventory-summary-filter" data-filter="">
+          <div class="stat-card-header"><span class="stat-card-label">Total Products</span><div class="stat-card-icon teal">&#128230;</div></div>
+          <div class="stat-card-value">${summary.totalProducts}</div>
+          <div class="stat-card-subtitle">Active in this branch</div>
+        </button>
+        <button type="button" class="stat-card stat-card-clickable inventory-summary-filter" data-filter="low-stock">
+          <div class="stat-card-header"><span class="stat-card-label">Low Stock</span><div class="stat-card-icon amber">&#9888;</div></div>
+          <div class="stat-card-value">${summary.lowStockCount}</div>
+          <div class="stat-card-subtitle">Needs restocking</div>
+        </button>
+        <button type="button" class="stat-card stat-card-clickable inventory-summary-filter" data-filter="expired">
+          <div class="stat-card-header"><span class="stat-card-label">Expired</span><div class="stat-card-icon red">&#128683;</div></div>
+          <div class="stat-card-value">${summary.expiredCount}</div>
+          <div class="stat-card-subtitle">Remove from sale</div>
+        </button>
+        <button type="button" class="stat-card stat-card-clickable inventory-summary-filter" data-filter="expiring-30">
+          <div class="stat-card-header"><span class="stat-card-label">Expiring ≤ 30 Days</span><div class="stat-card-icon amber">⌛</div></div>
+          <div class="stat-card-value">${summary.expiringSoonCount}</div>
+          <div class="stat-card-subtitle">Review soon</div>
+        </button>
+      </div>
+
+      <div class="card inventory-products-card">
+        <div class="card-header inventory-card-header">
+          <div>
+            <span class="card-title">Products in ${escapeHtml(branchName)}</span>
+            <div class="text-xs text-muted inventory-result-summary">Showing ${fromItem}-${toItem} of ${inventoryState.totalCount.toLocaleString()} matching product${inventoryState.totalCount === 1 ? '' : 's'}</div>
+          </div>
+        </div>
+
+        <div class="inventory-filter-panel">
+          <div class="search-box inventory-product-search">
+            <span style="color:var(--gray-400)">&#128269;</span>
+            <input type="text" id="product-search" value="${escapeHtml(inventoryState.search)}" placeholder="Search product name, category or description..." />
+          </div>
+          <select class="form-select" id="cat-filter">
+            <option value="">All Categories</option>
+            ${inventoryState.categories.map((category) => `<option value="${escapeHtml(category)}" ${inventoryState.category === category ? 'selected' : ''}>${escapeHtml(category)}</option>`).join('')}
           </select>
-          <div class="text-xs text-muted" style="margin-top: 0.5rem;">Currently viewing: <strong>${branchName}</strong></div>
+          <select class="form-select" id="filter-type">
+            <option value="" ${!inventoryState.filterType ? 'selected' : ''}>All Stock / Expiry</option>
+            <option value="low-stock" ${inventoryState.filterType === 'low-stock' ? 'selected' : ''}>Low Stock</option>
+            <option value="expired" ${inventoryState.filterType === 'expired' ? 'selected' : ''}>Expired</option>
+            <option value="expiring-30" ${inventoryState.filterType === 'expiring-30' ? 'selected' : ''}>Expiring in 30 Days</option>
+            <option value="expiring-60" ${inventoryState.filterType === 'expiring-60' ? 'selected' : ''}>Expiring in 60 Days</option>
+            <option value="expiring-90" ${inventoryState.filterType === 'expiring-90' ? 'selected' : ''}>Expiring in 90 Days</option>
+            <option value="no-expiry" ${inventoryState.filterType === 'no-expiry' ? 'selected' : ''}>No Expiry Date</option>
+            <option value="duplicates" ${inventoryState.filterType === 'duplicates' ? 'selected' : ''}>Duplicate Names</option>
+          </select>
+          <select class="form-select" id="price-sort">
+            <option value="" ${!inventoryState.sortType ? 'selected' : ''}>Sort: Product Name</option>
+            <option value="selling-asc" ${inventoryState.sortType === 'selling-asc' ? 'selected' : ''}>Selling Price: Low → High</option>
+            <option value="selling-desc" ${inventoryState.sortType === 'selling-desc' ? 'selected' : ''}>Selling Price: High → Low</option>
+            <option value="cost-asc" ${inventoryState.sortType === 'cost-asc' ? 'selected' : ''}>Cost Price: Low → High</option>
+            <option value="cost-desc" ${inventoryState.sortType === 'cost-desc' ? 'selected' : ''}>Cost Price: High → Low</option>
+            <option value="margin-asc" ${inventoryState.sortType === 'margin-asc' ? 'selected' : ''}>Profit Margin: Low → High</option>
+            <option value="margin-desc" ${inventoryState.sortType === 'margin-desc' ? 'selected' : ''}>Profit Margin: High → Low</option>
+            <option value="stock-asc" ${inventoryState.sortType === 'stock-asc' ? 'selected' : ''}>Stock: Low → High</option>
+            <option value="stock-desc" ${inventoryState.sortType === 'stock-desc' ? 'selected' : ''}>Stock: High → Low</option>
+            <option value="expiry-asc" ${inventoryState.sortType === 'expiry-asc' ? 'selected' : ''}>Expiry: Soonest First</option>
+          </select>
+          <select class="form-select inventory-page-size" id="inventory-page-size" title="Products per page">
+            ${[25, 30, 50].map((size) => `<option value="${size}" ${inventoryState.pageSize === size ? 'selected' : ''}>${size} / page</option>`).join('')}
+          </select>
+          <button type="button" class="btn btn-ghost" id="clear-inventory-filters">Clear</button>
         </div>
-      </div>
 
-      <div class="stats-grid" style="grid-template-columns:repeat(auto-fill,minmax(160px,1fr))">
-        <div class="stat-card">
-          <div class="stat-card-header">
-            <span class="stat-card-label">Total Products</span>
-            <div class="stat-card-icon teal">&#128230;</div>
-          </div>
-          <div class="stat-card-value">${products.length}</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-card-header">
-            <span class="stat-card-label">Low Stock</span>
-            <div class="stat-card-icon amber">&#9888;</div>
-          </div>
-          <div class="stat-card-value">${lowStockCount}</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-card-header">
-            <span class="stat-card-label">Expired</span>
-            <div class="stat-card-icon red">&#128683;</div>
-          </div>
-          <div class="stat-card-value">${expiredCount}</div>
-        </div>
-        ${duplicateCount > 0 ? `
-        <div class="stat-card" style="border:2px solid var(--warning);background:var(--warning-light)">
-          <div class="stat-card-header">
-            <span class="stat-card-label">Duplicates</span>
-            <div class="stat-card-icon" style="background:var(--warning);color:white">⚠️</div>
-          </div>
-          <div class="stat-card-value" style="color:var(--warning)">${duplicateCount}</div>
-          <div style="font-size:0.75rem;color:var(--warning);margin-top:0.25rem"><button class="btn btn-ghost btn-sm" id="show-duplicates-btn" style="padding:0;text-decoration:underline">Show</button></div>
-        </div>
-        ` : ''}
-      </div>
-
-      <div class="card">
-        <div class="card-header">
-          <span class="card-title">Products in ${branchName}</span>
-          <div class="flex gap-2" style="flex-wrap:wrap;gap:0.5rem">
-            <select class="form-select" id="filter-type" style="width:auto;padding:0.4rem 0.75rem;font-size:0.8rem">
-              <option value="">All Products</option>
-              <option value="low-stock" ${currentFilterType === 'low-stock' ? 'selected' : ''}>Low Stock</option>
-              <option value="expired">Expired</option>
-              <option value="expiring">Expiring Soon</option>
-              <option value="duplicates">Duplicates</option>
-            </select>
-            <select class="form-select" id="price-sort" style="width:auto;padding:0.4rem 0.75rem;font-size:0.8rem">
-              <option value="">Sort by...</option>
-              <option value="selling-asc">Selling Price (Low to High)</option>
-              <option value="selling-desc">Selling Price (High to Low)</option>
-              <option value="cost-asc">Cost Price (Low to High)</option>
-              <option value="cost-desc">Cost Price (High to Low)</option>
-              <option value="margin-asc">Profit Margin (Low to High)</option>
-              <option value="margin-desc">Profit Margin (High to Low)</option>
-            </select>
-            <select class="form-select" id="cat-filter" style="width:auto;padding:0.4rem 0.75rem;font-size:0.8rem">
-              <option value="">All Categories</option>
-              ${[...new Set(allProducts.map(p => p.category))].map(c => `<option value="${c}">${c}</option>`).join('')}
-            </select>
-            <div class="search-box" style="min-width:200px">
-              <span style="color:var(--gray-400)">&#128269;</span>
-              <input type="text" id="product-search" placeholder="Search products..." />
-            </div>
-          </div>
-        </div>
-        <div id="bulk-actions-bar" style="display:none;padding:1rem;background:var(--blue-light);border-bottom:1px solid var(--border);display:flex;gap:1rem;align-items:center">
+        <div id="bulk-actions-bar" style="display:none;padding:1rem;background:var(--blue-light);border-bottom:1px solid var(--border);gap:1rem;align-items:center;flex-wrap:wrap">
           <span id="bulk-count" class="font-semibold"></span>
           <button class="btn btn-ghost btn-sm" id="bulk-edit-btn">✏️ Bulk Edit</button>
           <button class="btn btn-ghost btn-sm" id="bulk-deactivate-btn" style="color:var(--amber)">🔒 Deactivate</button>
@@ -174,7 +273,8 @@ function renderView(container, products, user, branchList) {
           <button class="btn btn-ghost btn-sm" id="bulk-delete-btn" style="color:var(--danger)">🗑️ Delete</button>
           <button class="btn btn-ghost btn-sm" id="bulk-cancel-btn">Cancel</button>
         </div>
-        <div class="table-container">
+
+        <div class="table-container inventory-table-container">
           <table>
             <thead>
               <tr>
@@ -184,86 +284,58 @@ function renderView(container, products, user, branchList) {
                 <th>Category</th>
                 <th>Cost Price</th>
                 <th>Selling Price</th>
+                <th>Margin</th>
                 <th>Stock</th>
                 <th>Expiry</th>
                 <th>Status</th>
                 <th>Actions</th>
               </tr>
             </thead>
-            <tbody id="inventory-tbody">
-              ${renderRows(products, branchList)}
-            </tbody>
+            <tbody id="inventory-tbody">${renderRows(products, branchList)}</tbody>
           </table>
+        </div>
+
+        <div class="inventory-pagination-wrap">
+          <div class="inventory-pagination-info">Page ${inventoryState.page} of ${totalPages} · ${inventoryState.pageSize} products per page</div>
+          ${renderPagination(totalPages)}
         </div>
       </div>
     </div>
   `;
 
-  const reload = () => renderInventory(container, user);
+  const refreshPage = async (options = {}) => refreshInventory(containerRef, user, branchList, options);
+  const updateView = async () => refreshPage({ refreshMeta: true });
 
-  // Smart update callback that preserves branch selection
-  const updateView = async () => {
-    try {
-      allProducts = await getProducts(user.profile.pharmacy_id, selectedBranchId);
-      renderView(containerRef, allProducts, user, branchList);
-    } catch (err) {
-      showToast(`Failed to update view: ${err.message}`, 'error');
-    }
-  };
-
-  // Branch selector change handler
-  document.getElementById('branch-selector').addEventListener('change', async (e) => {
-    selectedBranchId = e.target.value;
-    try {
-      allProducts = await getProducts(user.profile.pharmacy_id, selectedBranchId);
-      renderView(containerRef, allProducts, user, branchList);
-    } catch (err) {
-      showToast(`Failed to load products: ${err.message}`, 'error');
-    }
+  document.getElementById('branch-selector')?.addEventListener('change', async (event) => {
+    selectedBranchId = event.target.value || null;
+    inventoryState.page = 1;
+    inventoryState.category = '';
+    await refreshPage({ refreshMeta: true });
   });
 
-  document.getElementById('add-product-btn').addEventListener('click', () => showProductModal(null, user, updateView, branchList));
-  document.getElementById('add-multiple-btn').addEventListener('click', () => showAddMultipleModal(user, updateView, branchList));
-  document.getElementById('stock-log-btn').addEventListener('click', () => showStockLogs(user));
-  document.getElementById('download-template-btn').addEventListener('click', () => downloadInventoryTemplate());
-  
-  document.getElementById('import-csv-btn').addEventListener('click', () => {
-    document.getElementById('csv-import-input').click();
-  });
-  
-  document.getElementById('csv-import-input').addEventListener('change', async (e) => {
-    const file = e.target.files[0];
+  document.getElementById('add-product-btn')?.addEventListener('click', () => showProductModal(null, user, updateView, branchList));
+  document.getElementById('add-multiple-btn')?.addEventListener('click', () => showAddMultipleModal(user, updateView, branchList));
+  document.getElementById('stock-log-btn')?.addEventListener('click', () => showStockLogs(user));
+  document.getElementById('download-template-btn')?.addEventListener('click', () => downloadInventoryTemplate());
+  document.getElementById('import-csv-btn')?.addEventListener('click', () => document.getElementById('csv-import-input')?.click());
+
+  document.getElementById('csv-import-input')?.addEventListener('change', async (event) => {
+    const file = event.target.files?.[0];
     if (!file) return;
-    
-    // Show progress indicator
     const progressDiv = document.getElementById('import-progress');
     if (progressDiv) progressDiv.style.display = 'block';
-    
-    // Smart update callback that preserves branch selection
-    const updateView = async () => {
-      try {
-        allProducts = await getProducts(user.profile.pharmacy_id, selectedBranchId);
-        renderView(containerRef, allProducts, user, branchList);
-      } catch (err) {
-        showToast(`Failed to update view: ${err.message}`, 'error');
-      }
-    };
-    
     try {
-      // Detect file type by extension
       const fileName = file.name.toLowerCase();
       if (fileName.endsWith('.xlsx') || fileName.endsWith('.xls')) {
-        // Handle Excel files
         const reader = new FileReader();
-        reader.onload = async (event) => {
-          await importProductsFromExcel(event.target.result, file.name, user, updateView, progressDiv);
+        reader.onload = async (readerEvent) => {
+          await importProductsFromExcel(readerEvent.target.result, file.name, user, updateView, progressDiv);
         };
         reader.readAsArrayBuffer(file);
       } else if (fileName.endsWith('.csv')) {
-        // Handle CSV files
         const reader = new FileReader();
-        reader.onload = async (event) => {
-          await importProductsFromCSV(event.target.result, user, updateView, progressDiv);
+        reader.onload = async (readerEvent) => {
+          await importProductsFromCSV(readerEvent.target.result, user, updateView, progressDiv);
         };
         reader.readAsText(file);
       } else {
@@ -271,158 +343,160 @@ function renderView(container, products, user, branchList) {
         if (progressDiv) progressDiv.style.display = 'none';
       }
     } catch (err) {
-      showToast('Failed to read file: ' + err.message, 'error');
+      showToast(`Failed to read file: ${err.message}`, 'error');
       if (progressDiv) progressDiv.style.display = 'none';
     }
   });
 
-  const search = debounce((q) => {
-    applyAllFilters(allProducts, branchList, user, reload);
-  });
-  
-  const applyAllFilters = (productsToFilter, branchList, user, reload) => {
-    const searchTerm = document.getElementById('product-search')?.value.toLowerCase() || '';
-    const category = document.getElementById('cat-filter')?.value || '';
-    const filterType = document.getElementById('filter-type')?.value || '';
-    const sortType = document.getElementById('price-sort')?.value || '';
-    
-    let filtered = productsToFilter.filter(p => {
-      // Text search
-      const matchesSearch = !searchTerm || p.name.toLowerCase().includes(searchTerm) || p.category.toLowerCase().includes(searchTerm);
-      
-      // Category filter
-      const matchesCategory = !category || p.category === category;
-      
-      // Type filter
-      let matchesType = true;
-      if (filterType === 'low-stock') {
-        matchesType = p.stock_boxes <= p.low_stock_threshold;
-      } else if (filterType === 'expired') {
-        matchesType = isExpired(p.expiry_date);
-      } else if (filterType === 'expiring') {
-        matchesType = isExpiringSoon(p.expiry_date) && !isExpired(p.expiry_date);
-      } else if (filterType === 'duplicates') {
-        const nameKey = p.name.toLowerCase().trim();
-        const dupCount = productsToFilter.filter(pp => pp.name.toLowerCase().trim() === nameKey).length;
-        matchesType = dupCount > 1;
-      }
-      
-      return matchesSearch && matchesCategory && matchesType;
-    });
-    
-    // Apply sorting
-    if (sortType) {
-      filtered.sort((a, b) => {
-        const costA = parseFloat(a.cost_price || 0);
-        const costB = parseFloat(b.cost_price || 0);
-        const sellA = parseFloat(a.price || 0);
-        const sellB = parseFloat(b.price || 0);
-        const marginA = sellA - costA;
-        const marginB = sellB - costB;
-        
-        if (sortType === 'selling-asc') return sellA - sellB;
-        if (sortType === 'selling-desc') return sellB - sellA;
-        if (sortType === 'cost-asc') return costA - costB;
-        if (sortType === 'cost-desc') return costB - costA;
-        if (sortType === 'margin-asc') return marginA - marginB;
-        if (sortType === 'margin-desc') return marginB - marginA;
-        return 0;
-      });
-    }
-    
-    document.getElementById('inventory-tbody').innerHTML = renderRows(filtered, branchList);
-    bindTableActions(filtered, user, reload, branchList);
-  };
+  const searchProducts = debounce(async (value) => {
+    inventoryState.search = String(value || '').trim();
+    currentSearchTerm = inventoryState.search;
+    inventoryState.page = 1;
+    await refreshPage({ focusSearch: true });
+  }, 350);
 
-  document.getElementById('product-search').addEventListener('input', (e) => {
-    applyAllFilters(allProducts, branchList, user, reload);
+  document.getElementById('product-search')?.addEventListener('input', (event) => searchProducts(event.target.value));
+  document.getElementById('cat-filter')?.addEventListener('change', async (event) => {
+    inventoryState.category = event.target.value;
+    inventoryState.page = 1;
+    await refreshPage();
   });
-  
-  if (document.getElementById('filter-type')) {
-    document.getElementById('filter-type').addEventListener('change', () => {
-      applyAllFilters(allProducts, branchList, user, reload);
-    });
-  }
-  
-  if (document.getElementById('price-sort')) {
-    document.getElementById('price-sort').addEventListener('change', () => {
-      applyAllFilters(allProducts, branchList, user, reload);
-    });
-  }
-  
-  document.getElementById('cat-filter').addEventListener('change', () => {
-    applyAllFilters(allProducts, branchList, user, reload);
+  document.getElementById('filter-type')?.addEventListener('change', async (event) => {
+    inventoryState.filterType = normalizeFilterType(event.target.value);
+    currentFilterType = inventoryState.filterType;
+    inventoryState.page = 1;
+    await refreshPage();
+  });
+  document.getElementById('price-sort')?.addEventListener('change', async (event) => {
+    inventoryState.sortType = event.target.value;
+    inventoryState.page = 1;
+    await refreshPage();
+  });
+  document.getElementById('inventory-page-size')?.addEventListener('change', async (event) => {
+    inventoryState.pageSize = Number(event.target.value) || 30;
+    inventoryState.page = 1;
+    await refreshPage();
+  });
+  document.getElementById('clear-inventory-filters')?.addEventListener('click', async () => {
+    inventoryState.search = '';
+    inventoryState.category = '';
+    inventoryState.filterType = '';
+    inventoryState.sortType = '';
+    inventoryState.page = 1;
+    currentSearchTerm = '';
+    currentFilterType = '';
+    await refreshPage();
   });
 
-  // Bulk select all
-  document.getElementById('select-all-products').addEventListener('change', (e) => {
-    document.querySelectorAll('.product-checkbox').forEach(cb => {
-      cb.checked = e.target.checked;
+  document.querySelectorAll('.inventory-summary-filter').forEach((card) => {
+    card.addEventListener('click', async () => {
+      inventoryState.filterType = card.dataset.filter || '';
+      currentFilterType = inventoryState.filterType;
+      inventoryState.page = 1;
+      await refreshPage();
     });
+  });
+
+  document.querySelectorAll('[data-inventory-page]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const nextPage = Number(button.dataset.inventoryPage);
+      if (!Number.isFinite(nextPage) || nextPage < 1 || nextPage > totalPages || nextPage === inventoryState.page) return;
+      inventoryState.page = nextPage;
+      await refreshPage();
+      document.querySelector('.inventory-products-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  });
+
+  document.getElementById('select-all-products')?.addEventListener('change', (event) => {
+    document.querySelectorAll('.product-checkbox').forEach((checkbox) => { checkbox.checked = event.target.checked; });
     updateBulkActionsBar();
   });
-  
-  // Show duplicates handler
-  const showDuplicatesBtn = document.getElementById('show-duplicates-btn');
-  if (showDuplicatesBtn) {
-    showDuplicatesBtn.addEventListener('click', () => {
-      document.getElementById('filter-type').value = 'duplicates';
-      applyAllFilters(allProducts, branchList, user, reload);
-    });
-  }
-  
-  // Apply initial filter/search if provided (e.g., dashboard/global search).
-  const initialSearchInput = document.getElementById('product-search');
-  if (initialSearchInput && currentSearchTerm) initialSearchInput.value = currentSearchTerm;
-  if (currentFilterType || currentSearchTerm) {
-    applyAllFilters(allProducts, branchList, user, reload);
-  }
 
-  bindTableActions(products, user, reload, branchList);
+  bindTableActions(products, user, updateView, branchList);
+}
+
+function renderPagination(totalPages) {
+  if (totalPages <= 1) return '';
+  const current = inventoryState.page;
+  const pages = new Set([1, totalPages, current - 2, current - 1, current, current + 1, current + 2]);
+  const validPages = [...pages].filter((page) => page >= 1 && page <= totalPages).sort((a, b) => a - b);
+  const parts = [];
+  let previous = 0;
+
+  validPages.forEach((page) => {
+    if (previous && page - previous > 1) parts.push('<span class="inventory-page-ellipsis">…</span>');
+    parts.push(`<button type="button" class="btn btn-ghost btn-sm inventory-page-btn ${page === current ? 'active' : ''}" data-inventory-page="${page}" ${page === current ? 'disabled' : ''}>${page}</button>`);
+    previous = page;
+  });
+
+  return `
+    <div class="inventory-pagination">
+      <button type="button" class="btn btn-ghost btn-sm" data-inventory-page="${current - 1}" ${current <= 1 ? 'disabled' : ''}>← Previous</button>
+      <div class="inventory-page-numbers">${parts.join('')}</div>
+      <button type="button" class="btn btn-ghost btn-sm" data-inventory-page="${current + 1}" ${current >= totalPages ? 'disabled' : ''}>Next →</button>
+    </div>
+  `;
 }
 
 function renderRows(products, branchList) {
-  if (!products.length) return `<tr><td colspan="9"><div class="empty-state"><div class="empty-state-icon">&#128230;</div><div class="empty-state-title">No products found</div><div class="empty-state-desc">Add your first product to this branch to get started</div></div></td></tr>`;
+  if (!products.length) {
+    return `<tr><td colspan="11"><div class="empty-state"><div class="empty-state-icon">&#128230;</div><div class="empty-state-title">No products found</div><div class="empty-state-desc">Try a different search or filter, or add a product to this branch.</div></div></td></tr>`;
+  }
 
-  return products.map(p => {
-    const isLow = p.stock_boxes <= p.low_stock_threshold;
-    const expired = isExpired(p.expiry_date);
-    const expiringSoon = isExpiringSoon(p.expiry_date);
-    const totalUnits = (p.stock_boxes * p.units_per_box) + p.stock_units;
-    const branchName = branchList.find(b => b.id === p.branch_id)?.name || 'Unknown Branch';
+  return products.map((product) => {
+    const stockBoxes = Number(product.stock_boxes || 0);
+    const stockUnits = Number(product.stock_units || 0);
+    const unitsPerBox = Math.max(1, Number(product.units_per_box || 1));
+    const isLow = stockBoxes <= Number(product.low_stock_threshold || 0);
+    const expired = isExpired(product.expiry_date);
+    const expiringSoon = isExpiringSoon(product.expiry_date);
+    const totalUnits = (stockBoxes * unitsPerBox) + stockUnits;
+    const branchName = branchList.find((branch) => branch.id === product.branch_id)?.name || 'Unknown Branch';
+    const storageUnit = String(product.stock_unit_type || 'box').toLowerCase();
+    const sellUnit = String(product.unit_type || 'unit').toLowerCase();
+    const sellingPrice = Number(product.price || 0);
+    const costPrice = Number(product.cost_price || 0);
+    const marginAmount = sellingPrice - costPrice;
+    const marginPercent = sellingPrice > 0 ? (marginAmount / sellingPrice) * 100 : 0;
 
     let expiryHtml = '—';
-    if (p.expiry_date) {
-      expiryHtml = `<span class="${expired ? 'expiry-expired' : expiringSoon ? 'expiry-soon' : ''}">${formatDate(p.expiry_date)}</span>`;
+    if (product.expiry_date) {
+      expiryHtml = `<span class="${expired ? 'expiry-expired' : expiringSoon ? 'expiry-soon' : ''}">${formatDate(product.expiry_date)}</span>`;
     }
 
     return `
       <tr>
-        <td style="width:40px"><input type="checkbox" class="product-checkbox" data-id="${p.id}" /></td>
+        <td style="width:40px"><input type="checkbox" class="product-checkbox" data-id="${product.id}" /></td>
         <td>
-          <div class="font-semibold">${p.name}</div>
-          <div class="text-xs text-muted">${p.description || ''}</div>
-          <div style="margin-top:0.25rem;"><span class="badge" style="background:var(--primary-light);color:var(--primary)">${(p.unit_type || 'box').charAt(0).toUpperCase() + (p.unit_type || 'box').slice(1)}</span></div>
+          <div class="font-semibold inventory-product-name">${escapeHtml(product.name)}</div>
+          <div class="text-xs text-muted">${escapeHtml(product.description || '')}</div>
+          <div style="margin-top:0.25rem"><span class="badge" style="background:var(--primary-light);color:var(--primary)">${escapeHtml(sellUnit.charAt(0).toUpperCase() + sellUnit.slice(1))}</span></div>
         </td>
-        <td><span class="badge badge-blue">${branchName}</span></td>
-        <td><span class="badge badge-gray">${p.category}</span></td>
-        <td class="font-semibold">${p.cost_price ? formatCurrency(p.cost_price) : '-'}</td>
-        <td class="font-semibold">${formatCurrency(p.price)}</td>
+        <td><span class="badge badge-blue">${escapeHtml(branchName)}</span></td>
+        <td><span class="badge badge-gray">${escapeHtml(product.category || 'General')}</span></td>
+        <td class="font-semibold">${costPrice ? formatCurrency(costPrice) : '-'}</td>
+        <td class="font-semibold">${formatCurrency(sellingPrice)}</td>
         <td>
-          <div class="font-semibold ${isLow ? 'expiry-soon' : ''}">${p.stock_boxes} ${(p.stock_unit_type || 'box').toLowerCase()}${p.stock_boxes !== 1 ? 's' : ''}</div>
-          <div class="text-xs text-muted">${totalUnits} units total</div>
+          <div class="font-semibold ${marginAmount < 0 ? 'expiry-expired' : ''}">${formatCurrency(marginAmount)}</div>
+          <div class="text-xs text-muted">${marginPercent.toFixed(1)}% gross margin</div>
+        </td>
+        <td>
+          <div class="font-semibold ${isLow ? 'expiry-soon' : ''}">${stockBoxes.toLocaleString()} ${escapeHtml(storageUnit)}${stockBoxes === 1 ? '' : 's'}${stockUnits ? ` + ${stockUnits.toLocaleString()} loose ${escapeHtml(sellUnit)}${stockUnits === 1 ? '' : 's'}` : ''}</div>
+          <div class="text-xs text-muted">${totalUnits.toLocaleString()} calculated units · ${unitsPerBox.toLocaleString()} per box</div>
         </td>
         <td>${expiryHtml}</td>
         <td>
           ${expired ? '<span class="badge badge-danger">Expired</span>' :
             isLow ? '<span class="badge badge-warning">Low Stock</span>' :
+            expiringSoon ? '<span class="badge badge-warning">Expiring Soon</span>' :
             '<span class="badge badge-success">In Stock</span>'}
         </td>
         <td>
-          <div class="flex gap-2">
-            <button class="btn btn-ghost btn-sm edit-product-btn" data-id="${p.id}">Edit</button>
-            <button class="btn btn-ghost btn-sm restock-btn" data-id="${p.id}" data-name="${p.name}">Restock</button>
-            <button class="btn btn-ghost btn-sm delete-product-btn" data-id="${p.id}" style="color:var(--danger)">Delete</button>
+          <div class="inventory-row-actions">
+            <button class="btn btn-ghost btn-sm edit-product-btn" data-id="${product.id}">Edit</button>
+            <button class="btn btn-ghost btn-sm restock-btn" data-id="${product.id}" data-name="${escapeHtml(product.name)}">Restock</button>
+            <button class="btn btn-ghost btn-sm history-product-btn" data-id="${product.id}">History</button>
+            <button class="btn btn-ghost btn-sm delete-product-btn" data-id="${product.id}" style="color:var(--danger)">Delete</button>
           </div>
         </td>
       </tr>
@@ -430,82 +504,68 @@ function renderRows(products, branchList) {
   }).join('');
 }
 
-function bindTableActions(products, user, reload, branchList) {
-  const productMap = Object.fromEntries(products.map(p => [p.id, p]));
+function bindTableActions(products, user, updateView, branchList) {
+  const productMap = Object.fromEntries(products.map((product) => [product.id, product]));
 
-  // Smart update callback that preserves branch selection
-  const updateView = async () => {
-    try {
-      allProducts = await getProducts(user.profile.pharmacy_id, selectedBranchId);
-      renderView(containerRef, allProducts, user, branchList);
-    } catch (err) {
-      showToast(`Failed to update view: ${err.message}`, 'error');
-    }
-  };
+  document.querySelectorAll('.product-checkbox').forEach((checkbox) => checkbox.addEventListener('change', updateBulkActionsBar));
 
-  // Checkbox selection
-  document.querySelectorAll('.product-checkbox').forEach(cb => {
-    cb.addEventListener('change', updateBulkActionsBar);
-  });
-
-  // Bulk edit
-  document.getElementById('bulk-edit-btn').addEventListener('click', () => {
-    const selected = Array.from(document.querySelectorAll('.product-checkbox:checked')).map(cb => cb.dataset.id);
-    if (selected.length === 0) return;
+  document.getElementById('bulk-edit-btn')?.addEventListener('click', () => {
+    const selected = Array.from(document.querySelectorAll('.product-checkbox:checked')).map((checkbox) => checkbox.dataset.id);
+    if (!selected.length) return;
     showBulkEditModal(selected, productMap, user, updateView);
   });
 
-  // Bulk deactivate
-  document.getElementById('bulk-deactivate-btn').addEventListener('click', async () => {
-    const selected = Array.from(document.querySelectorAll('.product-checkbox:checked')).map(cb => cb.dataset.id);
-    if (selected.length === 0) return;
-    const confirmed = await showConfirm(`Deactivate ${selected.length} product(s)?`);
-    if (!confirmed) return;
+  document.getElementById('bulk-deactivate-btn')?.addEventListener('click', async () => {
+    const selected = Array.from(document.querySelectorAll('.product-checkbox:checked')).map((checkbox) => checkbox.dataset.id);
+    if (!selected.length) return;
+    if (!await showConfirm(`Deactivate ${selected.length} product(s)?`)) return;
     await bulkUpdateProducts(selected, { is_active: false }, updateView);
   });
 
-  // Bulk activate
-  document.getElementById('bulk-activate-btn').addEventListener('click', async () => {
-    const selected = Array.from(document.querySelectorAll('.product-checkbox:checked')).map(cb => cb.dataset.id);
-    if (selected.length === 0) return;
-    const confirmed = await showConfirm(`Activate ${selected.length} product(s)?`);
-    if (!confirmed) return;
+  document.getElementById('bulk-activate-btn')?.addEventListener('click', async () => {
+    const selected = Array.from(document.querySelectorAll('.product-checkbox:checked')).map((checkbox) => checkbox.dataset.id);
+    if (!selected.length) return;
+    if (!await showConfirm(`Activate ${selected.length} product(s)?`)) return;
     await bulkUpdateProducts(selected, { is_active: true }, updateView);
   });
 
-  // Bulk delete
-  document.getElementById('bulk-delete-btn').addEventListener('click', async () => {
-    const selected = Array.from(document.querySelectorAll('.product-checkbox:checked')).map(cb => cb.dataset.id);
-    if (selected.length === 0) return;
-    const confirmed = await showConfirm(`Delete ${selected.length} product(s)? This cannot be undone.`);
-    if (!confirmed) return;
+  document.getElementById('bulk-delete-btn')?.addEventListener('click', async () => {
+    const selected = Array.from(document.querySelectorAll('.product-checkbox:checked')).map((checkbox) => checkbox.dataset.id);
+    if (!selected.length) return;
+    if (!await showConfirm(`Delete ${selected.length} product(s)? This cannot be undone.`)) return;
     await bulkDeleteProducts(selected, updateView);
   });
 
-  // Cancel bulk selection
-  document.getElementById('bulk-cancel-btn').addEventListener('click', () => {
-    document.querySelectorAll('.product-checkbox').forEach(cb => cb.checked = false);
-    document.getElementById('select-all-products').checked = false;
+  document.getElementById('bulk-cancel-btn')?.addEventListener('click', () => {
+    document.querySelectorAll('.product-checkbox').forEach((checkbox) => { checkbox.checked = false; });
+    const selectAll = document.getElementById('select-all-products');
+    if (selectAll) selectAll.checked = false;
     updateBulkActionsBar();
   });
 
-  document.querySelectorAll('.edit-product-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const product = productMap[btn.dataset.id];
+  document.querySelectorAll('.edit-product-btn').forEach((button) => {
+    button.addEventListener('click', () => {
+      const product = productMap[button.dataset.id];
       if (product) showProductModal(product, user, updateView, branchList);
     });
   });
 
-  document.querySelectorAll('.restock-btn').forEach(btn => {
-    btn.addEventListener('click', () => showRestockModal(btn.dataset.id, btn.dataset.name, user, updateView));
+  document.querySelectorAll('.restock-btn').forEach((button) => {
+    button.addEventListener('click', () => showRestockModal(button.dataset.id, button.dataset.name, user, updateView));
   });
 
-  document.querySelectorAll('.delete-product-btn').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      const confirmed = await showConfirm('Delete this product? This action cannot be undone.');
-      if (!confirmed) return;
+  document.querySelectorAll('.history-product-btn').forEach((button) => {
+    button.addEventListener('click', () => {
+      const product = productMap[button.dataset.id];
+      if (product) showProductStockHistory(product, user);
+    });
+  });
+
+  document.querySelectorAll('.delete-product-btn').forEach((button) => {
+    button.addEventListener('click', async () => {
+      if (!await showConfirm('Delete this product? This action cannot be undone.')) return;
       try {
-        await deleteProduct(btn.dataset.id);
+        await deleteProduct(button.dataset.id);
         showToast('Product deleted');
         await updateView();
       } catch (err) {
@@ -513,6 +573,46 @@ function bindTableActions(products, user, reload, branchList) {
       }
     });
   });
+}
+
+async function showProductStockHistory(product, user) {
+  const { overlay } = createModal({
+    id: 'product-stock-history',
+    title: `Stock History · ${escapeHtml(product.name)}`,
+    size: 'modal-lg',
+    body: `<div class="inventory-history-loading"><div class="text-muted">Loading stock movements…</div></div>`
+  });
+
+  try {
+    const logs = await getProductStockLogs(user.profile.pharmacy_id, product.id, 100);
+    const body = overlay.querySelector('.modal-body');
+    if (!body) return;
+    body.innerHTML = `
+      <div class="inventory-history-summary">
+        <div><span class="text-xs text-muted">Current stock</span><strong>${Number(product.stock_boxes || 0).toLocaleString()} ${escapeHtml(product.stock_unit_type || 'box')}${Number(product.stock_boxes || 0) === 1 ? '' : 's'} + ${Number(product.stock_units || 0).toLocaleString()} loose</strong></div>
+        <div><span class="text-xs text-muted">Calculated units</span><strong>${((Number(product.stock_boxes || 0) * Math.max(1, Number(product.units_per_box || 1))) + Number(product.stock_units || 0)).toLocaleString()}</strong></div>
+        <div><span class="text-xs text-muted">Movements shown</span><strong>${logs.length}</strong></div>
+      </div>
+      <div class="table-container" style="max-height:520px;overflow:auto">
+        <table>
+          <thead><tr><th>Date</th><th>Movement</th><th>Change</th><th>Notes</th></tr></thead>
+          <tbody>
+            ${logs.length ? logs.map((log) => `
+              <tr>
+                <td>${formatDateTime(log.created_at)}</td>
+                <td><span class="badge ${Number(log.quantity_change || 0) < 0 ? 'badge-danger' : 'badge-success'}">${escapeHtml(log.change_type || 'adjustment')}</span></td>
+                <td class="font-semibold ${Number(log.quantity_change || 0) < 0 ? 'expiry-expired' : ''}">${Number(log.quantity_change || 0) > 0 ? '+' : ''}${Number(log.quantity_change || 0).toLocaleString()}</td>
+                <td class="text-sm text-muted">${escapeHtml(log.notes || '—')}</td>
+              </tr>
+            `).join('') : `<tr><td colspan="4"><div class="empty-state"><div class="empty-state-title">No stock movement recorded</div><div class="empty-state-desc">Future restocks, sales and adjustments will appear here.</div></div></td></tr>`}
+          </tbody>
+        </table>
+      </div>
+    `;
+  } catch (err) {
+    const body = overlay.querySelector('.modal-body');
+    if (body) body.innerHTML = `<div class="alert alert-danger">Failed to load stock history: ${escapeHtml(err.message)}</div>`;
+  }
 }
 
 function showProductModal(product, user, updateView, branchList) {

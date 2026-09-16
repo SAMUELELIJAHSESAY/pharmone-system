@@ -4732,3 +4732,226 @@ body {
     align-items: flex-start;
   }
 }
+
+/* ===================== ADMIN INVENTORY UPGRADE ===================== */
+.inventory-header-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.inventory-branch-card {
+  margin-bottom: 1rem;
+}
+
+.inventory-branch-row {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.inventory-branch-context {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 180px;
+  padding: 0.65rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--gray-50);
+}
+
+.inventory-stats-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.inventory-stats-grid .stat-card {
+  width: 100%;
+  min-width: 0;
+  text-align: left;
+  font: inherit;
+}
+
+.inventory-stats-grid .stat-card-value,
+.inventory-stats-grid .stat-card-label,
+.inventory-stats-grid .stat-card-subtitle {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.inventory-products-card {
+  overflow: hidden;
+}
+
+.inventory-card-header {
+  align-items: flex-start;
+}
+
+.inventory-result-summary {
+  margin-top: 0.25rem;
+}
+
+.inventory-filter-panel {
+  display: grid;
+  grid-template-columns: minmax(260px, 1.7fr) repeat(3, minmax(170px, 1fr)) auto auto;
+  gap: 0.65rem;
+  padding: 1rem;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  background: var(--gray-50);
+  align-items: center;
+}
+
+.inventory-filter-panel > * {
+  min-width: 0;
+  width: 100%;
+}
+
+.inventory-product-search {
+  min-width: 0;
+  width: 100%;
+}
+
+.inventory-product-search input {
+  min-width: 0;
+  width: 100%;
+}
+
+.inventory-page-size {
+  min-width: 110px;
+}
+
+.inventory-table-container table {
+  width: 100%;
+}
+
+.inventory-product-name {
+  max-width: 260px;
+  overflow-wrap: anywhere;
+}
+
+.inventory-row-actions {
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.inventory-pagination-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  padding: 0.85rem 1rem 1rem;
+  border-top: 1px solid var(--border);
+  background: var(--surface, #fff);
+}
+
+.inventory-pagination-info {
+  font-size: 0.8rem;
+  color: var(--gray-500);
+}
+
+.inventory-pagination,
+.inventory-page-numbers {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.inventory-page-btn.active {
+  background: var(--primary);
+  color: #fff;
+  border-color: var(--primary);
+}
+
+.inventory-page-ellipsis {
+  color: var(--gray-400);
+  padding: 0 0.2rem;
+}
+
+.inventory-history-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.inventory-history-summary > div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--gray-50);
+  min-width: 0;
+}
+
+.inventory-history-summary strong {
+  overflow-wrap: anywhere;
+}
+
+.inventory-history-loading {
+  min-height: 160px;
+  display: grid;
+  place-items: center;
+}
+
+@media (max-width: 1200px) {
+  .inventory-stats-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .inventory-filter-panel {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .inventory-product-search {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 768px) {
+  .inventory-header-actions {
+    width: 100%;
+    justify-content: stretch;
+  }
+
+  .inventory-header-actions .btn {
+    flex: 1 1 calc(50% - 0.5rem);
+  }
+
+  .inventory-stats-grid,
+  .inventory-filter-panel,
+  .inventory-history-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .inventory-product-search {
+    grid-column: auto;
+  }
+
+  .inventory-pagination-wrap,
+  .inventory-pagination {
+    align-items: stretch;
+  }
+
+  .inventory-pagination {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .inventory-page-numbers {
+    justify-content: center;
+  }
+
+  .inventory-pagination > .btn {
+    flex: 1 1 auto;
+  }
+}
