@@ -2,7 +2,7 @@
 import {
   getBranches,
   getPharmacySettings,
-  getPharmacyStaff,
+  getPharmacySalesmen,
   getSalesForReport,
   enrichSalesWithItems
 } from '../../database.js';
@@ -119,7 +119,7 @@ export async function renderAdminSalesReports(container, user) {
 
     const [branches, staff] = await Promise.all([
       getBranches(pharmacyId),
-      getPharmacyStaff(pharmacyId)
+      getPharmacySalesmen(pharmacyId)
     ]);
 
     renderReportsView(container, branches || [], staff || [], pharmacyId);
@@ -141,7 +141,7 @@ function renderReportsView(container, branches, staff, pharmacyId) {
     : (branches.find(branch => branch.id === id)?.name || 'Selected Branch');
 
   const employeeName = (id) => id === 'all'
-    ? 'All Employees'
+    ? 'All Salesmen'
     : (staff.find(person => person.id === id)?.full_name || 'Selected Employee');
 
   async function generateReport() {
@@ -434,9 +434,9 @@ function renderReportsView(container, branches, staff, pharmacyId) {
             </div>
 
             <div class="form-group" style="margin:0">
-              <label class="form-label">Employee</label>
+              <label class="form-label">Employee (Salesman)</label>
               <select class="form-control" id="employee-filter">
-                <option value="all">All Employees</option>
+                <option value="all">All Salesmen</option>
                 ${staff
                   .slice()
                   .sort((a, b) => String(a.full_name || '').localeCompare(String(b.full_name || '')))

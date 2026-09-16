@@ -1383,6 +1383,24 @@ export async function getPharmacyStaff(pharmacyId) {
   return data;
 }
 
+
+/**
+ * Return only active salesmen for employee sales reporting.
+ * Keeping the role filter in the database query prevents admin, inventory
+ * manager and other private roles from appearing in the Sales Reports picker.
+ */
+export async function getPharmacySalesmen(pharmacyId) {
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('id, full_name, email, role')
+    .eq('pharmacy_id', pharmacyId)
+    .eq('role', 'salesman')
+    .eq('is_active', true)
+    .order('full_name', { ascending: true });
+  if (error) throw error;
+  return data || [];
+}
+
 export async function removeStaffFromBranch(assignmentId) {
   const { data, error } = await supabase
     .from('staff_branch_assignments')
