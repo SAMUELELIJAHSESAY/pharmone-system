@@ -547,7 +547,7 @@ export function navigate(view, params = {}) {
     case 'reports': renderReports(content, activeUser); break;
     case 'sales-reports': renderAdminSalesReports(content, activeUser); break;
     case 'daily-reports': renderDailyReports(content, activeUser); break;
-    case 'staff': renderStaff(content, activeUser); break;
+    case 'staff': renderStaff(content, activeUser, currentParams.search || ''); break;
     case 'branches': renderBranches(content, activeUser); break;
     case 'branch-details': 
       if (params.branchId && params.pharmacyId) {

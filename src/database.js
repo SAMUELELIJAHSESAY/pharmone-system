@@ -175,6 +175,177 @@ export async function updateProfile(id, payload) {
   return data;
 }
 
+/**
+ * Load one page of pharmacy staff directly from Supabase. Branch filtering is
+ * resolved through staff_branch_assignments first, then only the visible profile
+ * rows are requested. This prevents the Staff page from downloading the entire
+ * team directory as the pharmacy grows.
+ */
+export async function getStaffPage(pharmacyId, {
+  page = 1,
+  pageSize = 30,
+  search = '',
+  role = '',
+  status = 'all',
+  branchId = null
+} = {}) {
+  const safePage = Math.max(1, Number(page) || 1);
+  const safePageSize = Math.min(100, Math.max(1, Number(pageSize) || 30));
+  const normalizedSearch = String(search || '').trim().replace(/[,%()]/g, ' ').replace(/\s+/g, ' ');
+
+  let branchStaffIds = null;
+  if (branchId) {
+    const { data: branchAssignments, error: assignmentError } = await supabase
+      .from('staff_branch_assignments')
+      .select('staff_id')
+      .eq('pharmacy_id', pharmacyId)
+      .eq('branch_id', branchId)
+      .eq('is_active', true);
+    if (assignmentError) throw assignmentError;
+    branchStaffIds = [...new Set((branchAssignments || []).map(row => row.staff_id).filter(Boolean))];
+    if (!branchStaffIds.length) {
+      return { data: [], total: 0, page: 1, pageSize: safePageSize, totalPages: 1 };
+    }
+  }
+
+  let query = supabase
+    .from('profiles')
+    .select('id,full_name,email,role,is_active,created_at,pharmacy_id', { count: 'exact' })
+    .eq('pharmacy_id', pharmacyId)
+    .neq('role', 'super_admin');
+
+  if (normalizedSearch) {
+    const pattern = `%${normalizedSearch}%`;
+    query = query.or(`full_name.ilike.${pattern},email.ilike.${pattern}`);
+  }
+  if (role) query = query.eq('role', role);
+  if (status === 'active') query = query.eq('is_active', true);
+  if (status === 'inactive') query = query.eq('is_active', false);
+  if (branchStaffIds) query = query.in('id', branchStaffIds);
+
+  const from = (safePage - 1) * safePageSize;
+  const to = from + safePageSize - 1;
+  const { data, error, count } = await query
+    .order('full_name', { ascending: true, nullsFirst: false })
+    .range(from, to);
+  if (error) throw error;
+
+  const profiles = data || [];
+  const staffIds = profiles.map(row => row.id);
+  let assignments = [];
+  if (staffIds.length) {
+    const { data: assignmentRows, error: assignmentError } = await supabase
+      .from('staff_branch_assignments')
+      .select('id,staff_id,branch_id,role_in_branch,assigned_date,is_active')
+      .eq('pharmacy_id', pharmacyId)
+      .eq('is_active', true)
+      .in('staff_id', staffIds);
+    if (assignmentError) throw assignmentError;
+    assignments = assignmentRows || [];
+  }
+
+  const branchIds = [...new Set(assignments.map(row => row.branch_id).filter(Boolean))];
+  let branchMap = new Map();
+  if (branchIds.length) {
+    const { data: branches, error: branchError } = await supabase
+      .from('branches')
+      .select('id,name')
+      .eq('pharmacy_id', pharmacyId)
+      .in('id', branchIds);
+    if (branchError) throw branchError;
+    branchMap = new Map((branches || []).map(branch => [branch.id, branch.name]));
+  }
+
+  const assignmentsByStaff = new Map();
+  assignments.forEach(assignment => {
+    const list = assignmentsByStaff.get(assignment.staff_id) || [];
+    list.push({
+      ...assignment,
+      branch_name: branchMap.get(assignment.branch_id) || 'Unknown branch'
+    });
+    assignmentsByStaff.set(assignment.staff_id, list);
+  });
+
+  const enriched = profiles.map(profile => ({
+    ...profile,
+    branch_assignments: assignmentsByStaff.get(profile.id) || []
+  }));
+  const total = Number(count || 0);
+  const totalPages = Math.max(1, Math.ceil(total / safePageSize));
+
+  return { data: enriched, total, page: Math.min(safePage, totalPages), pageSize: safePageSize, totalPages };
+}
+
+export async function getStaffSummary(pharmacyId) {
+  const base = () => supabase
+    .from('profiles')
+    .select('id', { count: 'exact', head: true })
+    .eq('pharmacy_id', pharmacyId)
+    .neq('role', 'super_admin');
+
+  const [totalResult, activeResult, salesmanResult, inventoryResult] = await Promise.all([
+    base(),
+    base().eq('is_active', true),
+    base().eq('role', 'salesman'),
+    base().eq('role', 'inventory_manager')
+  ]);
+
+  for (const result of [totalResult, activeResult, salesmanResult, inventoryResult]) {
+    if (result.error) throw result.error;
+  }
+
+  return {
+    total: Number(totalResult.count || 0),
+    active: Number(activeResult.count || 0),
+    salesmen: Number(salesmanResult.count || 0),
+    inventoryManagers: Number(inventoryResult.count || 0)
+  };
+}
+
+/**
+ * Build an employee sales summary for a selected period. Sales are read in
+ * database pages by getSalesForReport so the profile modal stays complete even
+ * when the employee has more than the default Supabase row limit.
+ */
+export async function getStaffSalesAnalytics(pharmacyId, staffId, {
+  branchId = null,
+  start = null,
+  end = null
+} = {}) {
+  const sales = await getSalesForReport(pharmacyId, { branchId, staffId, start, end });
+  const dailyMap = new Map();
+  const paymentBreakdown = {};
+  let totalRevenue = 0;
+
+  for (const sale of sales) {
+    const amount = Number(sale.total_amount || 0);
+    totalRevenue += amount;
+    const method = sale.payment_method || 'other';
+    paymentBreakdown[method] = (paymentBreakdown[method] || 0) + amount;
+
+    const date = new Date(sale.created_at).toISOString().slice(0, 10);
+    const row = dailyMap.get(date) || { date, transactions: 0, total: 0 };
+    row.transactions += 1;
+    row.total += amount;
+    dailyMap.set(date, row);
+  }
+
+  const daily = [...dailyMap.values()].sort((a, b) => b.date.localeCompare(a.date));
+  const bestDay = daily.reduce((best, row) => (!best || row.total > best.total ? row : best), null);
+  const lastSale = sales.length ? sales[sales.length - 1].created_at : null;
+
+  return {
+    totalRevenue,
+    transactions: sales.length,
+    averageSale: sales.length ? totalRevenue / sales.length : 0,
+    activeDays: daily.length,
+    bestDay,
+    lastSale,
+    paymentBreakdown,
+    daily
+  };
+}
+
 
 // ===================== GLOBAL ADMIN SEARCH =====================
 /**

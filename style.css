@@ -5560,3 +5560,463 @@ body {
     justify-content: center;
   }
 }
+
+/* ========================================================================== */
+/* Admin Staff Management Upgrade                                             */
+/* ========================================================================== */
+
+.admin-staff-page,
+.admin-staff-page * {
+  min-width: 0;
+}
+
+.staff-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.staff-summary-card {
+  appearance: none;
+  border: 1px solid var(--gray-200);
+  border-radius: 14px;
+  background: #fff;
+  padding: 1rem 1.1rem;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color .18s ease, box-shadow .18s ease, transform .18s ease;
+  color: var(--gray-900);
+}
+
+.staff-summary-card:hover,
+.staff-summary-card:focus-visible {
+  border-color: var(--primary);
+  box-shadow: 0 8px 24px rgba(37, 99, 235, .09);
+  transform: translateY(-1px);
+  outline: none;
+}
+
+.staff-summary-card span,
+.staff-summary-card small,
+.staff-summary-card strong {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.staff-summary-card span {
+  color: var(--gray-500);
+  font-size: .78rem;
+  font-weight: 600;
+}
+
+.staff-summary-card strong {
+  margin-top: .35rem;
+  font-size: clamp(1.35rem, 2vw, 1.8rem);
+  line-height: 1.1;
+}
+
+.staff-summary-card small {
+  margin-top: .35rem;
+  color: var(--gray-400);
+}
+
+.staff-directory-card[aria-busy="true"] .staff-table-container,
+.staff-directory-card[aria-busy="true"] .staff-pagination-wrap {
+  opacity: .62;
+}
+
+.staff-directory-header {
+  gap: 1rem;
+}
+
+.staff-filter-panel {
+  display: grid;
+  grid-template-columns: minmax(260px, 1.4fr) repeat(3, minmax(145px, .65fr)) 120px auto;
+  gap: .75rem;
+  align-items: center;
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid var(--gray-200);
+}
+
+.staff-search-box,
+.staff-search-box input,
+.staff-page-size {
+  width: 100%;
+}
+
+.staff-name-cell {
+  display: flex;
+  align-items: center;
+  gap: .65rem;
+}
+
+.staff-avatar {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  font-size: .78rem;
+}
+
+.staff-name-text,
+.staff-email-cell {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.staff-branch-badges,
+.staff-row-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: .4rem;
+}
+
+.staff-branch-chip {
+  display: inline-flex;
+  align-items: center;
+  max-width: 190px;
+  padding: .3rem .55rem;
+  border-radius: 999px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-size: .72rem;
+  font-weight: 700;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.staff-branch-more {
+  color: var(--gray-500);
+  font-size: .72rem;
+  font-weight: 700;
+}
+
+.staff-row-actions {
+  min-width: 220px;
+}
+
+.staff-pagination-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  padding: .95rem 1.25rem;
+  border-top: 1px solid var(--gray-200);
+}
+
+.staff-pagination-info {
+  color: var(--gray-500);
+  font-size: .8rem;
+}
+
+.staff-pagination,
+.staff-page-numbers {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: .35rem;
+}
+
+.staff-page-btn.active {
+  background: var(--primary);
+  color: #fff;
+  border-color: var(--primary);
+}
+
+.staff-page-ellipsis {
+  color: var(--gray-400);
+  padding: 0 .2rem;
+}
+
+.staff-profile-shell {
+  display: grid;
+  gap: 1rem;
+}
+
+.staff-profile-top {
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--gray-200);
+}
+
+.staff-profile-avatar {
+  width: 64px;
+  height: 64px;
+  flex: 0 0 64px;
+  border-radius: 16px;
+  display: grid;
+  place-items: center;
+  background: var(--primary-light);
+  color: var(--primary);
+  font-size: 1.45rem;
+  font-weight: 800;
+}
+
+.staff-profile-identity h3 {
+  margin: 0 0 .2rem;
+  color: var(--gray-900);
+}
+
+.staff-profile-identity > div:not(.staff-profile-meta) {
+  color: var(--gray-600);
+  overflow-wrap: anywhere;
+}
+
+.staff-profile-meta {
+  margin-top: .55rem;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: .45rem;
+  color: var(--gray-500);
+  font-size: .78rem;
+}
+
+.staff-profile-section {
+  border: 1px solid var(--gray-200);
+  border-radius: 14px;
+  padding: 1rem;
+  background: #fff;
+}
+
+.staff-profile-section h4,
+.staff-profile-report-panel h5 {
+  margin: 0 0 .75rem;
+  color: var(--gray-900);
+}
+
+.staff-profile-section-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.staff-profile-section-heading p {
+  margin: -.45rem 0 .85rem;
+  color: var(--gray-500);
+  font-size: .78rem;
+}
+
+.staff-profile-assignments {
+  display: grid;
+  gap: .6rem;
+}
+
+.staff-profile-assignment {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: .75rem .85rem;
+  border-radius: 10px;
+  background: var(--gray-50);
+  border: 1px solid var(--gray-100);
+}
+
+.staff-profile-assignment strong,
+.staff-profile-assignment small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.staff-profile-assignment small,
+.staff-profile-assignment > span {
+  color: var(--gray-500);
+  font-size: .75rem;
+}
+
+.staff-profile-report-controls {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(150px, 1fr)) repeat(2, minmax(145px, .8fr)) auto;
+  gap: .65rem;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.staff-profile-loading {
+  min-height: 150px;
+  display: grid;
+  place-items: center;
+  color: var(--gray-500);
+}
+
+.staff-profile-period-label {
+  color: var(--gray-500);
+  font-size: .8rem;
+  font-weight: 700;
+  margin-bottom: .7rem;
+}
+
+.staff-performance-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: .7rem;
+  margin-bottom: 1rem;
+}
+
+.staff-performance-card {
+  border: 1px solid var(--gray-200);
+  border-radius: 12px;
+  padding: .85rem;
+  background: var(--gray-50);
+}
+
+.staff-performance-card span,
+.staff-performance-card strong {
+  display: block;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.staff-performance-card span {
+  color: var(--gray-500);
+  font-size: .72rem;
+  font-weight: 700;
+}
+
+.staff-performance-card strong {
+  margin-top: .35rem;
+  font-size: clamp(1rem, 1.7vw, 1.3rem);
+  line-height: 1.2;
+  color: var(--gray-900);
+}
+
+.staff-profile-report-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(220px, 1fr);
+  gap: .8rem;
+}
+
+.staff-profile-report-panel {
+  border: 1px solid var(--gray-200);
+  border-radius: 12px;
+  padding: .85rem;
+  min-width: 0;
+}
+
+.staff-profile-daily-table {
+  max-height: 360px;
+  overflow-y: auto;
+}
+
+.staff-profile-daily-table table {
+  width: 100%;
+}
+
+.staff-payment-list {
+  display: grid;
+  gap: .55rem;
+}
+
+.staff-payment-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: .7rem .75rem;
+  border-radius: 10px;
+  background: var(--gray-50);
+}
+
+.staff-payment-row span {
+  color: var(--gray-600);
+  text-transform: capitalize;
+}
+
+.staff-payment-row strong {
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
+@media (min-width: 769px) {
+  .staff-table-container table {
+    min-width: 1120px;
+  }
+}
+
+@media (max-width: 1180px) {
+  .staff-summary-grid,
+  .staff-performance-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .staff-filter-panel {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .staff-search-box {
+    grid-column: 1 / -1;
+  }
+
+  .staff-profile-report-controls {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 768px) {
+  .staff-pagination-wrap,
+  .staff-profile-top,
+  .staff-profile-assignment,
+  .staff-profile-section-heading {
+    align-items: stretch;
+  }
+
+  .staff-pagination-wrap,
+  .staff-profile-top {
+    flex-direction: column;
+  }
+
+  .staff-pagination {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .staff-page-numbers {
+    justify-content: center;
+  }
+
+  .staff-profile-report-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .staff-profile-assignment {
+    flex-wrap: wrap;
+  }
+}
+
+@media (max-width: 560px) {
+  .staff-summary-grid,
+  .staff-filter-panel,
+  .staff-performance-grid,
+  .staff-profile-report-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .staff-search-box {
+    grid-column: auto;
+  }
+
+  .staff-row-actions {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .staff-row-actions .btn {
+    flex: 1 1 auto;
+  }
+
+  .staff-pagination {
+    flex-direction: column;
+  }
+
+  .staff-page-numbers {
+    width: 100%;
+  }
+}
