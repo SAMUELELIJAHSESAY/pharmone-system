@@ -6,11 +6,13 @@ let allProducts = [];
 let branches = [];
 let selectedBranchId = null;
 let currentFilterType = null; // For pre-filtering from dashboard
+let currentSearchTerm = ''; // Optional search handed off from global search
 let containerRef = null; // Module-level reference to container for updateView callbacks
 
-export async function renderInventory(container, user, filterType = null) {
-  // Store filter type for use in rendering
+export async function renderInventory(container, user, filterType = null, initialSearch = '', initialBranchId = null) {
+  // Store filter/search state for use in rendering
   currentFilterType = filterType;
+  currentSearchTerm = String(initialSearch || '').trim();
   if (!user) {
     container.innerHTML = `<div class="alert alert-warning">User not authenticated. Please refresh the page.</div>`;
     return;
@@ -30,7 +32,9 @@ export async function renderInventory(container, user, filterType = null) {
     branches = await getBranches(pharmacyId);
     
     // Set initial selected branch to the first branch (or null for overview)
-    selectedBranchId = branches.length > 0 ? branches[0].id : null;
+    selectedBranchId = initialBranchId && branches.some(branch => branch.id === initialBranchId)
+      ? initialBranchId
+      : (branches.length > 0 ? branches[0].id : null);
     
     // Load products - if branch selected, get branch-specific products
     allProducts = await getProducts(pharmacyId, selectedBranchId);
@@ -367,8 +371,10 @@ function renderView(container, products, user, branchList) {
     });
   }
   
-  // Apply initial filter if provided (e.g., from dashboard)
-  if (currentFilterType) {
+  // Apply initial filter/search if provided (e.g., dashboard/global search).
+  const initialSearchInput = document.getElementById('product-search');
+  if (initialSearchInput && currentSearchTerm) initialSearchInput.value = currentSearchTerm;
+  if (currentFilterType || currentSearchTerm) {
     applyAllFilters(allProducts, branchList, user, reload);
   }
 

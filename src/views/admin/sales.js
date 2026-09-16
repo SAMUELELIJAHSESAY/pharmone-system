@@ -79,7 +79,7 @@ function getPeriodInfo() {
   };
 }
 
-export async function renderSales(container, user, lifecycleToken) {
+export async function renderSales(container, user, lifecycleToken, initialSearch = '') {
   const pharmacyId = user.profile?.pharmacy_id;
   if (!pharmacyId) { container.innerHTML = `<div class="alert alert-warning">No pharmacy linked.</div>`; return; }
 
@@ -312,7 +312,12 @@ export async function renderSales(container, user, lifecycleToken) {
       bindViewActions(filtered);
     };
 
-    document.getElementById('sales-search').addEventListener('input', applyFilters);
+    const salesSearchInput = document.getElementById('sales-search');
+    salesSearchInput.addEventListener('input', applyFilters);
+    if (initialSearch) {
+      salesSearchInput.value = initialSearch;
+      applyFilters();
+    }
     if (document.getElementById('branch-filter')) {
       document.getElementById('branch-filter').addEventListener('change', applyFilters);
     }

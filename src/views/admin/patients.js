@@ -10,7 +10,7 @@ let currentPatientPharmacyId = null;
 let currentPatientBranchId = null;
 let currentPatientList = [];
 
-export async function renderPatientManagementView(container, user) {
+export async function renderPatientManagementView(container, user, initialSearch = '') {
   const pharmacyId = user?.profile?.pharmacy_id;
   const branchId = user?.profile?.branch_id;
   
@@ -28,6 +28,13 @@ export async function renderPatientManagementView(container, user) {
     const patients = await getPatients(pharmacyId, branchId);
     currentPatientList = patients;
     renderView(container, patients, user, pharmacyId, branchId);
+    if (initialSearch) {
+      const patientSearchInput = document.getElementById('patient-search');
+      if (patientSearchInput) {
+        patientSearchInput.value = initialSearch;
+        await searchPatientList();
+      }
+    }
   } catch (err) {
     container.innerHTML = `<div class="alert alert-danger">Failed to load patients: ${err.message}</div>`;
   }

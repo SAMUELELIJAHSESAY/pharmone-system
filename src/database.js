@@ -175,6 +175,139 @@ export async function updateProfile(id, payload) {
   return data;
 }
 
+
+// ===================== GLOBAL ADMIN SEARCH =====================
+/**
+ * Search the current pharmacy workspace without loading full module datasets.
+ * Each query is explicitly scoped to pharmacy_id (and branch_id where the table
+ * supports it), then RLS provides the final database-side access boundary.
+ */
+export async function searchAdminWorkspace(pharmacyId, searchTerm, { branchId = null, limitPerType = 5 } = {}) {
+  const normalized = String(searchTerm || '')
+    .trim()
+    .replace(/[%_(),\\"']/g, ' ')
+    .replace(/\s+/g, ' ')
+    .slice(0, 80);
+
+  if (!pharmacyId || normalized.length < 2) {
+    return {
+      products: [], customers: [], patients: [], sales: [],
+      suppliers: [], purchases: [], staff: [], branches: []
+    };
+  }
+
+  const pattern = `%${normalized}%`;
+  const safe = async (label, buildQuery) => {
+    try {
+      const { data, error } = await buildQuery();
+      if (error) throw error;
+      return data || [];
+    } catch (error) {
+      console.warn(`[global search] ${label} query failed:`, error);
+      return [];
+    }
+  };
+
+  const productQuery = () => {
+    let query = supabase
+      .from('products')
+      .select('id,name,category,price,stock_boxes,stock_units,units_per_box,branch_id,expiry_date')
+      .eq('pharmacy_id', pharmacyId)
+      .eq('is_active', true)
+      .or(`name.ilike.${pattern},category.ilike.${pattern}`)
+      .order('name', { ascending: true })
+      .limit(limitPerType);
+    if (branchId) query = query.eq('branch_id', branchId);
+    return query;
+  };
+
+  const customerQuery = () => supabase
+    .from('customers')
+    .select('id,name,phone,email,address,created_at')
+    .eq('pharmacy_id', pharmacyId)
+    .or(`name.ilike.${pattern},phone.ilike.${pattern},email.ilike.${pattern}`)
+    .order('name', { ascending: true })
+    .limit(limitPerType);
+
+  const patientQuery = () => {
+    let query = supabase
+      .from('patients')
+      .select('id,name,phone,email,patient_id_number,branch_id')
+      .eq('pharmacy_id', pharmacyId)
+      .eq('is_active', true)
+      .or(`name.ilike.${pattern},phone.ilike.${pattern},email.ilike.${pattern},patient_id_number.ilike.${pattern}`)
+      .order('name', { ascending: true })
+      .limit(limitPerType);
+    if (branchId) query = query.eq('branch_id', branchId);
+    return query;
+  };
+
+  const salesQuery = () => {
+    let query = supabase
+      .from('sales')
+      .select('id,invoice_number,total_amount,payment_method,status,branch_id,created_at')
+      .eq('pharmacy_id', pharmacyId)
+      .ilike('invoice_number', pattern)
+      .order('created_at', { ascending: false })
+      .limit(limitPerType);
+    if (branchId) query = query.eq('branch_id', branchId);
+    return query;
+  };
+
+  const supplierQuery = () => supabase
+    .from('suppliers')
+    .select('id,name,contact_person,phone,email')
+    .eq('pharmacy_id', pharmacyId)
+    .eq('is_active', true)
+    .or(`name.ilike.${pattern},contact_person.ilike.${pattern},phone.ilike.${pattern},email.ilike.${pattern}`)
+    .order('name', { ascending: true })
+    .limit(limitPerType);
+
+  const purchaseQuery = () => supabase
+    .from('purchases')
+    .select('id,purchase_number,total_cost,payment_status,supplier_id,created_at')
+    .eq('pharmacy_id', pharmacyId)
+    .ilike('purchase_number', pattern)
+    .order('created_at', { ascending: false })
+    .limit(limitPerType);
+
+  const staffQuery = () => supabase
+    .from('profiles')
+    .select('id,full_name,email,role,is_active')
+    .eq('pharmacy_id', pharmacyId)
+    .eq('is_active', true)
+    .neq('role', 'super_admin')
+    .or(`full_name.ilike.${pattern},email.ilike.${pattern},role.ilike.${pattern}`)
+    .order('full_name', { ascending: true })
+    .limit(limitPerType);
+
+  const branchQuery = () => {
+    let query = supabase
+      .from('branches')
+      .select('id,name,address,is_active')
+      .eq('pharmacy_id', pharmacyId)
+      .eq('is_active', true)
+      .or(`name.ilike.${pattern},address.ilike.${pattern}`)
+      .order('name', { ascending: true })
+      .limit(limitPerType);
+    if (branchId) query = query.eq('id', branchId);
+    return query;
+  };
+
+  const [products, customers, patients, sales, suppliers, purchases, staff, branches] = await Promise.all([
+    safe('products', productQuery),
+    safe('customers', customerQuery),
+    safe('patients', patientQuery),
+    safe('sales', salesQuery),
+    safe('suppliers', supplierQuery),
+    safe('purchases', purchaseQuery),
+    safe('staff', staffQuery),
+    safe('branches', branchQuery)
+  ]);
+
+  return { products, customers, patients, sales, suppliers, purchases, staff, branches };
+}
+
 // ===================== PRODUCTS =====================
 export async function getProducts(pharmacyId, branchId = null) {
   let query = supabase

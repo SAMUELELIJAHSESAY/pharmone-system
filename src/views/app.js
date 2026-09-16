@@ -1,6 +1,6 @@
 import { signOut } from '../auth.js';
 import { renderSidebar } from '../components/sidebar.js';
-import { getPharmacySettings, getSalesmanFeatures } from '../database.js';
+import { getPharmacySettings, getSalesmanFeatures, searchAdminWorkspace } from '../database.js';
 import { renderSuperAdminDashboard } from './super-admin/dashboard.js';
 import { renderAdminDashboard } from './admin/dashboard.js';
 import { renderInventory } from './admin/inventory.js';
@@ -28,7 +28,7 @@ import { renderSalesmanReturnsRequest } from './salesman/returns-request.js';
 import { renderPharmacies } from './super-admin/pharmacies.js';
 import { renderAllUsers } from './super-admin/users.js';
 import { renderSettings } from './super-admin/settings.js';
-import { showToast } from '../utils.js';
+import { showToast, formatCurrency } from '../utils.js';
 import { showProfileModal } from '../components/profile.js';
 import { beginViewLifecycle, cleanupActiveView } from '../view-lifecycle.js';
 
@@ -38,6 +38,7 @@ let currentView = null;
 let currentParams = {};
 let currentSalesmanFeatures = null; // Store salesman features globally
 let currentImpersonation = null;
+let globalSearchDocumentController = new AbortController();
 
 const PAGE_TITLES = {
   'super-dashboard': 'Overview',
@@ -172,6 +173,15 @@ function initResponsiveEnhancements() {
 
 // Global mobile-navigation safety. The module is evaluated once, so these listeners cannot stack.
 document.addEventListener('keydown', (event) => {
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+    const searchInput = document.getElementById('global-search');
+    if (searchInput && searchInput.offsetParent !== null) {
+      event.preventDefault();
+      searchInput.focus();
+      searchInput.select();
+    }
+  }
+
   if (event.key === 'Escape' && document.getElementById('sidebar')?.classList.contains('open')) {
     closeMobileSidebar({ restoreFocus: true });
   }
@@ -224,6 +234,8 @@ export function clearImpersonation() {
 }
 
 export function renderApp(user) {
+  globalSearchDocumentController.abort();
+  globalSearchDocumentController = new AbortController();
   currentUser = user;
   const savedImpersonation = localStorage.getItem('impersonation');
   if (savedImpersonation && currentUser.profile?.role === 'super_admin') {
@@ -284,9 +296,20 @@ export function renderApp(user) {
           </div>
           <span class="topbar-title" id="topbar-title">Dashboard</span>
           <div class="topbar-actions">
-            <div class="topbar-search">
-              <span style="color:var(--gray-400);font-size:0.9rem">&#128269;</span>
-              <input type="text" id="global-search" placeholder="Search..." />
+            <div class="topbar-search" id="global-search-wrap">
+              <span class="global-search-icon" aria-hidden="true">&#128269;</span>
+              <input
+                type="search"
+                id="global-search"
+                placeholder="Search products, invoices, people..."
+                autocomplete="off"
+                aria-label="Search this pharmacy"
+                aria-controls="global-search-results"
+                aria-expanded="false"
+                aria-autocomplete="list"
+              />
+              <kbd class="global-search-shortcut">Ctrl K</kbd>
+              <div class="global-search-results" id="global-search-results" role="listbox" aria-label="Search results"></div>
             </div>
             <span id="impersonation-note" class="topbar-impersonation-note" style="display:none;align-self:center;font-size:0.9rem;color:var(--gray-700);"></span>
             <button class="btn btn-warning btn-sm" id="exit-impersonation-btn" aria-label="Exit pharmacy view" style="display:none;">Exit Pharmacy View</button>
@@ -369,16 +392,9 @@ export function renderApp(user) {
     }
   }
 
-  // Global search functionality
-  const globalSearchEl = document.getElementById('global-search');
-  if (globalSearchEl) {
-    globalSearchEl.addEventListener('keyup', (e) => {
-      const query = e.target.value.toLowerCase().trim();
-      if (e.key === 'Enter' && query) {
-        handleGlobalSearch(query, activeUser);
-      }
-    });
-  }
+  // Global pharmacy search (Admin workspace). Results are queried from Supabase
+  // after a short debounce instead of downloading entire modules to the browser.
+  initGlobalSearch(activeUser);
 
   const defaultView = role === 'super_admin' ? 'super-dashboard'
     : role === 'admin' ? 'admin-dashboard'
@@ -517,10 +533,10 @@ export function navigate(view, params = {}) {
     case 'all-users': renderAllUsers(content, activeUser); break;
     case 'settings': renderSettings(content, activeUser); break;
     case 'admin-dashboard': renderAdminDashboard(content, activeUser); break;
-    case 'inventory': renderInventory(content, activeUser, currentParams.filterType); break;
-    case 'sales': renderSales(content, activeUser, lifecycleToken); break;
-    case 'customers': renderCustomers(content, activeUser); break;
-    case 'patients': renderPatientManagementView(content, activeUser); break;
+    case 'inventory': renderInventory(content, activeUser, currentParams.filterType, currentParams.search || '', currentParams.branchId || null); break;
+    case 'sales': renderSales(content, activeUser, lifecycleToken, currentParams.search || ''); break;
+    case 'customers': renderCustomers(content, activeUser, currentParams.search || ''); break;
+    case 'patients': renderPatientManagementView(content, activeUser, currentParams.search || ''); break;
     case 'expenses': renderExpenseManagement(content, activeUser); break;
     case 'stock-transfers': renderStockTransfers(content, activeUser); break;
     case 'suppliers': renderSuppliers(content, activeUser); break;
@@ -550,35 +566,307 @@ export function navigate(view, params = {}) {
   }
 }
 
-function handleGlobalSearch(query, user) {
-  const role = user?.profile?.role || 'salesman';
-  const content = document.getElementById('page-content');
-  if (!content) return;
+const GLOBAL_SEARCH_GROUPS = [
+  { key: 'products', label: 'Products', icon: '📦', view: 'inventory' },
+  { key: 'sales', label: 'Sales & Invoices', icon: '🧾', view: 'sales' },
+  { key: 'customers', label: 'Customers', icon: '👤', view: 'customers' },
+  { key: 'patients', label: 'Patients', icon: '🩺', view: 'patients' },
+  { key: 'suppliers', label: 'Suppliers', icon: '🚚', view: 'suppliers' },
+  { key: 'purchases', label: 'Purchase Orders', icon: '📋', view: 'purchases' },
+  { key: 'staff', label: 'Staff', icon: '👥', view: 'staff' },
+  { key: 'branches', label: 'Branches', icon: '🏪', view: 'branches' }
+];
 
-  const allSearchableContent = `
-    <div class="animate-in">
-      <div class="page-header">
-        <div>
-          <div class="page-title">Search Results</div>
-          <div class="page-subtitle">Results for: "${query}"</div>
-        </div>
-      </div>
-      <div class="card">
-        <div class="card-body">
-          <div class="empty-state">
-            <div class="empty-state-icon">&#128269;</div>
-            <div class="empty-state-title">Search functionality</div>
-            <div class="empty-state-desc">Use the navigation menu to browse specific sections. Search is available within each module.</div>
-          </div>
-        </div>
-      </div>
-    </div>
-  `;
+let globalSearchRequestId = 0;
+let globalSearchItems = [];
+let globalSearchActiveIndex = -1;
+let globalSearchDebounceTimer = null;
 
-  content.innerHTML = allSearchableContent;
-  applyPageTitle('', 'Search Results');
-  
-  document.getElementById('global-search').value = '';
+function escapeSearchHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+function formatSearchDate(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function getSearchItemPresentation(type, item) {
+  switch (type) {
+    case 'products': {
+      const boxes = Number(item.stock_boxes || 0);
+      const units = Number(item.stock_units || 0);
+      return {
+        title: item.name,
+        subtitle: `${item.category || 'General'} • ${boxes} box${boxes === 1 ? '' : 'es'}${units ? ` + ${units} units` : ''}`,
+        meta: formatCurrency(item.price || 0),
+        params: { search: item.name, branchId: item.branch_id || null }
+      };
+    }
+    case 'sales':
+      return {
+        title: item.invoice_number,
+        subtitle: `${formatSearchDate(item.created_at)} • ${(item.payment_method || 'cash').replace('_', ' ')}`,
+        meta: formatCurrency(item.total_amount || 0),
+        params: { search: item.invoice_number }
+      };
+    case 'customers':
+      return {
+        title: item.name,
+        subtitle: item.phone || item.email || 'Customer record',
+        meta: item.email && item.phone ? item.email : '',
+        params: { search: item.name }
+      };
+    case 'patients':
+      return {
+        title: item.name,
+        subtitle: item.patient_id_number || item.phone || 'Patient record',
+        meta: item.phone && item.patient_id_number ? item.phone : '',
+        params: { search: item.name, branchId: item.branch_id || null }
+      };
+    case 'suppliers':
+      return {
+        title: item.name,
+        subtitle: item.contact_person || item.phone || item.email || 'Supplier',
+        meta: item.phone || '',
+        params: { search: item.name }
+      };
+    case 'purchases':
+      return {
+        title: item.purchase_number,
+        subtitle: `${formatSearchDate(item.created_at)} • ${item.payment_status || 'pending'}`,
+        meta: formatCurrency(item.total_cost || 0),
+        params: { search: item.purchase_number }
+      };
+    case 'staff':
+      return {
+        title: item.full_name || item.email,
+        subtitle: (item.role || 'staff').replace('_', ' '),
+        meta: item.email || '',
+        params: { search: item.full_name || item.email }
+      };
+    case 'branches':
+      return {
+        title: item.name,
+        subtitle: item.address || 'Branch',
+        meta: '',
+        params: { branchId: item.id, pharmacyId: activeUser?.profile?.pharmacy_id }
+      };
+    default:
+      return { title: 'Result', subtitle: '', meta: '', params: {} };
+  }
+}
+
+function closeGlobalSearch({ clear = false } = {}) {
+  const input = document.getElementById('global-search');
+  const results = document.getElementById('global-search-results');
+  if (!input || !results) return;
+  results.classList.remove('show');
+  results.innerHTML = '';
+  input.setAttribute('aria-expanded', 'false');
+  input.removeAttribute('aria-activedescendant');
+  globalSearchItems = [];
+  globalSearchActiveIndex = -1;
+  if (clear) input.value = '';
+}
+
+function setGlobalSearchActiveIndex(nextIndex) {
+  if (!globalSearchItems.length) return;
+  globalSearchActiveIndex = Math.max(0, Math.min(nextIndex, globalSearchItems.length - 1));
+  const resultNodes = [...document.querySelectorAll('.global-search-result-item')];
+  resultNodes.forEach((node, index) => node.classList.toggle('active', index === globalSearchActiveIndex));
+  const active = resultNodes[globalSearchActiveIndex];
+  if (active) {
+    document.getElementById('global-search')?.setAttribute('aria-activedescendant', active.id);
+    active.scrollIntoView({ block: 'nearest' });
+  }
+}
+
+function openGlobalSearchResult(result) {
+  if (!result) return;
+  closeGlobalSearch({ clear: true });
+  if (result.type === 'branches') {
+    navigate('branch-details', { branchId: result.item.id, pharmacyId: activeUser?.profile?.pharmacy_id });
+    return;
+  }
+  navigate(result.view, result.presentation.params || {});
+}
+
+function renderGlobalSearchResults(groupedResults, query) {
+  const resultsEl = document.getElementById('global-search-results');
+  const input = document.getElementById('global-search');
+  if (!resultsEl || !input) return;
+
+  globalSearchItems = [];
+  globalSearchActiveIndex = -1;
+  const sections = [];
+
+  GLOBAL_SEARCH_GROUPS.forEach(group => {
+    const rows = groupedResults?.[group.key] || [];
+    if (!rows.length) return;
+
+    const rowHtml = rows.map(item => {
+      const presentation = getSearchItemPresentation(group.key, item);
+      const flatIndex = globalSearchItems.length;
+      globalSearchItems.push({ type: group.key, view: group.view, item, presentation });
+      return `
+        <button type="button" class="global-search-result-item" id="global-search-option-${flatIndex}" data-search-index="${flatIndex}" role="option">
+          <span class="global-search-result-icon" aria-hidden="true">${group.icon}</span>
+          <span class="global-search-result-copy">
+            <span class="global-search-result-title">${escapeSearchHtml(presentation.title)}</span>
+            <span class="global-search-result-subtitle">${escapeSearchHtml(presentation.subtitle)}</span>
+          </span>
+          ${presentation.meta ? `<span class="global-search-result-meta">${escapeSearchHtml(presentation.meta)}</span>` : ''}
+        </button>
+      `;
+    }).join('');
+
+    sections.push(`
+      <section class="global-search-group" aria-label="${escapeSearchHtml(group.label)}">
+        <div class="global-search-group-title"><span>${group.icon}</span>${escapeSearchHtml(group.label)}</div>
+        ${rowHtml}
+      </section>
+    `);
+  });
+
+  if (!globalSearchItems.length) {
+    resultsEl.innerHTML = `
+      <div class="global-search-empty">
+        <span class="global-search-empty-icon">🔎</span>
+        <strong>No results for “${escapeSearchHtml(query)}”</strong>
+        <span>Try a product, invoice, customer, patient, supplier, staff member or branch.</span>
+      </div>`;
+  } else {
+    resultsEl.innerHTML = `
+      <div class="global-search-results-scroll">${sections.join('')}</div>
+      <div class="global-search-footer">
+        <span><kbd>↑</kbd><kbd>↓</kbd> navigate</span>
+        <span><kbd>Enter</kbd> open</span>
+        <span><kbd>Esc</kbd> close</span>
+      </div>`;
+  }
+
+  resultsEl.classList.add('show');
+  input.setAttribute('aria-expanded', 'true');
+
+  resultsEl.querySelectorAll('.global-search-result-item').forEach(button => {
+    button.addEventListener('mouseenter', () => {
+      setGlobalSearchActiveIndex(Number(button.dataset.searchIndex));
+    });
+    button.addEventListener('click', () => {
+      openGlobalSearchResult(globalSearchItems[Number(button.dataset.searchIndex)]);
+    });
+  });
+}
+
+async function runGlobalSearch(query, user, requestId) {
+  const input = document.getElementById('global-search');
+  const resultsEl = document.getElementById('global-search-results');
+  if (!input || !resultsEl) return;
+
+  const pharmacyId = user?.profile?.pharmacy_id;
+  if (!pharmacyId) return;
+
+  resultsEl.innerHTML = `
+    <div class="global-search-loading">
+      <span class="global-search-loading-dot"></span>
+      Searching this pharmacy…
+    </div>`;
+  resultsEl.classList.add('show');
+  input.setAttribute('aria-expanded', 'true');
+
+  try {
+    const data = await searchAdminWorkspace(pharmacyId, query, {
+      branchId: user?.profile?.branch_id || null,
+      limitPerType: 5
+    });
+    if (requestId !== globalSearchRequestId) return;
+    renderGlobalSearchResults(data, query);
+  } catch (error) {
+    if (requestId !== globalSearchRequestId) return;
+    console.error('Global search failed:', error);
+    resultsEl.innerHTML = `
+      <div class="global-search-empty">
+        <span class="global-search-empty-icon">⚠️</span>
+        <strong>Search could not be completed</strong>
+        <span>Please try again.</span>
+      </div>`;
+    resultsEl.classList.add('show');
+    input.setAttribute('aria-expanded', 'true');
+  }
+}
+
+function initGlobalSearch(user) {
+  const input = document.getElementById('global-search');
+  const wrap = document.getElementById('global-search-wrap');
+  const resultsEl = document.getElementById('global-search-results');
+  if (!input || !wrap || !resultsEl) return;
+
+  // This first global-search rollout is intentionally Admin-only. Other roles
+  // will get role-specific search scopes as their workspaces are upgraded.
+  if (user?.profile?.role !== 'admin' || !user?.profile?.pharmacy_id) {
+    wrap.style.display = 'none';
+    return;
+  }
+
+  input.addEventListener('input', () => {
+    const query = input.value.trim();
+    clearTimeout(globalSearchDebounceTimer);
+    globalSearchRequestId += 1;
+
+    if (query.length < 2) {
+      if (query.length === 1) {
+        resultsEl.innerHTML = '<div class="global-search-hint">Type at least 2 characters to search this pharmacy.</div>';
+        resultsEl.classList.add('show');
+        input.setAttribute('aria-expanded', 'true');
+      } else {
+        closeGlobalSearch();
+      }
+      return;
+    }
+
+    const requestId = globalSearchRequestId;
+    globalSearchDebounceTimer = setTimeout(() => runGlobalSearch(query, user, requestId), 300);
+  });
+
+  input.addEventListener('focus', () => {
+    if (input.value.trim().length === 1) {
+      resultsEl.innerHTML = '<div class="global-search-hint">Type at least 2 characters to search this pharmacy.</div>';
+      resultsEl.classList.add('show');
+      input.setAttribute('aria-expanded', 'true');
+    }
+  });
+
+  input.addEventListener('keydown', event => {
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      if (globalSearchItems.length) setGlobalSearchActiveIndex(globalSearchActiveIndex < 0 ? 0 : globalSearchActiveIndex + 1);
+    } else if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      if (globalSearchItems.length) setGlobalSearchActiveIndex(globalSearchActiveIndex < 0 ? globalSearchItems.length - 1 : globalSearchActiveIndex - 1);
+    } else if (event.key === 'Enter') {
+      if (globalSearchItems.length) {
+        event.preventDefault();
+        const index = globalSearchActiveIndex >= 0 ? globalSearchActiveIndex : 0;
+        openGlobalSearchResult(globalSearchItems[index]);
+      }
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      closeGlobalSearch();
+      input.blur();
+    }
+  });
+
+  document.addEventListener('pointerdown', event => {
+    if (!wrap.contains(event.target)) closeGlobalSearch();
+  }, { signal: globalSearchDocumentController.signal });
 }
 
 // Make navigate globally accessible for use in onclick handlers and dynamic imports

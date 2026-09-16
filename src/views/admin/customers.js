@@ -2,7 +2,7 @@ import { getCustomers, createCustomer, updateCustomer, deleteCustomer, getSales,
 import { formatDate, formatDateTime, formatCurrency, showToast, showConfirm, debounce } from '../../utils.js';
 import { createModal } from '../../components/modal.js';
 
-export async function renderCustomers(container, user) {
+export async function renderCustomers(container, user, initialSearch = '') {
   const pharmacyId = user.profile?.pharmacy_id;
   if (!pharmacyId) { container.innerHTML = `<div class="alert alert-warning">No pharmacy linked.</div>`; return; }
 
@@ -14,13 +14,13 @@ export async function renderCustomers(container, user) {
     }
     
     const customers = await getCustomers(pharmacyId);
-    renderView(container, customers, user);
+    renderView(container, customers, user, initialSearch);
   } catch (err) {
     container.innerHTML = `<div class="alert alert-danger">Failed to load customers: ${err.message}</div>`;
   }
 }
 
-function renderView(container, customers, user) {
+function renderView(container, customers, user, initialSearch = '') {
   container.innerHTML = `
     <div class="animate-in">
       <div class="page-header">
@@ -73,7 +73,12 @@ function renderView(container, customers, user) {
     bindActions(filtered, user, reload);
   });
 
-  document.getElementById('customer-search').addEventListener('input', (e) => search(e.target.value.toLowerCase()));
+  const customerSearchInput = document.getElementById('customer-search');
+  customerSearchInput.addEventListener('input', (e) => search(e.target.value.toLowerCase()));
+  if (initialSearch) {
+    customerSearchInput.value = initialSearch;
+    search(initialSearch.toLowerCase());
+  }
   bindActions(customers, user, reload);
 }
 
