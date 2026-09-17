@@ -292,7 +292,7 @@ export function renderApp(user) {
         <header class="topbar">
           <div style="display:flex;gap:0.5rem;align-items:center">
             <button class="mobile-toggle" id="mobile-menu-btn" aria-label="Open navigation menu" aria-controls="sidebar" aria-expanded="false">&#9776;</button>
-            <button class="btn btn-ghost btn-sm desktop-sidebar-toggle" id="desktop-sidebar-toggle" aria-label="Toggle sidebar" style="font-size:1.2rem">☰</button>
+            <button class="btn btn-ghost btn-sm desktop-sidebar-toggle" id="desktop-sidebar-toggle" aria-label="Collapse sidebar" aria-controls="sidebar" aria-expanded="true" style="font-size:1.2rem">☰</button>
           </div>
           <span class="topbar-title" id="topbar-title">Dashboard</span>
           <div class="topbar-actions">
@@ -378,18 +378,40 @@ export function renderApp(user) {
   // A desktop sidebar preference must never leak into the mobile drawer.
   const desktopMediaQuery = window.matchMedia('(min-width: 769px)');
 
-  // Desktop sidebar collapse toggle
+  // Desktop sidebar collapse toggle. Desktop collapse fully hides the sidebar;
+  // mobile keeps using the independent drawer/open behavior above.
   const desktopToggle = document.getElementById('desktop-sidebar-toggle');
+  const setDesktopSidebarCollapsed = (collapsed, { persist = true } = {}) => {
+    if (!sidebar || !desktopToggle) return;
+
+    const shouldCollapse = Boolean(collapsed) && desktopMediaQuery.matches;
+    sidebar.classList.toggle('collapsed', shouldCollapse);
+    desktopToggle.setAttribute('aria-expanded', String(!shouldCollapse));
+    desktopToggle.setAttribute('aria-label', shouldCollapse ? 'Open sidebar' : 'Collapse sidebar');
+
+    if (persist && desktopMediaQuery.matches) {
+      localStorage.setItem('sidebar-collapsed', shouldCollapse ? 'true' : 'false');
+    }
+  };
+
   if (desktopToggle) {
+    setDesktopSidebarCollapsed(
+      desktopMediaQuery.matches && localStorage.getItem('sidebar-collapsed') === 'true',
+      { persist: false }
+    );
+
     desktopToggle.addEventListener('click', () => {
-      sidebar?.classList.toggle('collapsed');
-      localStorage.setItem('sidebar-collapsed', sidebar?.classList.contains('collapsed') ? 'true' : 'false');
+      setDesktopSidebarCollapsed(!sidebar?.classList.contains('collapsed'));
     });
 
-    // Restore sidebar state only on desktop. A desktop preference must never affect the mobile drawer.
-    if (desktopMediaQuery.matches && localStorage.getItem('sidebar-collapsed') === 'true') {
-      sidebar?.classList.add('collapsed');
-    }
+    desktopMediaQuery.addEventListener?.('change', (event) => {
+      if (event.matches) {
+        setDesktopSidebarCollapsed(localStorage.getItem('sidebar-collapsed') === 'true', { persist: false });
+      } else {
+        // Never carry the desktop collapsed class into the mobile drawer.
+        sidebar?.classList.remove('collapsed');
+      }
+    });
   }
 
   // Global pharmacy search (Admin workspace). Results are queried from Supabase

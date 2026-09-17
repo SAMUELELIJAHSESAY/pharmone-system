@@ -1260,34 +1260,27 @@ tr:hover td { background: var(--gray-50); }
   .pos-cart { min-height: 400px; }
 }
 
-/* Desktop sidebar collapse state */
-.sidebar.collapsed {
-  width: 80px;
-  overflow-x: hidden;
-  transition: width var(--transition);
-}
+/* Desktop sidebar collapse state
+   Collapse means fully hide the navigation and return its width to the page.
+   Mobile continues to use the independent drawer/open state below. */
+@media (min-width: 769px) {
+  .sidebar {
+    transform: translateX(0);
+    transition: transform 0.24s ease;
+  }
 
-.sidebar.collapsed .sidebar-brand-name,
-.sidebar.collapsed .sidebar-brand-sub,
-.sidebar.collapsed .sidebar-section-label {
-  display: none;
-}
+  .sidebar.collapsed {
+    transform: translateX(-100%);
+    pointer-events: none;
+  }
 
-.sidebar.collapsed .nav-item span:not(:first-child) {
-  display: none;
-}
+  .main-content {
+    transition: margin-left 0.24s ease;
+  }
 
-.sidebar.collapsed .nav-item {
-  justify-content: center;
-  padding: 0.75rem;
-}
-
-.main-content {
-  transition: margin-left var(--transition);
-}
-
-.sidebar.collapsed ~ .main-content {
-  margin-left: 80px;
+  .sidebar.collapsed ~ .main-content {
+    margin-left: 0;
+  }
 }
 
 @media (max-width: 768px) {
@@ -2552,14 +2545,10 @@ svg {
 }
 
 @media (min-width: 769px) {
+  /* The desktop collapsed sidebar is completely off-canvas, so no compact
+     80px icon rail is kept behind. */
   .sidebar.collapsed .sidebar-brand-copy {
-    display: none;
-  }
-
-  .sidebar.collapsed .sidebar-brand {
-    justify-content: center;
-    padding-left: 0.75rem;
-    padding-right: 0.75rem;
+    display: block;
   }
 }
 
