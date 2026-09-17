@@ -1064,6 +1064,63 @@ export async function getProductsPage(pharmacyId, options = {}) {
   };
 }
 
+
+/**
+ * POS-focused product paging. Keeps the till responsive by returning only one
+ * small page of products while search/category/stock filters execute in Supabase.
+ */
+export async function getPOSProductsPage(pharmacyId, {
+  branchId = null,
+  page = 1,
+  pageSize = 24,
+  search = '',
+  category = '',
+  inStockOnly = true
+} = {}) {
+  const safePage = Math.max(1, Number(page) || 1);
+  const safePageSize = Math.min(60, Math.max(12, Number(pageSize) || 24));
+  const from = (safePage - 1) * safePageSize;
+  const to = from + safePageSize - 1;
+  const term = String(search || '').trim().replace(/[,%()]/g, ' ').replace(/\s+/g, ' ').slice(0, 80);
+
+  let query = supabase
+    .from('products')
+    .select('*', { count: 'exact' })
+    .eq('pharmacy_id', pharmacyId)
+    .eq('is_active', true);
+
+  if (branchId) query = query.eq('branch_id', branchId);
+  if (category) query = query.eq('category', category);
+  if (term) {
+    const pattern = `%${term}%`;
+    query = query.or(`name.ilike.${pattern},category.ilike.${pattern},description.ilike.${pattern}`);
+  }
+  if (inStockOnly) query = query.or('stock_boxes.gt.0,stock_units.gt.0');
+
+  const { data, error, count } = await query
+    .order('name', { ascending: true })
+    .range(from, to);
+  if (error) throw error;
+  return { products: data || [], count: Number(count || 0), page: safePage, pageSize: safePageSize };
+}
+
+
+export async function getPOSProductsByIds(pharmacyId, branchId, ids = []) {
+  const cleanIds = [...new Set((ids || []).filter(Boolean))].slice(0, 30);
+  if (!cleanIds.length) return [];
+  let query = supabase
+    .from('products')
+    .select('*')
+    .eq('pharmacy_id', pharmacyId)
+    .eq('is_active', true)
+    .in('id', cleanIds);
+  if (branchId) query = query.eq('branch_id', branchId);
+  const { data, error } = await query;
+  if (error) throw error;
+  const byId = new Map((data || []).map(row => [row.id, row]));
+  return cleanIds.map(id => byId.get(id)).filter(Boolean);
+}
+
 export async function getInventorySummary(pharmacyId, branchId = null) {
   const today = new Date().toISOString().slice(0, 10);
   const cutoff = new Date(`${today}T00:00:00Z`);
@@ -1411,6 +1468,35 @@ export async function getCustomerSalesSummary(pharmacyId, customerId) {
     lastPurchaseAt,
     paymentBreakdown
   };
+}
+
+
+// ===================== POS HELD SALES =====================
+export async function getPOSHeldSales(pharmacyId, branchId, userId) {
+  const { data, error } = await supabase
+    .from('pos_held_sales')
+    .select('*')
+    .eq('pharmacy_id', pharmacyId)
+    .eq('branch_id', branchId)
+    .eq('created_by', userId)
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  return data || [];
+}
+
+export async function createPOSHeldSale(payload) {
+  const { data, error } = await supabase
+    .from('pos_held_sales')
+    .insert(payload)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function deletePOSHeldSale(id) {
+  const { error } = await supabase.from('pos_held_sales').delete().eq('id', id);
+  if (error) throw error;
 }
 
 // ===================== SALES =====================
@@ -1793,7 +1879,7 @@ export async function createSale(salePayload, items) {
   // Get pharmacy settings for tax calculation
   const { data: pharmacy } = await supabase.from('pharmacies').select('tax_enabled, tax_rate').eq('id', salePayload.pharmacy_id).single();
   
-  let finalTotal = salePayload.total_amount - (salePayload.discount || 0);
+  let finalTotal = Number(salePayload.total_amount || 0);
   if (pharmacy?.tax_enabled && pharmacy?.tax_rate > 0) {
     const taxAmount = (finalTotal * pharmacy.tax_rate) / 100;
     finalTotal += taxAmount;
@@ -1823,7 +1909,9 @@ export async function createSale(salePayload, items) {
     product_name: item.product_name,
     quantity: item.quantity,
     unit_price: item.unit_price,
-    total_price: item.quantity * item.unit_price
+    total_price: item.quantity * item.unit_price,
+    packaging_type: item.packaging_type || 'unit',
+    packaging_quantity: item.packaging_quantity || item.quantity
   }));
 
   const { error: itemsError } = await supabase.from('sale_items').insert(saleItems);

@@ -1,4 +1,4 @@
-import { getProducts, getCustomers, createCustomer, createSale, getStaffBranch, getPharmacySettings, getBranchDetails } from '../../database.js';
+import { getPOSProductsPage, getPOSProductsByIds, getProductCategories, getCustomers, createCustomer, createSale, getStaffBranch, getPharmacySettings, getBranchDetails, getSalesPage, getPOSHeldSales, createPOSHeldSale, deletePOSHeldSale } from '../../database.js';
 import { formatCurrency, showToast, debounce, formatUTCDateTime } from '../../utils.js';
 import { createModal } from '../../components/modal.js';
 import { isViewLifecycleActive, registerViewCleanup } from '../../view-lifecycle.js';
@@ -6,6 +6,19 @@ import { resolveReceiptFooter, getPharmacyLogoUrl } from '../../branding.js';
 
 let cart = [];
 let allProducts = [];
+let productPage = 1;
+let productPageSize = 24;
+let productTotal = 0;
+let productHasMore = false;
+let productSearch = '';
+let productCategory = '';
+let inStockOnly = true;
+let productLoadSeq = 0;
+let productLoading = false;
+let productCategories = [];
+let heldSales = [];
+let recentSales = [];
+let splitPaymentEnabled = false;
 let allCustomers = [];
 let selectedCustomer = null;
 let currentUser = null;
@@ -47,18 +60,23 @@ export async function renderPOS(container, user, lifecycleToken = null) {
   currentLifecycleToken = lifecycleToken;
   currentUser = user;
   cart = [];
+  allProducts = [];
   selectedCustomer = null;
+  productPage = 1;
+  productTotal = 0;
+  productHasMore = false;
+  productSearch = '';
+  productCategory = '';
+  inStockOnly = true;
 
   const pharmacyId = user.profile?.pharmacy_id;
   if (!pharmacyId) { container.innerHTML = `<div class="alert alert-warning">No pharmacy linked.</div>`; return; }
 
   try {
-    // Load pharmacy settings globally so all formatCurrency calls use correct currency
     const settings = await getPharmacySettings(pharmacyId);
     if (lifecycleToken && !isViewLifecycleActive(lifecycleToken)) return;
     window.pharmacySettings = settings || { currency_symbol: 'Le', currency_code: 'NLE' };
-    
-    // Get the salesman's assigned branch
+
     staffBranchId = await getStaffBranch(user.id);
     if (lifecycleToken && !isViewLifecycleActive(lifecycleToken)) return;
     if (!staffBranchId) {
@@ -66,18 +84,21 @@ export async function renderPOS(container, user, lifecycleToken = null) {
       return;
     }
 
-    [allProducts, allCustomers] = await Promise.all([
-      getProducts(pharmacyId, staffBranchId),
-      getCustomers(pharmacyId)
+    const [customers, categories, held, recent] = await Promise.all([
+      getCustomers(pharmacyId),
+      getProductCategories(pharmacyId, staffBranchId),
+      getPOSHeldSales(pharmacyId, staffBranchId, user.id).catch(() => []),
+      getSalesPage(pharmacyId, { page: 1, pageSize: 25, branchId: staffBranchId, staffId: user.id }).then(r => r.data.slice(0, 8)).catch(() => [])
     ]);
     if (lifecycleToken && !isViewLifecycleActive(lifecycleToken)) return;
 
-    if (allProducts.length === 0) {
-      container.innerHTML = `<div class="alert alert-warning">No products available in your assigned branch.</div>`;
-      return;
-    }
+    allCustomers = customers || [];
+    productCategories = categories || [];
+    heldSales = held || [];
+    recentSales = recent || [];
 
     renderPOSView(container);
+    await loadPOSProducts({ reset: true });
   } catch (err) {
     if (lifecycleToken && !isViewLifecycleActive(lifecycleToken)) return;
     container.innerHTML = `<div class="alert alert-danger">Failed to load POS: ${err.message}</div>`;
@@ -86,15 +107,17 @@ export async function renderPOS(container, user, lifecycleToken = null) {
 
 function renderPOSView(container) {
   container.innerHTML = `
-    <div style="margin-bottom:1rem;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:0.75rem">
+    <div class="pos-page-head">
       <div>
         <div class="page-title">Point of Sale</div>
-        <div class="page-subtitle">Select products to create a sale</div>
+        <div class="page-subtitle">Fast checkout for your assigned branch</div>
       </div>
-      <div class="flex gap-2 pos-customer-actions">
-        <select class="form-select" id="customer-select" style="min-width:200px">
+      <div class="pos-head-actions">
+        <button class="btn btn-ghost" id="pos-held-sales">⏸ Held Sales <span class="badge badge-gray" id="held-sales-count">${heldSales.length}</span></button>
+        <button class="btn btn-ghost" id="pos-recent-sales">🧾 Recent Sales</button>
+        <select class="form-select" id="customer-select">
           <option value="">Walk-in Customer</option>
-          ${allCustomers.map(c => `<option value="${c.id}">${c.name} ${c.phone ? '('+c.phone+')' : ''}</option>`).join('')}
+          ${allCustomers.map(c => `<option value="${c.id}">${escapeReceiptText(c.name)} ${c.phone ? '('+escapeReceiptText(c.phone)+')' : ''}</option>`).join('')}
         </select>
         <button class="btn btn-ghost" id="add-customer-quick">+ New Customer</button>
       </div>
@@ -102,18 +125,29 @@ function renderPOSView(container) {
 
     <div class="pos-layout">
       <div class="pos-products">
-        <div style="margin-bottom:0.875rem;display:flex;gap:0.75rem;flex-wrap:wrap">
-          <div class="search-box" style="flex:1;min-width:200px">
+        <div class="pos-toolbar">
+          <div class="search-box pos-search-box">
             <span style="color:var(--gray-400)">&#128269;</span>
-            <input type="text" id="pos-search" placeholder="Search products..." />
+            <input type="search" id="pos-search" placeholder="Search products... (F2)" autocomplete="off" />
           </div>
-          <select class="form-select" id="pos-cat-filter" style="width:auto">
+          <select class="form-select" id="pos-cat-filter">
             <option value="">All Categories</option>
-            ${[...new Set(allProducts.map(p => p.category))].map(c => `<option value="${c}">${c}</option>`).join('')}
+            ${productCategories.map(c => `<option value="${escapeReceiptText(c)}">${escapeReceiptText(c)}</option>`).join('')}
           </select>
+          <label class="pos-stock-toggle"><input type="checkbox" id="pos-in-stock" checked /> <span>In Stock Only</span></label>
         </div>
+
+        <div class="pos-quick-row">
+          <button type="button" class="btn btn-ghost btn-sm" id="pos-favorites">★ Favorites</button>
+          <button type="button" class="btn btn-ghost btn-sm" id="pos-recent-products">↻ Recent Products</button>
+          <span class="text-xs text-muted" id="pos-product-count"></span>
+        </div>
+
         <div class="pos-product-grid" id="pos-product-grid">
-          ${renderProductCards(allProducts)}
+          <div class="empty-state" style="grid-column:1/-1"><div class="empty-state-title">Loading products…</div></div>
+        </div>
+        <div class="pos-load-more-wrap" id="pos-load-more-wrap" hidden>
+          <button type="button" class="btn btn-ghost" id="pos-load-more">Load More Products</button>
         </div>
       </div>
 
@@ -121,6 +155,7 @@ function renderPOSView(container) {
         <div class="pos-cart-header">
           <span>&#128179; Cart</span>
           <div class="pos-cart-header-actions">
+            <button type="button" class="btn btn-ghost btn-sm" id="hold-sale-btn" disabled>Hold Sale</button>
             <span id="cart-count" class="badge badge-gray">0 items</span>
             <button type="button" class="mobile-pos-cart-close" id="mobile-pos-cart-close" aria-label="Close cart">&#10005;</button>
           </div>
@@ -133,52 +168,59 @@ function renderPOSView(container) {
           </div>
         </div>
         <div class="pos-cart-footer">
-          <div class="cart-summary-row">
-            <span>Subtotal</span>
-            <span id="cart-subtotal">Le0.00</span>
-          </div>
+          <div class="cart-summary-row"><span>Subtotal</span><span id="cart-subtotal">${formatCurrency(0)}</span></div>
           <div class="cart-summary-row">
             <span>Discount</span>
-            <input type="number" id="discount-input" value="0" min="0" step="0.01"
-              style="width:70px;padding:0.25rem 0.5rem;border:1px solid var(--gray-200);border-radius:4px;text-align:right;font-size:0.875rem;font-family:inherit" />
+            <input type="number" id="discount-input" value="0" min="0" step="0.01" class="pos-discount-input" />
           </div>
-          <div class="cart-summary-total">
-            <span>Total</span>
-            <span id="cart-total" style="color:var(--primary)">Le0.00</span>
-          </div>
-          <div class="form-group" style="margin-bottom:0.75rem">
-            <label class="form-label" style="margin-bottom:0.25rem">Payment Method</label>
+          <div class="cart-summary-total"><span>Total</span><span id="cart-total" style="color:var(--primary)">${formatCurrency(0)}</span></div>
+
+          <div class="form-group pos-payment-block">
+            <label class="form-label">Payment</label>
             <select class="form-select" id="payment-method">
               <option value="cash">Cash</option>
               <option value="mobile_money">Mobile Money</option>
               <option value="card">Card</option>
+              <option value="split">Split Payment</option>
             </select>
           </div>
+
+          <div id="cash-payment-fields" class="pos-payment-extra">
+            <label class="form-label">Cash Received</label>
+            <input type="number" class="form-input" id="cash-received" min="0" step="0.01" placeholder="0.00" />
+            <div class="pos-change-row"><span>Change Due</span><strong id="change-due">${formatCurrency(0)}</strong></div>
+          </div>
+
+          <div id="split-payment-fields" class="pos-split-payment" hidden>
+            <div class="pos-split-grid">
+              <label>Cash<input type="number" class="form-input split-pay-input" id="split-cash" min="0" step="0.01" value="0" /></label>
+              <label>Mobile Money<input type="number" class="form-input split-pay-input" id="split-mobile" min="0" step="0.01" value="0" /></label>
+              <label>Card<input type="number" class="form-input split-pay-input" id="split-card" min="0" step="0.01" value="0" /></label>
+            </div>
+            <div class="pos-change-row"><span>Amount Remaining</span><strong id="split-remaining">${formatCurrency(0)}</strong></div>
+          </div>
+
           <div class="form-group" style="margin-bottom:0.875rem">
-            <label class="form-label" style="margin-bottom:0.25rem">Notes (optional)</label>
+            <label class="form-label">Notes (optional)</label>
             <input type="text" class="form-input" id="sale-notes" placeholder="Any notes..." />
           </div>
-          <button class="btn btn-primary btn-full btn-lg" id="checkout-btn" disabled>
-            Complete Sale
-          </button>
+          <div class="pos-checkout-actions">
+            <button class="btn btn-ghost" id="preview-receipt-btn" disabled>Preview</button>
+            <button class="btn btn-primary btn-lg" id="checkout-btn" disabled>Complete Sale</button>
+          </div>
         </div>
       </div>
     </div>
 
     <button type="button" class="mobile-pos-cart-toggle" id="mobile-pos-cart-toggle" aria-expanded="false" aria-controls="pos-cart">
-      <span class="mobile-pos-cart-toggle-main">
-        <span aria-hidden="true">&#128722;</span>
-        <span>View Cart</span>
-        <span class="mobile-pos-cart-count" id="mobile-cart-count">0</span>
-      </span>
-      <span class="mobile-pos-cart-total" id="mobile-cart-total">Le0.00</span>
+      <span class="mobile-pos-cart-toggle-main"><span aria-hidden="true">&#128722;</span><span>View Cart</span><span class="mobile-pos-cart-count" id="mobile-cart-count">0</span></span>
+      <span class="mobile-pos-cart-total" id="mobile-cart-total">${formatCurrency(0)}</span>
     </button>
     <div class="mobile-pos-cart-backdrop" id="mobile-pos-cart-backdrop" aria-hidden="true"></div>
   `;
 
   const posCart = document.querySelector('.pos-cart');
   if (posCart) posCart.id = 'pos-cart';
-
   const mobileCartToggle = document.getElementById('mobile-pos-cart-toggle');
   const mobileCartClose = document.getElementById('mobile-pos-cart-close');
   const mobileCartBackdrop = document.getElementById('mobile-pos-cart-backdrop');
@@ -192,77 +234,106 @@ function renderPOSView(container) {
     document.body.classList.toggle('mobile-pos-cart-open', shouldOpen);
     mobileCartToggle?.setAttribute('aria-expanded', shouldOpen ? 'true' : 'false');
     mobileCartBackdrop?.setAttribute('aria-hidden', shouldOpen ? 'false' : 'true');
-
-    if (mobileCartMedia.matches) {
-      posCart.setAttribute('aria-hidden', shouldOpen ? 'false' : 'true');
-      if (shouldOpen) window.setTimeout(() => mobileCartClose?.focus(), 0);
-    } else {
-      posCart.removeAttribute('aria-hidden');
-    }
+    if (mobileCartMedia.matches) posCart.setAttribute('aria-hidden', shouldOpen ? 'false' : 'true');
+    else posCart.removeAttribute('aria-hidden');
   };
 
   const handleMobileCartMediaChange = () => setMobileCartOpen(false);
   const handlePOSKeydown = (e) => {
     if (e.key === 'Escape' && posCart?.classList.contains('mobile-open')) {
-      setMobileCartOpen(false);
-      mobileCartToggle?.focus();
-      return;
+      setMobileCartOpen(false); mobileCartToggle?.focus(); return;
     }
-
-    if (e.ctrlKey && e.shiftKey && e.key === 'P') {
-      e.preventDefault();
-      showReceiptPreview();
-    }
+    if (e.key === 'F2') { e.preventDefault(); document.getElementById('pos-search')?.focus(); }
+    if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'p') { e.preventDefault(); showReceiptPreview(); }
+    if (e.ctrlKey && e.key.toLowerCase() === 'h') { e.preventDefault(); if (cart.length) holdCurrentSale(); }
   };
 
-  const openMobileCart = () => setMobileCartOpen(true);
-  const closeMobileCart = () => setMobileCartOpen(false);
-
-  mobileCartToggle?.addEventListener('click', openMobileCart);
-  mobileCartClose?.addEventListener('click', closeMobileCart);
-  mobileCartBackdrop?.addEventListener('click', closeMobileCart);
+  mobileCartToggle?.addEventListener('click', () => setMobileCartOpen(true));
+  mobileCartClose?.addEventListener('click', () => setMobileCartOpen(false));
+  mobileCartBackdrop?.addEventListener('click', () => setMobileCartOpen(false));
   mobileCartMedia.addEventListener?.('change', handleMobileCartMediaChange);
   document.addEventListener('keydown', handlePOSKeydown);
   setMobileCartOpen(false);
 
+  const searchEl = document.getElementById('pos-search');
+  searchEl.addEventListener('input', debounce(async () => {
+    productSearch = searchEl.value.trim();
+    await loadPOSProducts({ reset: true });
+  }, 300));
+  document.getElementById('pos-cat-filter').addEventListener('change', async (e) => { productCategory = e.target.value; await loadPOSProducts({ reset: true }); });
+  document.getElementById('pos-in-stock').addEventListener('change', async (e) => { inStockOnly = e.target.checked; await loadPOSProducts({ reset: true }); });
+  document.getElementById('pos-load-more')?.addEventListener('click', () => loadPOSProducts({ reset: false }));
+  document.getElementById('customer-select').addEventListener('change', (e) => { selectedCustomer = e.target.value || null; });
+  document.getElementById('add-customer-quick').addEventListener('click', showQuickAddCustomer);
+  document.getElementById('discount-input').addEventListener('input', updateCartTotals);
+  document.getElementById('payment-method').addEventListener('change', updatePaymentUI);
+  document.getElementById('cash-received').addEventListener('input', updatePaymentUI);
+  document.querySelectorAll('.split-pay-input').forEach(el => el.addEventListener('input', updatePaymentUI));
+  document.getElementById('checkout-btn').addEventListener('click', processCheckout);
+  document.getElementById('preview-receipt-btn').addEventListener('click', showReceiptPreview);
+  document.getElementById('hold-sale-btn').addEventListener('click', holdCurrentSale);
+  document.getElementById('pos-held-sales').addEventListener('click', showHeldSalesModal);
+  document.getElementById('pos-recent-sales').addEventListener('click', showRecentSalesModal);
+  document.getElementById('pos-favorites').addEventListener('click', showFavoriteProducts);
+  document.getElementById('pos-recent-products').addEventListener('click', showRecentProducts);
+
   cleanupPOSInteractions = () => {
-    mobileCartToggle?.removeEventListener('click', openMobileCart);
-    mobileCartClose?.removeEventListener('click', closeMobileCart);
-    mobileCartBackdrop?.removeEventListener('click', closeMobileCart);
     mobileCartMedia.removeEventListener?.('change', handleMobileCartMediaChange);
     document.removeEventListener('keydown', handlePOSKeydown);
     document.body.classList.remove('mobile-pos-cart-open');
-    posCart?.classList.remove('mobile-open');
-    mobileCartBackdrop?.classList.remove('show');
   };
+  if (currentLifecycleToken && isViewLifecycleActive(currentLifecycleToken)) registerViewCleanup(currentLifecycleToken, () => cleanupPOSInteractions?.());
+  updatePaymentUI();
+}
 
-  if (currentLifecycleToken && isViewLifecycleActive(currentLifecycleToken)) {
-    registerViewCleanup(currentLifecycleToken, () => {
-      cleanupPOSInteractions?.();
-      cleanupPOSInteractions = null;
-    });
+async function loadPOSProducts({ reset = false } = {}) {
+  if (!currentUser?.profile?.pharmacy_id || !staffBranchId || productLoading) return;
+  const seq = ++productLoadSeq;
+  productLoading = true;
+  const grid = document.getElementById('pos-product-grid');
+  const loadMore = document.getElementById('pos-load-more');
+  if (reset) {
+    productPage = 1;
+    allProducts = [];
+    if (grid) grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1"><div class="empty-state-title">Searching inventory…</div></div>`;
   }
+  if (loadMore) { loadMore.disabled = true; loadMore.textContent = 'Loading…'; }
 
-  document.getElementById('pos-search').addEventListener('input', debounce((e) => filterProducts()));
-  document.getElementById('pos-cat-filter').addEventListener('change', () => filterProducts());
-  document.getElementById('customer-select').addEventListener('change', (e) => {
-    selectedCustomer = e.target.value || null;
-  });
-  document.getElementById('add-customer-quick').addEventListener('click', showQuickAddCustomer);
-  document.getElementById('discount-input').addEventListener('input', updateCartTotals);
-  document.getElementById('checkout-btn').addEventListener('click', processCheckout);
-
-  bindProductClicks();
+  try {
+    const result = await getPOSProductsPage(currentUser.profile.pharmacy_id, {
+      branchId: staffBranchId,
+      page: productPage,
+      pageSize: productPageSize,
+      search: productSearch,
+      category: productCategory,
+      inStockOnly
+    });
+    if (seq !== productLoadSeq) return;
+    const rows = result.products || [];
+    const byId = new Map(allProducts.map(p => [p.id, p]));
+    rows.forEach(p => byId.set(p.id, p));
+    allProducts = [...byId.values()];
+    productTotal = Number(result.count || 0);
+    productHasMore = allProducts.length < productTotal;
+    if (grid) grid.innerHTML = renderProductCards(allProducts);
+    bindProductClicks();
+    const count = document.getElementById('pos-product-count');
+    if (count) count.textContent = `Showing ${allProducts.length} of ${productTotal} matching products`;
+    const wrap = document.getElementById('pos-load-more-wrap');
+    if (wrap) wrap.hidden = !productHasMore;
+    if (productHasMore) productPage += 1;
+  } catch (err) {
+    if (grid) grid.innerHTML = `<div class="alert alert-danger" style="grid-column:1/-1">Could not load products: ${escapeReceiptText(err.message)}</div>`;
+  } finally {
+    productLoading = false;
+    if (loadMore) { loadMore.disabled = false; loadMore.textContent = 'Load More Products'; }
+  }
 }
 
 function filterProducts() {
-  const q = document.getElementById('pos-search').value.toLowerCase();
-  const cat = document.getElementById('pos-cat-filter').value;
-  const filtered = allProducts.filter(p =>
-    (p.name.toLowerCase().includes(q) || p.category.toLowerCase().includes(q)) &&
-    (!cat || p.category === cat)
-  );
-  document.getElementById('pos-product-grid').innerHTML = renderProductCards(filtered);
+  // Kept for cart refresh compatibility. The product list is already filtered server-side.
+  const grid = document.getElementById('pos-product-grid');
+  if (grid) grid.innerHTML = renderProductCards(allProducts);
   bindProductClicks();
 }
 
@@ -270,14 +341,16 @@ function renderProductCards(products) {
   if (!products.length) return `<div class="empty-state" style="grid-column:1/-1"><div class="empty-state-icon">&#128230;</div><div class="empty-state-title">No products found</div></div>`;
 
   return products.map(p => {
-    const totalUnits = (p.stock_boxes * p.units_per_box) + p.stock_units;
+    const totalUnits = (Number(p.stock_boxes || 0) * Number(p.units_per_box || 1)) + Number(p.stock_units || 0);
     const inCart = cart.find(c => c.product_id === p.id);
     const outOfStock = totalUnits <= 0;
     const unitType = (p.unit_type || 'box').charAt(0).toUpperCase() + (p.unit_type || 'box').slice(1);
+    const favorite = readPOSLocalList('favorites').includes(p.id);
     return `
       <div class="pos-product-card ${outOfStock ? 'out-of-stock' : ''}" data-id="${p.id}" data-stock="${totalUnits}">
-        <div class="pos-product-category">${p.category}</div>
-        <div class="pos-product-name">${p.name}</div>
+        <button type="button" class="pos-product-favorite ${favorite ? 'active' : ''}" data-id="${p.id}" aria-label="${favorite ? 'Remove from favorites' : 'Add to favorites'}">${favorite ? '★' : '☆'}</button>
+        <div class="pos-product-category">${escapeReceiptText(p.category || 'Other')}</div>
+        <div class="pos-product-name">${escapeReceiptText(p.name)}</div>
         <div style="font-size:0.75rem;color:var(--primary);font-weight:600;margin-top:0.25rem">Sold by: ${unitType}</div>
         <div class="pos-product-price">${formatCurrency(p.price)} per ${unitType.toLowerCase()}</div>
         <div class="pos-product-stock">${outOfStock ? 'Out of stock' : totalUnits + ' units'}</div>
@@ -287,45 +360,62 @@ function renderProductCards(products) {
   }).join('');
 }
 
+function getPOSStorageKey(kind) {
+  return `sammia_pos_${kind}_${currentUser?.id || 'anon'}_${staffBranchId || 'branch'}`;
+}
+function readPOSLocalList(kind) {
+  try { return JSON.parse(localStorage.getItem(getPOSStorageKey(kind)) || '[]'); } catch { return []; }
+}
+function writePOSLocalList(kind, values) {
+  localStorage.setItem(getPOSStorageKey(kind), JSON.stringify(values.slice(0, 20)));
+}
+function rememberRecentProduct(productId) {
+  const next = [productId, ...readPOSLocalList('recent_products').filter(id => id !== productId)];
+  writePOSLocalList('recent_products', next);
+}
+function toggleFavoriteProduct(productId) {
+  const list = readPOSLocalList('favorites');
+  const next = list.includes(productId) ? list.filter(id => id !== productId) : [productId, ...list];
+  writePOSLocalList('favorites', next);
+  filterProducts();
+}
+
 function bindProductClicks() {
+  document.querySelectorAll('.pos-product-favorite').forEach(btn => {
+    btn.addEventListener('click', (e) => { e.stopPropagation(); toggleFavoriteProduct(btn.dataset.id); });
+  });
   document.querySelectorAll('.pos-product-card:not(.out-of-stock)').forEach(card => {
     card.addEventListener('click', () => {
       const productId = card.dataset.id;
-      const stock = parseInt(card.dataset.stock);
+      const stock = parseInt(card.dataset.stock, 10);
       const product = allProducts.find(p => p.id === productId);
       if (!product) return;
-
+      rememberRecentProduct(productId);
       const existing = cart.find(c => c.product_id === productId);
       if (existing) {
-        if (existing.quantity < stock) {
-          existing.quantity++;
-        } else {
-          showToast('Not enough stock available', 'error');
-          return;
-        }
+        const nextUnits = getCartItemUnits(existing, existing.quantity + 1);
+        if (nextUnits <= stock) existing.quantity++;
+        else { showToast('Not enough stock available', 'error'); return; }
       } else {
         const unitType = product.unit_type || 'box';
         const minSell = product.min_sell_quantity || 1;
-        const unitsPerBox = product.units_per_box || 10; // Ensure consistent default
+        const unitsPerBox = product.units_per_box || 1;
         cart.push({
-          product_id: productId,
-          product_name: product.name,
-          unit_type: unitType,
-          unit_price: product.price,
-          quantity: minSell,
-          maxStock: stock,
-          priceSet: product.price > 0,
-          packaging_type: 'unit',
-          units_per_box: unitsPerBox,
-          min_sell_quantity: minSell,
-          notes: ''
+          product_id: productId, product_name: product.name, unit_type: unitType,
+          unit_price: Number(product.price || 0), quantity: minSell, maxStock: stock,
+          priceSet: Number(product.price || 0) > 0, packaging_type: 'unit',
+          units_per_box: unitsPerBox, min_sell_quantity: minSell, notes: ''
         });
       }
-
       renderCart();
       filterProducts();
     });
   });
+}
+
+function getCartItemUnits(item, quantity = item.quantity) {
+  const info = getPackagingInfo(item.packaging_type || 'unit', item.units_per_box || 1);
+  return Number(quantity || 0) * Number(info.units_per_unit || 1);
 }
 
 function renderCart() {
@@ -344,6 +434,8 @@ function renderCart() {
       </div>
     `;
     if (checkoutBtn) checkoutBtn.disabled = true;
+    document.getElementById('preview-receipt-btn') && (document.getElementById('preview-receipt-btn').disabled = true);
+    document.getElementById('hold-sale-btn') && (document.getElementById('hold-sale-btn').disabled = true);
     if (countBadge) countBadge.textContent = '0 items';
     const mobileCount = document.getElementById('mobile-cart-count');
     if (mobileCount) mobileCount.textContent = '0';
@@ -406,6 +498,8 @@ function renderCart() {
   const mobileCount = document.getElementById('mobile-cart-count');
   if (mobileCount) mobileCount.textContent = String(totalItems);
   if (checkoutBtn) checkoutBtn.disabled = false;
+  document.getElementById('preview-receipt-btn') && (document.getElementById('preview-receipt-btn').disabled = false);
+  document.getElementById('hold-sale-btn') && (document.getElementById('hold-sale-btn').disabled = false);
 
   document.querySelectorAll('.decrease-qty').forEach(btn => {
     btn.addEventListener('click', () => adjustQty(btn.dataset.id, -1));
@@ -475,57 +569,178 @@ function removeFromCart(productId) {
 }
 
 function updateCartTotals() {
-  const subtotal = cart.reduce((sum, i) => sum + (i.quantity * i.unit_price), 0);
-  const discount = parseFloat(document.getElementById('discount-input')?.value || 0) || 0;
-  const total = Math.max(0, subtotal - discount);
-
+  const { subtotal, discount, total } = getCartTotals();
   const subtotalEl = document.getElementById('cart-subtotal');
   const totalEl = document.getElementById('cart-total');
   if (subtotalEl) subtotalEl.textContent = formatCurrency(subtotal);
   if (totalEl) totalEl.textContent = formatCurrency(total);
   const mobileTotalEl = document.getElementById('mobile-cart-total');
   if (mobileTotalEl) mobileTotalEl.textContent = formatCurrency(total);
+  updatePaymentUI();
+}
+
+function getCartTotals() {
+  const subtotal = cart.reduce((sum, i) => sum + (Number(i.quantity || 0) * Number(i.unit_price || 0)), 0);
+  const discount = Math.max(0, Number(document.getElementById('discount-input')?.value || 0));
+  return { subtotal, discount, total: Math.max(0, subtotal - discount) };
+}
+
+function getPaymentState() {
+  const { total } = getCartTotals();
+  const method = document.getElementById('payment-method')?.value || 'cash';
+  if (method === 'split') {
+    const cash = Math.max(0, Number(document.getElementById('split-cash')?.value || 0));
+    const mobileMoney = Math.max(0, Number(document.getElementById('split-mobile')?.value || 0));
+    const card = Math.max(0, Number(document.getElementById('split-card')?.value || 0));
+    const paid = cash + mobileMoney + card;
+    return { method, details: { cash, mobile_money: mobileMoney, card }, paid, remaining: Math.max(0, total - paid), changeDue: Math.max(0, paid - total) };
+  }
+  const cashReceived = method === 'cash' ? Math.max(0, Number(document.getElementById('cash-received')?.value || 0)) : total;
+  return { method, details: { [method]: total }, paid: method === 'cash' ? cashReceived : total, remaining: method === 'cash' ? Math.max(0, total - cashReceived) : 0, changeDue: method === 'cash' ? Math.max(0, cashReceived - total) : 0 };
+}
+
+function updatePaymentUI() {
+  const method = document.getElementById('payment-method')?.value || 'cash';
+  const cashFields = document.getElementById('cash-payment-fields');
+  const splitFields = document.getElementById('split-payment-fields');
+  if (cashFields) cashFields.hidden = method !== 'cash';
+  if (splitFields) splitFields.hidden = method !== 'split';
+  const payment = getPaymentState();
+  const change = document.getElementById('change-due');
+  if (change) change.textContent = formatCurrency(payment.changeDue);
+  const remaining = document.getElementById('split-remaining');
+  if (remaining) remaining.textContent = formatCurrency(payment.remaining);
+}
+
+async function holdCurrentSale() {
+  if (!cart.length) return;
+  const name = window.prompt('Name this held sale (optional):', selectedCustomer ? 'Customer order' : 'Walk-in customer');
+  if (name === null) return;
+  const { discount } = getCartTotals();
+  try {
+    const held = await createPOSHeldSale({
+      pharmacy_id: currentUser.profile.pharmacy_id,
+      branch_id: staffBranchId,
+      created_by: currentUser.id,
+      customer_id: selectedCustomer || null,
+      label: name.trim() || 'Held sale',
+      cart_json: cart,
+      discount,
+      notes: document.getElementById('sale-notes')?.value || ''
+    });
+    heldSales = [held, ...heldSales.filter(h => h.id !== held.id)];
+    cart = [];
+    selectedCustomer = null;
+    document.getElementById('customer-select').value = '';
+    document.getElementById('discount-input').value = '0';
+    document.getElementById('sale-notes').value = '';
+    document.getElementById('held-sales-count').textContent = heldSales.length;
+    renderCart();
+    filterProducts();
+    showToast('Sale held');
+  } catch (err) { showToast(`Could not hold sale: ${err.message}`, 'error'); }
+}
+
+function showHeldSalesModal() {
+  const { overlay, closeModal } = createModal({
+    id: 'held-sales-modal', title: `Held Sales (${heldSales.length})`, size: 'modal-lg',
+    body: heldSales.length ? `<div class="pos-held-list">${heldSales.map(h => `<div class="pos-held-row"><div><strong>${escapeReceiptText(h.label || 'Held sale')}</strong><small>${new Date(h.created_at).toLocaleString()} · ${(h.cart_json || []).length} product(s)</small></div><div class="flex gap-2"><button class="btn btn-primary btn-sm resume-held" data-id="${h.id}">Resume</button><button class="btn btn-ghost btn-sm delete-held" data-id="${h.id}">Delete</button></div></div>`).join('')}</div>` : `<div class="empty-state"><div class="empty-state-title">No held sales</div></div>`,
+    footer: `<button class="btn btn-ghost" id="held-close">Close</button>`
+  });
+  overlay.querySelector('#held-close').addEventListener('click', closeModal);
+  overlay.querySelectorAll('.resume-held').forEach(btn => btn.addEventListener('click', async () => {
+    const held = heldSales.find(h => h.id === btn.dataset.id); if (!held) return;
+    if (cart.length && !window.confirm('Replace the current cart with this held sale?')) return;
+    cart = Array.isArray(held.cart_json) ? held.cart_json : [];
+    selectedCustomer = held.customer_id || null;
+    document.getElementById('customer-select').value = selectedCustomer || '';
+    document.getElementById('discount-input').value = held.discount || 0;
+    document.getElementById('sale-notes').value = held.notes || '';
+    await deletePOSHeldSale(held.id).catch(() => {});
+    heldSales = heldSales.filter(h => h.id !== held.id);
+    document.getElementById('held-sales-count').textContent = heldSales.length;
+    renderCart(); filterProducts(); closeModal(); showToast('Held sale resumed');
+  }));
+  overlay.querySelectorAll('.delete-held').forEach(btn => btn.addEventListener('click', async () => {
+    if (!window.confirm('Delete this held sale?')) return;
+    await deletePOSHeldSale(btn.dataset.id);
+    heldSales = heldSales.filter(h => h.id !== btn.dataset.id);
+    closeModal(); showHeldSalesModal();
+  }));
+}
+
+function showRecentSalesModal() {
+  const { overlay, closeModal } = createModal({
+    id: 'recent-pos-sales', title: 'Recent Sales', size: 'modal-lg',
+    body: recentSales.length ? `<div class="pos-recent-sales-list">${recentSales.map(sale => `<button class="pos-recent-sale-row" data-id="${sale.id}"><span><strong>${escapeReceiptText(sale.invoice_number)}</strong><small>${formatUTCDateTime(sale.created_at)}</small></span><strong>${formatCurrency(Number(sale.total_amount || 0))}</strong></button>`).join('')}</div>` : `<div class="empty-state"><div class="empty-state-title">No recent sales</div></div>`,
+    footer: `<button class="btn btn-ghost" id="recent-close">Close</button>`
+  });
+  overlay.querySelector('#recent-close').addEventListener('click', closeModal);
+  overlay.querySelectorAll('.pos-recent-sale-row').forEach(btn => btn.addEventListener('click', async () => {
+    const sale = recentSales.find(s => s.id === btn.dataset.id); if (!sale) return;
+    const branchDetails = await getBranchDetails(staffBranchId).catch(() => ({}));
+    showReceiptModal(sale, (sale.sale_items || []).map(i => ({ product_name:i.product_name, quantity:Number(i.packaging_quantity || i.quantity), unit_price:Number(i.total_price || 0) / Math.max(1, Number(i.packaging_quantity || i.quantity)), packaging_type:i.packaging_type || 'unit', units_per_box:1 })), Number(sale.total_amount||0), Number(sale.discount||0), sale.payment_method || 'cash', branchDetails, sale.payment_details || null, Number(sale.change_due||0));
+  }));
+}
+
+async function showFavoriteProducts() {
+  const ids = readPOSLocalList('favorites');
+  if (!ids.length) { showToast('No favorite products yet. Use the star on a product card.', 'warning'); return; }
+  try {
+    const rows = await getPOSProductsByIds(currentUser.profile.pharmacy_id, staffBranchId, ids);
+    allProducts = rows;
+    document.getElementById('pos-product-grid').innerHTML = renderProductCards(rows);
+    bindProductClicks();
+    document.getElementById('pos-product-count').textContent = `${rows.length} favorite product(s)`;
+    document.getElementById('pos-load-more-wrap').hidden = true;
+  } catch (err) { showToast(`Could not load favorites: ${err.message}`, 'error'); }
+}
+async function showRecentProducts() {
+  const ids = readPOSLocalList('recent_products');
+  if (!ids.length) { showToast('No recent products yet.', 'warning'); return; }
+  try {
+    const rows = await getPOSProductsByIds(currentUser.profile.pharmacy_id, staffBranchId, ids);
+    allProducts = rows;
+    document.getElementById('pos-product-grid').innerHTML = renderProductCards(rows);
+    bindProductClicks();
+    document.getElementById('pos-product-count').textContent = `${rows.length} recently selected product(s)`;
+    document.getElementById('pos-load-more-wrap').hidden = true;
+  } catch (err) { showToast(`Could not load recent products: ${err.message}`, 'error'); }
 }
 
 async function processCheckout() {
   if (cart.length === 0) { showToast('Cart is empty', 'error'); return; }
-
   const checkoutBtn = document.getElementById('checkout-btn');
   checkoutBtn.disabled = true;
   checkoutBtn.textContent = 'Processing...';
 
-  const subtotal = cart.reduce((sum, i) => sum + (i.quantity * i.unit_price), 0);
-  const discount = parseFloat(document.getElementById('discount-input')?.value || 0) || 0;
-  const total = Math.max(0, subtotal - discount);
-  const paymentMethod = document.getElementById('payment-method').value;
+  const { subtotal, discount, total } = getCartTotals();
+  const payment = getPaymentState();
+  const paymentMethod = payment.method;
   const notes = document.getElementById('sale-notes').value;
 
   if (!staffBranchId) {
     showToast('Error: Your branch assignment could not be determined', 'error');
-    checkoutBtn.disabled = false;
-    checkoutBtn.textContent = 'Complete Sale';
-    return;
+    checkoutBtn.disabled = false; checkoutBtn.textContent = 'Complete Sale'; return;
+  }
+  if ([subtotal, discount, total].some(Number.isNaN)) {
+    showToast('Invalid cart calculations. Please refresh and try again.', 'error');
+    checkoutBtn.disabled = false; checkoutBtn.textContent = 'Complete Sale'; return;
+  }
+  if (payment.remaining > 0.009) {
+    showToast(`Payment is short by ${formatCurrency(payment.remaining)}`, 'error');
+    checkoutBtn.disabled = false; checkoutBtn.textContent = 'Complete Sale'; return;
   }
 
-  // Validate calculations
-  if (isNaN(subtotal) || isNaN(discount) || isNaN(total)) {
-    showToast('Error: Invalid cart calculations. Please refresh and try again.', 'error');
-    checkoutBtn.disabled = false;
-    checkoutBtn.textContent = 'Complete Sale';
-    return;
-  }
-
-  // Calculate actual units to deduct based on packaging type
   const cartItemsForSale = cart.map(item => {
     const product = allProducts.find(p => p.id === item.product_id);
-    const packagingInfo = getPackagingInfo(item.packaging_type, product?.units_per_box || 10);
+    const packagingInfo = getPackagingInfo(item.packaging_type, product?.units_per_box || item.units_per_box || 1);
     const actualUnits = item.quantity * packagingInfo.units_per_unit;
-    
     return {
       product_id: item.product_id,
       product_name: item.product_name,
-      quantity: actualUnits,  // Send actual units to be deducted from stock
-      unit_price: item.unit_price,
+      quantity: actualUnits,
+      unit_price: actualUnits > 0 ? Number(item.unit_price || 0) / packagingInfo.units_per_unit : Number(item.unit_price || 0),
       packaging_type: item.packaging_type,
       packaging_quantity: item.quantity
     };
@@ -534,52 +749,41 @@ async function processCheckout() {
   const salePayload = {
     customer_id: selectedCustomer || null,
     payment_method: paymentMethod,
-    total_amount: parseFloat(total.toFixed(2)),  // Ensure proper decimal format
-    discount: parseFloat(discount.toFixed(2)),   // Ensure proper decimal format
-    notes: notes || '',                           // Ensure string
+    total_amount: parseFloat(total.toFixed(2)),
+    discount: parseFloat(discount.toFixed(2)),
+    notes: notes || '',
     created_by: currentUser.id,
     pharmacy_id: currentUser.profile.pharmacy_id,
     branch_id: staffBranchId,
     status: 'completed',
-    created_at: new Date().toISOString()  // Use client's current timestamp with timezone
+    payment_details: payment.details,
+    cash_received: paymentMethod === 'cash' ? payment.paid : Number(payment.details.cash || 0),
+    change_due: payment.changeDue,
+    created_at: new Date().toISOString()
   };
 
   try {
     const sale = await createSale(salePayload, cartItemsForSale);
     showToast(`Sale completed! Invoice: ${sale.invoice_number}`);
-    // Fetch branch details for receipt header
     const branchDetails = await getBranchDetails(staffBranchId);
-    showReceiptModal(sale, cart.slice(), total, discount, paymentMethod, branchDetails);
+    showReceiptModal(sale, cart.slice(), total, discount, paymentMethod, branchDetails, payment.details, payment.changeDue);
     cart = [];
     selectedCustomer = null;
-    renderPOS(document.getElementById('page-content'), currentUser, currentLifecycleToken);
+    await renderPOS(document.getElementById('page-content'), currentUser, currentLifecycleToken);
   } catch (err) {
     let errorMsg = err.message || 'Unknown error occurred';
-    
-    // Parse PostgreSQL/Supabase errors for better user messages
-    if (errorMsg.includes('branch_id')) {
-      errorMsg = 'Branch information missing. Please contact administrator.';
-    } else if (errorMsg.includes('expired')) {
-      errorMsg = 'Cannot sell expired products. Remove them and try again.';
-    } else if (errorMsg.includes('stock')) {
-      errorMsg = 'Insufficient stock for some items. Refresh and try again.';
-    } else if (errorMsg.includes('record')) {
-      errorMsg = 'Database constraint error. Please try again.';
-    } else if (errorMsg.includes('pharmacy_id') || err.code === 'PGRST204') {
-      errorMsg = 'Please ensure you are logged in and assigned to a pharmacy.';
-    } else if (err.code === '42703') {
-      errorMsg = 'Database schema mismatch. Please contact support.';
-    } else if (err.code) {
-      errorMsg = `Database error (${err.code}). Please try again.`;
-    }
-    
+    if (errorMsg.includes('branch_id')) errorMsg = 'Branch information missing. Please contact administrator.';
+    else if (errorMsg.includes('expired')) errorMsg = 'Cannot sell expired products. Remove them and try again.';
+    else if (errorMsg.includes('stock')) errorMsg = 'Insufficient stock for some items. Refresh and try again.';
+    else if (errorMsg.includes('payment_method')) errorMsg = 'Split payment support requires the latest POS database migration.';
+    else if (err.code === '42703' || err.code === 'PGRST204') errorMsg = 'POS database upgrade required. Apply the latest Supabase migration.';
     showToast('Failed to complete sale: ' + errorMsg, 'error');
     checkoutBtn.disabled = false;
     checkoutBtn.textContent = 'Complete Sale';
   }
 }
 
-function showReceiptModal(sale, items, total, discount, paymentMethod, branchDetails = {}) {
+function showReceiptModal(sale, items, total, discount, paymentMethod, branchDetails = {}, paymentDetails = null, changeDue = 0) {
   const saleDate = formatUTCDateTime(sale.created_at);
   const branchName = branchDetails?.name || 'Pharmacy';
   const branchAddress = branchDetails?.address || '';
@@ -611,7 +815,7 @@ function showReceiptModal(sale, items, total, discount, paymentMethod, branchDet
           </div>
           <div class="cart-summary-row">
             <span class="text-muted">Payment</span>
-            <span class="font-semibold">${paymentMethod.replace('_', ' ')}</span>
+            <span class="font-semibold">${paymentMethod.replace('_', ' ')}${paymentDetails ? ` · ${Object.entries(paymentDetails).filter(([,v]) => Number(v)>0).map(([k,v]) => `${k.replace('_',' ')} ${formatCurrency(Number(v))}`).join(' + ')}` : ''}</span>
           </div>
         </div>
       </div>
@@ -662,6 +866,8 @@ function showReceiptModal(sale, items, total, discount, paymentMethod, branchDet
             ${discount > 0 ? `<div class="row success"><span>Discount:</span><span>-${window.pharmacySettings?.currency_symbol || 'Le'}${discount.toFixed(2)}</span></div>` : ''}
             <div class="row total success"><span>TOTAL:</span><span>${window.pharmacySettings?.currency_symbol || 'Le'}${total.toFixed(2)}</span></div>
             <div class="row"><span>Payment:</span><span>${paymentMethod.replace('_', ' ')}</span></div>
+            ${paymentDetails ? Object.entries(paymentDetails).filter(([,v]) => Number(v)>0).map(([k,v]) => `<div class="row"><span>${k.replace('_',' ')}:</span><span>${window.pharmacySettings?.currency_symbol || 'Le'}${Number(v).toFixed(2)}</span></div>`).join('') : ''}
+            ${changeDue > 0 ? `<div class="row"><span>Change:</span><span>${window.pharmacySettings?.currency_symbol || 'Le'}${Number(changeDue).toFixed(2)}</span></div>` : ''}
             <div class="divider"></div>
             <div style="text-align: center; font-size: 10px; margin-top: 10px;">${getConfiguredReceiptFooter(branchDetails)}</div>
           </div>
@@ -722,7 +928,7 @@ function showReceiptPreview() {
             </div>
             <div class="cart-summary-row">
               <span class="text-muted">Payment</span>
-              <span class="font-semibold">${paymentMethod.replace('_', ' ')}</span>
+              <span class="font-semibold">${paymentMethod.replace('_', ' ')}${paymentDetails ? ` · ${Object.entries(paymentDetails).filter(([,v]) => Number(v)>0).map(([k,v]) => `${k.replace('_',' ')} ${formatCurrency(Number(v))}`).join(' + ')}` : ''}</span>
             </div>
           </div>
         </div>
@@ -812,7 +1018,7 @@ function showReceiptPreview() {
             </div>
             <div class="cart-summary-row">
               <span class="text-muted">Payment</span>
-              <span class="font-semibold">${paymentMethod.replace('_', ' ')}</span>
+              <span class="font-semibold">${paymentMethod.replace('_', ' ')}${paymentDetails ? ` · ${Object.entries(paymentDetails).filter(([,v]) => Number(v)>0).map(([k,v]) => `${k.replace('_',' ')} ${formatCurrency(Number(v))}`).join(' + ')}` : ''}</span>
             </div>
           </div>
         </div>
