@@ -122,11 +122,11 @@ function renderPOSView(container) {
       <div class="pos-head-actions">
         <button class="btn btn-ghost" id="pos-held-sales">⏸ Held Sales <span class="badge badge-gray" id="held-sales-count">${heldSales.length}</span></button>
         <button class="btn btn-ghost" id="pos-recent-sales">🧾 Recent Sales</button>
-        <select class="form-select" id="customer-select">
+        <select class="form-select pos-customer-select" id="customer-select" aria-label="Select customer">
           <option value="">Walk-in Customer</option>
           ${allCustomers.map(c => `<option value="${c.id}">${escapeReceiptText(c.name)} ${c.phone ? '('+escapeReceiptText(c.phone)+')' : ''}</option>`).join('')}
         </select>
-        <button class="btn btn-ghost" id="add-customer-quick">+ New Customer</button>
+        <button class="btn btn-ghost pos-new-customer-btn" id="add-customer-quick">+ New Customer</button>
       </div>
     </div>
 
@@ -207,10 +207,6 @@ function renderPOSView(container) {
             <div class="pos-change-row"><span>Amount Remaining</span><strong id="split-remaining">${formatCurrency(0)}</strong></div>
           </div>
 
-          <div class="form-group" style="margin-bottom:0.875rem">
-            <label class="form-label">Notes (optional)</label>
-            <input type="text" class="form-input" id="sale-notes" placeholder="Any notes..." />
-          </div>
           <div class="pos-checkout-actions">
             <button class="btn btn-ghost" id="preview-receipt-btn" disabled>Preview</button>
             <button class="btn btn-primary btn-lg" id="checkout-btn" disabled>Complete Sale</button>
@@ -633,14 +629,13 @@ async function holdCurrentSale() {
       label: name.trim() || 'Held sale',
       cart_json: cart,
       discount,
-      notes: document.getElementById('sale-notes')?.value || ''
+      notes: ''
     });
     heldSales = [held, ...heldSales.filter(h => h.id !== held.id)];
     cart = [];
     selectedCustomer = null;
     document.getElementById('customer-select').value = '';
     document.getElementById('discount-input').value = '0';
-    document.getElementById('sale-notes').value = '';
     document.getElementById('held-sales-count').textContent = heldSales.length;
     renderCart();
     filterProducts();
@@ -662,7 +657,6 @@ function showHeldSalesModal() {
     selectedCustomer = held.customer_id || null;
     document.getElementById('customer-select').value = selectedCustomer || '';
     document.getElementById('discount-input').value = held.discount || 0;
-    document.getElementById('sale-notes').value = held.notes || '';
     await deletePOSHeldSale(held.id).catch(() => {});
     heldSales = heldSales.filter(h => h.id !== held.id);
     document.getElementById('held-sales-count').textContent = heldSales.length;
@@ -724,7 +718,7 @@ async function processCheckout() {
   const { subtotal, discount, total } = getCartTotals();
   const payment = getPaymentState();
   const paymentMethod = payment.method;
-  const notes = document.getElementById('sale-notes').value;
+  const notes = '';
 
   if (!staffBranchId) {
     showToast('Error: Your branch assignment could not be determined', 'error');
