@@ -2,6 +2,20 @@
 import { getSales, enrichSalesWithItems, getPharmacySettings, getBranchDetails } from '../../database.js';
 import { formatCurrency, formatDate, showToast, formatUTCDate, formatUTCTime, formatUTCDateTime } from '../../utils.js';
 
+function escapeReceiptText(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+function getConfiguredReceiptFooter(branchName = 'Pharmacy') {
+  const configured = window.pharmacySettings?.operational_settings?.receipt_footer;
+  return escapeReceiptText(String(configured || '').trim() || `${getConfiguredReceiptFooter(branchName)}`);
+}
+
 export async function renderSalesHistory(container, user) {
   const pharmacyId = user?.profile?.pharmacy_id;
   const branchId = user?.profile?.branch_id;
@@ -329,7 +343,7 @@ function renderSalesHistoryView(container, sales, user, pharmacyId, branchId) {
         ` : ''}
 
         <div style="margin-top:1rem;text-align:center;border-top:1px dashed;padding-top:1rem;font-size:0.75rem;color:var(--gray-500)">
-          Thank you for visiting, ${branchName}!
+          ${getConfiguredReceiptFooter(branchName)}
         </div>
       `;
 

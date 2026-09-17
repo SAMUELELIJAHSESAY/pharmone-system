@@ -37,6 +37,12 @@ let activeUser = null;
 let currentView = null;
 let currentParams = {};
 let currentSalesmanFeatures = null; // Store salesman features globally
+const DEFAULT_MODULE_FEATURES = {
+  inventory: true, sales: true, customers: true, patients: true, suppliers: true, purchases: true,
+  returns: true, alerts: true, stock_transfers: true, staff: true, branches: true, expenses: true,
+  reports: true, sales_reports: true, daily_records: true
+};
+let currentModuleFeatures = { ...DEFAULT_MODULE_FEATURES };
 let currentImpersonation = null;
 let globalSearchDocumentController = new AbortController();
 
@@ -251,11 +257,25 @@ export function renderApp(user) {
   activeUser = getActiveUser();
   const role = activeUser.profile?.role || 'salesman';
 
-  // Load pharmacy settings globally for currency display on all pages
+  // Load pharmacy settings globally for currency display and tenant-level
+  // module availability. Module controls are a workspace/UI control; RLS remains
+  // the database security boundary.
+  currentModuleFeatures = { ...DEFAULT_MODULE_FEATURES };
   if (activeUser.profile?.pharmacy_id) {
     getPharmacySettings(activeUser.profile.pharmacy_id)
       .then(settings => {
         window.pharmacySettings = settings || { currency_symbol: 'Le', currency_code: 'NLE' };
+        currentModuleFeatures = { ...DEFAULT_MODULE_FEATURES, ...(settings?.module_features || {}) };
+        refreshSidebarNavigation(activeUser);
+
+        // If a restored/deep-linked view has since been disabled by Super Admin,
+        // immediately replace it with the role's safe landing page.
+        if (!isModuleViewEnabled(currentView)) {
+          const fallback = role === 'admin' ? 'admin-dashboard'
+            : role === 'inventory_manager' ? (currentModuleFeatures.inventory !== false ? 'inventory' : currentModuleFeatures.branches !== false ? 'branches' : null)
+            : 'salesman-dashboard';
+          if (fallback && currentView && currentView !== fallback) navigate(fallback);
+        }
       })
       .catch(err => console.error('Failed to load pharmacy settings:', err));
 
@@ -286,7 +306,7 @@ export function renderApp(user) {
     <div class="app-shell">
       <div class="sidebar-backdrop" id="sidebar-backdrop"></div>
       <aside class="sidebar" id="sidebar" aria-label="Primary navigation">
-        ${renderSidebar(activeUser, null)}
+        ${renderSidebar(activeUser, currentSalesmanFeatures, currentModuleFeatures)}
       </aside>
       <div class="main-content">
         <header class="topbar">
@@ -323,6 +343,7 @@ export function renderApp(user) {
             </button>
           </div>
         </header>
+        ${currentImpersonation ? `<div class="super-admin-access-banner"><strong>SUPER ADMIN ACCESS MODE</strong><span>You are viewing: ${currentImpersonation.pharmacy?.name || 'Selected pharmacy'}</span><button type="button" class="btn btn-warning btn-sm" id="access-banner-exit">Exit Pharmacy</button></div>` : ''}
         <main class="page-content" id="page-content">
           <div class="loading-spinner"></div>
         </main>
@@ -334,6 +355,9 @@ export function renderApp(user) {
     cleanupActiveView();
     await signOut();
   });
+
+  const accessBannerExit = document.getElementById('access-banner-exit');
+  if (accessBannerExit) accessBannerExit.addEventListener('click', () => clearImpersonation());
 
   const impersonationNote = document.getElementById('impersonation-note');
   const exitImpersonationBtn = document.getElementById('exit-impersonation-btn');
@@ -447,19 +471,51 @@ export function renderApp(user) {
  * Update sidebar with feature-filtered navigation for salesman
  * Called after features are loaded from database
  */
-function updateSidebarWithFeatures(user, features) {
+function refreshSidebarNavigation(user = activeUser) {
   const sidebarNav = document.querySelector('.sidebar-nav');
-  if (sidebarNav && user) {
-    sidebarNav.innerHTML = renderSidebar(user, features).match(/<nav class="sidebar-nav">([\s\S]*?)<\/nav>/)?.[1] || '';
-    // Re-attach click handlers to new nav items
-    document.querySelectorAll('.nav-item').forEach(item => {
-      item.addEventListener('click', () => {
-        const view = item.dataset.view;
-        if (view) navigate(view);
-        closeMobileSidebar();
-      });
+  if (!sidebarNav || !user) return;
+  sidebarNav.innerHTML = renderSidebar(user, currentSalesmanFeatures, currentModuleFeatures).match(/<nav class="sidebar-nav">([\s\S]*?)<\/nav>/)?.[1] || '';
+  document.querySelectorAll('.nav-item').forEach(item => {
+    item.classList.toggle('active', item.dataset.view === currentView);
+    item.addEventListener('click', () => {
+      const view = item.dataset.view;
+      if (view) navigate(view);
+      closeMobileSidebar();
     });
-  }
+  });
+}
+
+function updateSidebarWithFeatures(user, features) {
+  currentSalesmanFeatures = features;
+  refreshSidebarNavigation(user);
+}
+
+const VIEW_MODULE_MAP = {
+  inventory: 'inventory',
+  sales: 'sales',
+  pos: 'sales',
+  'sales-history': 'sales',
+  customers: 'customers',
+  patients: 'patients',
+  suppliers: 'suppliers',
+  purchases: 'purchases',
+  returns: 'returns',
+  'returns-management': 'returns',
+  'returns-request': 'returns',
+  alerts: 'alerts',
+  'stock-transfers': 'stock_transfers',
+  staff: 'staff',
+  branches: 'branches',
+  'branch-details': 'branches',
+  expenses: 'expenses',
+  reports: 'reports',
+  'sales-reports': 'sales_reports',
+  'daily-reports': 'daily_records'
+};
+
+function isModuleViewEnabled(view) {
+  const key = VIEW_MODULE_MAP[view];
+  return !key || currentModuleFeatures?.[key] !== false;
 }
 
 /**
@@ -498,6 +554,28 @@ export function navigate(view, params = {}) {
   content.innerHTML = '<div class="loading-spinner"></div>';
 
   const activeRole = activeUser.profile?.role;
+
+  if (activeRole !== 'super_admin' && !isModuleViewEnabled(view)) {
+    const moduleKey = VIEW_MODULE_MAP[view];
+    content.innerHTML = `
+      <div class="animate-in">
+        <div style="padding: 2rem; text-align: center;">
+          <div style="font-size: 3rem; margin-bottom: 1rem">🔒</div>
+          <div style="font-size: 1.5rem; font-weight: 600; margin-bottom: 0.5rem">Module Disabled</div>
+          <div style="color: var(--gray-600); margin-bottom: 2rem">The ${moduleKey?.replace(/_/g, ' ') || 'requested'} workspace has been disabled for this pharmacy by the platform administrator.</div>
+          <button type="button" class="btn btn-primary" id="module-disabled-home">Go to Dashboard</button>
+        </div>
+      </div>
+    `;
+    document.getElementById('module-disabled-home')?.addEventListener('click', () => {
+      const fallback = activeRole === 'salesman' ? 'salesman-dashboard'
+        : activeRole === 'inventory_manager' ? (currentModuleFeatures.inventory !== false ? 'inventory' : 'branches')
+        : 'admin-dashboard';
+      navigate(fallback);
+    });
+    applyPageTitle(view, 'Module Disabled');
+    return;
+  }
 
   // Check if salesman is trying to access a disabled feature
   if (activeRole === 'salesman') {
@@ -551,8 +629,8 @@ export function navigate(view, params = {}) {
 
   switch (view) {
     case 'super-dashboard': renderSuperAdminDashboard(content, activeUser); break;
-    case 'pharmacies': renderPharmacies(content, activeUser); break;
-    case 'all-users': renderAllUsers(content, activeUser); break;
+    case 'pharmacies': renderPharmacies(content, activeUser, currentParams); break;
+    case 'all-users': renderAllUsers(content, activeUser, currentParams.search || ''); break;
     case 'settings': renderSettings(content, activeUser); break;
     case 'admin-dashboard': renderAdminDashboard(content, activeUser); break;
     case 'inventory': renderInventory(content, activeUser, currentParams.filterType, currentParams.search || '', currentParams.branchId || null); break;

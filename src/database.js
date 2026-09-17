@@ -111,16 +111,34 @@ export async function updatePharmacy(id, payload) {
 
 // ===================== PHARMACY SETTINGS =====================
 export async function getPharmacySettings(pharmacyId) {
-  const { data, error } = await supabase
+  const enhancedSelect = 'id, name, branding_color, currency_code, currency_symbol, timezone, tax_enabled, tax_rate, discount_enabled, discount_rules, logo_url, module_features, operational_settings, updated_at';
+  let { data, error } = await supabase
     .from('pharmacies')
-    .select('id, name, branding_color, currency_code, currency_symbol, tax_enabled, tax_rate, discount_enabled, discount_rules, logo_url, updated_at')
+    .select(enhancedSelect)
     .eq('id', pharmacyId)
     .single();
+
+  // Keep deployments usable while the optional Settings Center migration is
+  // being applied. Older schemas simply fall back to the legacy settings fields.
+  if (error && (error.code === '42703' || /module_features|operational_settings/i.test(error.message || ''))) {
+    const legacy = await supabase
+      .from('pharmacies')
+      .select('id, name, branding_color, currency_code, currency_symbol, timezone, tax_enabled, tax_rate, discount_enabled, discount_rules, logo_url, updated_at')
+      .eq('id', pharmacyId)
+      .single();
+    data = legacy.data;
+    error = legacy.error;
+  }
+
   if (error) {
     console.error('Error fetching pharmacy settings:', error);
     throw error;
   }
-  return data;
+  return {
+    ...(data || {}),
+    module_features: data?.module_features || null,
+    operational_settings: data?.operational_settings || null
+  };
 }
 
 export async function updatePharmacySettings(pharmacyId, settings) {
@@ -160,6 +178,163 @@ export async function updatePharmacySettings(pharmacyId, settings) {
   return data;
 }
 
+
+const SUPER_ADMIN_DEFAULT_MODULE_FEATURES = Object.freeze({
+  inventory: true,
+  sales: true,
+  customers: true,
+  patients: true,
+  suppliers: true,
+  purchases: true,
+  returns: true,
+  alerts: true,
+  stock_transfers: true,
+  staff: true,
+  branches: true,
+  expenses: true,
+  reports: true,
+  sales_reports: true,
+  daily_records: true
+});
+
+function fallbackPlatformSettings() {
+  return {
+    settings: {
+      branding_color: '#2563eb',
+      currency_code: 'NLE',
+      currency_symbol: 'Le',
+      timezone: 'Africa/Freetown',
+      tax_enabled: false,
+      tax_rate: 0,
+      discount_enabled: true,
+      discount_rules: { max_discount: 10, min_cart_amount: 0 },
+      default_low_stock_threshold: 5,
+      receipt_footer: 'Thank you for choosing SamMia Pharm.',
+      module_features: { ...SUPER_ADMIN_DEFAULT_MODULE_FEATURES },
+      updated_at: null
+    },
+    summary: {
+      total_pharmacies: 0,
+      tax_enabled_pharmacies: 0,
+      custom_branding_pharmacies: 0,
+      restricted_pharmacies: 0
+    },
+    migrationRequired: true
+  };
+}
+
+function isMissingSettingsRpc(error) {
+  return ['PGRST202', '42883', '42P01', '42703'].includes(error?.code) ||
+    /function .* does not exist|platform_settings|module_features|operational_settings/i.test(error?.message || '');
+}
+
+/** Load platform-wide defaults and summary counts for the Super Admin Settings center. */
+export async function getSuperAdminPlatformSettings() {
+  const { data, error } = await supabase.rpc('get_super_admin_platform_settings');
+  if (error) {
+    if (isMissingSettingsRpc(error)) {
+      console.warn('[settings] Settings-center migration is not applied yet:', error.message);
+      return fallbackPlatformSettings();
+    }
+    throw error;
+  }
+  return { ...(data || fallbackPlatformSettings()), migrationRequired: false };
+}
+
+/** Persist platform defaults through a guarded SECURITY DEFINER RPC. */
+export async function updateSuperAdminPlatformSettings(settings, note = '') {
+  const { data, error } = await supabase.rpc('super_admin_update_platform_settings', {
+    p_settings: settings || {},
+    p_note: String(note || '').trim() || null
+  });
+  if (error) {
+    if (isMissingSettingsRpc(error)) throw new Error('Apply the Super Admin Settings migration before saving platform defaults.');
+    throw error;
+  }
+  return data;
+}
+
+/** Load one pharmacy configuration together with platform defaults and recent changes. */
+export async function getSuperAdminPharmacyConfiguration(pharmacyId) {
+  if (!pharmacyId) throw new Error('Pharmacy is required.');
+  const { data, error } = await supabase.rpc('get_super_admin_pharmacy_configuration', {
+    p_pharmacy_id: pharmacyId
+  });
+  if (error) {
+    if (isMissingSettingsRpc(error)) {
+      const settings = await getPharmacySettings(pharmacyId);
+      return {
+        pharmacy: {
+          ...settings,
+          module_features: { ...SUPER_ADMIN_DEFAULT_MODULE_FEATURES, ...(settings?.module_features || {}) },
+          operational_settings: {
+            default_low_stock_threshold: 5,
+            receipt_footer: 'Thank you for choosing SamMia Pharm.',
+            ...(settings?.operational_settings || {})
+          }
+        },
+        platform_defaults: fallbackPlatformSettings().settings,
+        recent_changes: [],
+        migrationRequired: true
+      };
+    }
+    throw error;
+  }
+  return { ...(data || {}), migrationRequired: false };
+}
+
+/** Update selected pharmacy overrides / module availability with an audit record. */
+export async function updateSuperAdminPharmacyConfiguration(pharmacyId, settings, note = '', section = 'pharmacy_overrides') {
+  const { data, error } = await supabase.rpc('super_admin_update_pharmacy_configuration', {
+    p_pharmacy_id: pharmacyId,
+    p_settings: settings || {},
+    p_note: String(note || '').trim() || null,
+    p_section: section || 'pharmacy_overrides'
+  });
+  if (error) {
+    if (isMissingSettingsRpc(error)) throw new Error('Apply the Super Admin Settings migration before saving pharmacy configuration.');
+    throw error;
+  }
+  return data;
+}
+
+/** Reset a pharmacy financial/display/module defaults to the current platform defaults. */
+export async function resetSuperAdminPharmacyConfiguration(pharmacyId, note = '') {
+  const { data, error } = await supabase.rpc('super_admin_reset_pharmacy_configuration', {
+    p_pharmacy_id: pharmacyId,
+    p_note: String(note || '').trim() || null
+  });
+  if (error) {
+    if (isMissingSettingsRpc(error)) throw new Error('Apply the Super Admin Settings migration before resetting pharmacy configuration.');
+    throw error;
+  }
+  return data;
+}
+
+/** Server-paged settings audit history. */
+export async function getSuperAdminSettingsAuditPage({
+  page = 1,
+  pageSize = 30,
+  scope = 'all',
+  pharmacyId = null
+} = {}) {
+  const safePage = Math.max(1, Number(page) || 1);
+  const safeSize = [25, 30, 50].includes(Number(pageSize)) ? Number(pageSize) : 30;
+  const { data, error } = await supabase.rpc('get_super_admin_settings_audit_page', {
+    p_page: safePage,
+    p_page_size: safeSize,
+    p_scope: scope || 'all',
+    p_pharmacy_id: pharmacyId || null
+  });
+  if (error) {
+    if (isMissingSettingsRpc(error)) {
+      return { rows: [], count: 0, page: 1, page_size: safeSize, page_count: 1, migrationRequired: true };
+    }
+    throw error;
+  }
+  return { ...(data || {}), migrationRequired: false };
+}
+
 // ===================== PROFILES =====================
 export async function getProfiles(pharmacyId = null) {
   let query = supabase.from('profiles').select('*, pharmacies(*)').order('created_at', { ascending: false });
@@ -173,6 +348,202 @@ export async function updateProfile(id, payload) {
   const { data, error } = await supabase.from('profiles').update(payload).eq('id', id).select().single();
   if (error) throw error;
   return data;
+}
+
+
+function normalizePlatformUserStatus(profile = {}) {
+  if (profile.account_status === 'locked') return 'locked';
+  if (profile.account_status === 'disabled' || profile.is_active === false) return 'disabled';
+  return 'active';
+}
+
+/**
+ * Server-side Super Admin user directory. The RPC enriches each visible row
+ * with Auth last-sign-in information and active branch assignments without
+ * downloading the entire platform directory into the browser.
+ */
+export async function getSuperAdminUsersPage({
+  page = 1,
+  pageSize = 30,
+  search = '',
+  role = '',
+  status = 'all',
+  pharmacyId = null,
+  branchId = null
+} = {}) {
+  const safePage = Math.max(1, Number(page) || 1);
+  const safeSize = [25, 30, 50].includes(Number(pageSize)) ? Number(pageSize) : 30;
+  const { data, error } = await supabase.rpc('get_super_admin_users_page', {
+    p_page: safePage,
+    p_page_size: safeSize,
+    p_search: String(search || '').trim().slice(0, 100),
+    p_role: role || null,
+    p_status: status || 'all',
+    p_pharmacy_id: pharmacyId || null,
+    p_branch_id: branchId || null
+  });
+
+  if (!error && data) {
+    return {
+      rows: data.rows || [],
+      count: Number(data.count || 0),
+      page: Number(data.page || safePage),
+      pageSize: Number(data.page_size || safeSize),
+      pageCount: Math.max(1, Number(data.page_count || 1)),
+      usingFallback: false
+    };
+  }
+
+  const missingRpc = error && (error.code === 'PGRST202' || /get_super_admin_users_page/i.test(error.message || ''));
+  if (error && !missingRpc) throw error;
+
+  console.warn('Super Admin user-management RPC is unavailable; using compatibility queries. Apply the latest Supabase migration for Auth activity and account locking.');
+  const from = (safePage - 1) * safeSize;
+  const to = from + safeSize - 1;
+  const term = String(search || '').trim().replace(/[%_(),\\"']/g, ' ').replace(/\s+/g, ' ').slice(0, 80);
+
+  let branchUserIds = null;
+  if (branchId) {
+    const { data: assignments, error: assignmentError } = await supabase
+      .from('staff_branch_assignments').select('staff_id').eq('branch_id', branchId).eq('is_active', true);
+    if (assignmentError) throw assignmentError;
+    branchUserIds = [...new Set((assignments || []).map(row => row.staff_id).filter(Boolean))];
+    if (!branchUserIds.length) return { rows: [], count: 0, page: 1, pageSize: safeSize, pageCount: 1, usingFallback: true };
+  }
+
+  let query = supabase
+    .from('profiles')
+    .select('id,full_name,email,role,pharmacy_id,is_active,created_at,pharmacies(id,name)', { count: 'exact' })
+    .order('created_at', { ascending: false })
+    .range(from, to);
+  if (term) query = query.or(`full_name.ilike.%${term}%,email.ilike.%${term}%`);
+  if (role) query = query.eq('role', role);
+  if (pharmacyId) query = query.eq('pharmacy_id', pharmacyId);
+  if (status === 'active') query = query.eq('is_active', true);
+  if (status === 'disabled' || status === 'locked') query = query.eq('is_active', false);
+  if (branchUserIds) query = query.in('id', branchUserIds);
+
+  const { data: rows, error: pageError, count } = await query;
+  if (pageError) throw pageError;
+  const ids = (rows || []).map(row => row.id);
+  let assignments = [];
+  if (ids.length) {
+    const { data: assignmentRows, error: assignmentError } = await supabase
+      .from('staff_branch_assignments')
+      .select('staff_id,role_in_branch,branches(id,name)')
+      .in('staff_id', ids)
+      .eq('is_active', true);
+    if (!assignmentError) assignments = assignmentRows || [];
+  }
+  const byUser = new Map();
+  assignments.forEach(row => {
+    const list = byUser.get(row.staff_id) || [];
+    list.push({ branch_id: row.branches?.id, branch_name: row.branches?.name, role_in_branch: row.role_in_branch });
+    byUser.set(row.staff_id, list);
+  });
+  return {
+    rows: (rows || []).map(row => ({
+      ...row,
+      pharmacy_name: row.pharmacies?.name || null,
+      account_status: row.is_active === false ? 'disabled' : 'active',
+      branch_assignments: byUser.get(row.id) || [],
+      last_sign_in_at: null,
+      last_activity_at: null
+    })),
+    count: Number(count || 0),
+    page: safePage,
+    pageSize: safeSize,
+    pageCount: Math.max(1, Math.ceil(Number(count || 0) / safeSize)),
+    usingFallback: true
+  };
+}
+
+export async function getSuperAdminUserSummary() {
+  const count = async (apply) => {
+    let query = supabase.from('profiles').select('id', { count: 'exact', head: true });
+    query = apply ? apply(query) : query;
+    const { count: total, error } = await query;
+    if (error) throw error;
+    return Number(total || 0);
+  };
+  const [total, active, disabled, superAdmins] = await Promise.all([
+    count(),
+    count(q => q.eq('is_active', true)),
+    count(q => q.eq('is_active', false)),
+    count(q => q.eq('role', 'super_admin'))
+  ]);
+  return { total, active, disabled, superAdmins };
+}
+
+export async function getSuperAdminUserFilterOptions() {
+  const [pharmaciesResult, branchesResult] = await Promise.all([
+    supabase.from('pharmacies').select('id,name,is_active').order('name'),
+    supabase.from('branches').select('id,name,pharmacy_id,is_active').order('name')
+  ]);
+  if (pharmaciesResult.error) throw pharmaciesResult.error;
+  if (branchesResult.error) throw branchesResult.error;
+  return { pharmacies: pharmaciesResult.data || [], branches: branchesResult.data || [] };
+}
+
+export async function getSuperAdminUserDetail(userId) {
+  const { data, error } = await supabase.rpc('get_super_admin_user_detail', { p_user_id: userId });
+  if (!error && data) return { ...data, usingFallback: false };
+  const missingRpc = error && (error.code === 'PGRST202' || /get_super_admin_user_detail/i.test(error.message || ''));
+  if (error && !missingRpc) throw error;
+
+  const [profileResult, assignmentsResult, salesResult] = await Promise.all([
+    supabase.from('profiles').select('*,pharmacies(id,name)').eq('id', userId).single(),
+    supabase.from('staff_branch_assignments').select('branch_id,role_in_branch,assigned_date,branches(id,name)').eq('staff_id', userId).eq('is_active', true),
+    supabase.from('sales').select('id,total_amount,created_at').eq('created_by', userId).eq('status', 'completed').order('created_at', { ascending: false }).limit(1000)
+  ]);
+  if (profileResult.error) throw profileResult.error;
+  if (assignmentsResult.error) throw assignmentsResult.error;
+  if (salesResult.error) throw salesResult.error;
+  const profile = profileResult.data;
+  const sales = salesResult.data || [];
+  return {
+    profile: {
+      ...profile,
+      pharmacy_name: profile.pharmacies?.name || null,
+      account_status: normalizePlatformUserStatus(profile)
+    },
+    security: { last_sign_in_at: null, email_confirmed_at: null, auth_created_at: profile.created_at, phone: null },
+    branches: (assignmentsResult.data || []).map(row => ({ branch_id: row.branch_id, branch_name: row.branches?.name, role_in_branch: row.role_in_branch, assigned_date: row.assigned_date })),
+    sales: {
+      transactions: sales.length,
+      total_sales: sales.reduce((sum, row) => sum + Number(row.total_amount || 0), 0),
+      last_sale_at: sales[0]?.created_at || null
+    },
+    audit: [],
+    usingFallback: true
+  };
+}
+
+export async function setSuperAdminUserAccountState(userId, status, reason = '') {
+  const { error } = await supabase.rpc('super_admin_set_user_account_state', {
+    p_target_user: userId,
+    p_status: status,
+    p_reason: reason || null
+  });
+  if (error) throw error;
+}
+
+export async function changeSuperAdminUserRole(userId, role, reason = '') {
+  const { error } = await supabase.rpc('super_admin_change_user_role', {
+    p_target_user: userId,
+    p_role: role,
+    p_reason: reason || null
+  });
+  if (error) throw error;
+}
+
+export async function revokeSuperAdminUserSessions(userId, reason = '') {
+  const { data, error } = await supabase.rpc('super_admin_revoke_user_sessions', {
+    p_target_user: userId,
+    p_reason: reason || null
+  });
+  if (error) throw error;
+  return Number(data || 0);
 }
 
 /**
@@ -1753,6 +2124,263 @@ export async function getSuperAdminStats() {
     totalRevenue,
     pharmacies: pharmacies.data || []
   };
+}
+
+
+function getSuperAdminPeriodRange(period = 'this_month') {
+  const now = new Date();
+  const utcDay = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  const tomorrow = new Date(utcDay.getTime() + 86400000);
+  let start;
+  let end = tomorrow;
+  let previousStart = null;
+  let previousEnd = null;
+
+  if (period === 'today') {
+    start = utcDay;
+    previousEnd = new Date(start);
+    previousStart = new Date(start.getTime() - 86400000);
+  } else if (period === 'yesterday') {
+    end = utcDay;
+    start = new Date(utcDay.getTime() - 86400000);
+    previousEnd = new Date(start);
+    previousStart = new Date(start.getTime() - 86400000);
+  } else if (period === 'last_7_days') {
+    start = new Date(utcDay.getTime() - (6 * 86400000));
+    previousEnd = new Date(start);
+    previousStart = new Date(start.getTime() - (7 * 86400000));
+  } else if (period === 'this_year') {
+    start = new Date(Date.UTC(now.getUTCFullYear(), 0, 1));
+    previousStart = new Date(Date.UTC(now.getUTCFullYear() - 1, 0, 1));
+    previousEnd = new Date(Date.UTC(now.getUTCFullYear(), 0, 1));
+  } else if (period === 'all_time') {
+    start = new Date('2000-01-01T00:00:00.000Z');
+  } else {
+    start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+    previousEnd = new Date(start);
+    previousStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1));
+  }
+
+  return {
+    start: start.toISOString(),
+    end: end.toISOString(),
+    previousStart: previousStart?.toISOString() || null,
+    previousEnd: previousEnd?.toISOString() || null
+  };
+}
+
+/**
+ * Platform-wide Super Admin overview. Uses the secure aggregate RPC when the
+ * latest migration is available and falls back to compatible queries for
+ * deployments that have not applied it yet.
+ */
+export async function getSuperAdminOverview(period = 'this_month') {
+  const range = getSuperAdminPeriodRange(period);
+  const { data, error } = await supabase.rpc('get_super_admin_overview', {
+    p_start: range.start,
+    p_end: range.end,
+    p_prev_start: range.previousStart,
+    p_prev_end: range.previousEnd
+  });
+
+  if (!error && data) return { ...data, period, range, usingFallback: false };
+
+  const missingRpc = error && (error.code === 'PGRST202' || /get_super_admin_overview/i.test(error.message || ''));
+  if (error && !missingRpc) throw error;
+
+  console.warn('get_super_admin_overview RPC is unavailable; using compatibility queries. Apply the latest Supabase migration for best performance.');
+
+  const [pharmaciesResult, profilesResult, branchesResult, periodSalesResult, previousSalesResult, recentSalesResult] = await Promise.all([
+    supabase.from('pharmacies').select('id,name,email,is_active,created_at').order('created_at', { ascending: false }),
+    supabase.from('profiles').select('id,full_name,role,pharmacy_id,is_active,created_at').order('created_at', { ascending: false }),
+    supabase.from('branches').select('id,pharmacy_id,is_active'),
+    supabase.from('sales').select('id,invoice_number,total_amount,pharmacy_id,created_at').eq('status', 'completed').gte('created_at', range.start).lt('created_at', range.end).order('created_at', { ascending: false }).limit(5000),
+    range.previousStart
+      ? supabase.from('sales').select('id,total_amount').eq('status', 'completed').gte('created_at', range.previousStart).lt('created_at', range.previousEnd).limit(5000)
+      : Promise.resolve({ data: [], error: null }),
+    supabase.from('sales').select('id,invoice_number,total_amount,pharmacy_id,created_at').eq('status', 'completed').order('created_at', { ascending: false }).limit(250)
+  ]);
+
+  for (const result of [pharmaciesResult, profilesResult, branchesResult, periodSalesResult, previousSalesResult, recentSalesResult]) {
+    if (result.error) throw result.error;
+  }
+
+  const pharmacies = pharmaciesResult.data || [];
+  const profiles = profilesResult.data || [];
+  const branches = branchesResult.data || [];
+  const periodSales = periodSalesResult.data || [];
+  const previousSales = previousSalesResult.data || [];
+  const recentSales = recentSalesResult.data || [];
+  const pharmacyMap = new Map(pharmacies.map(p => [p.id, p]));
+
+  const pharmacyRows = pharmacies.map(p => {
+    const pharmacyUsers = profiles.filter(row => row.pharmacy_id === p.id);
+    const pharmacyBranches = branches.filter(row => row.pharmacy_id === p.id && row.is_active);
+    const selectedSales = periodSales.filter(row => row.pharmacy_id === p.id);
+    const latestSale = recentSales.find(row => row.pharmacy_id === p.id);
+    return {
+      ...p,
+      user_count: pharmacyUsers.length,
+      active_user_count: pharmacyUsers.filter(row => row.is_active !== false).length,
+      branch_count: pharmacyBranches.length,
+      period_revenue: selectedSales.reduce((sum, row) => sum + Number(row.total_amount || 0), 0),
+      period_transactions: selectedSales.length,
+      last_sale_at: latestSale?.created_at || null
+    };
+  });
+
+  const trend = [];
+  for (let offset = 6; offset >= 0; offset -= 1) {
+    const dayStart = new Date(utcMidnight(Date.now() - offset * 86400000));
+    const dayEnd = new Date(dayStart.getTime() + 86400000);
+    const rows = recentSales.filter(row => {
+      const when = new Date(row.created_at);
+      return when >= dayStart && when < dayEnd;
+    });
+    trend.push({
+      date: dayStart.toISOString().slice(0, 10),
+      revenue: rows.reduce((sum, row) => sum + Number(row.total_amount || 0), 0),
+      transactions: rows.length
+    });
+  }
+
+  const activities = [
+    ...pharmacies.slice(0, 6).map(p => ({ type: 'pharmacy_created', time: p.created_at, title: 'Pharmacy registered', detail: p.name, pharmacy_id: p.id })),
+    ...profiles.slice(0, 6).map(pr => ({
+      type: 'user_created',
+      time: pr.created_at,
+      title: 'User joined',
+      detail: [pr.full_name, pr.role, pharmacyMap.get(pr.pharmacy_id)?.name].filter(Boolean).join(' · '),
+      pharmacy_id: pr.pharmacy_id
+    })),
+    ...recentSales.slice(0, 8).map(sl => ({
+      type: 'sale_completed',
+      time: sl.created_at,
+      title: 'Sale completed',
+      detail: [pharmacyMap.get(sl.pharmacy_id)?.name, sl.invoice_number].filter(Boolean).join(' · '),
+      pharmacy_id: sl.pharmacy_id,
+      amount: sl.total_amount
+    }))
+  ].sort((a, b) => new Date(b.time) - new Date(a.time)).slice(0, 15);
+
+  return {
+    period,
+    range,
+    usingFallback: true,
+    summary: {
+      total_pharmacies: pharmacies.length,
+      active_pharmacies: pharmacies.filter(p => p.is_active).length,
+      total_users: profiles.length,
+      active_users: profiles.filter(p => p.is_active !== false).length,
+      period_revenue: periodSales.reduce((sum, row) => sum + Number(row.total_amount || 0), 0),
+      period_transactions: periodSales.length,
+      previous_revenue: range.previousStart ? previousSales.reduce((sum, row) => sum + Number(row.total_amount || 0), 0) : null,
+      previous_transactions: range.previousStart ? previousSales.length : null
+    },
+    pharmacies: pharmacyRows,
+    revenue_trend: trend,
+    activity: activities
+  };
+}
+
+
+
+/**
+ * Server-side pharmacy directory for Super Admin. Keeps the platform list fast
+ * as tenants grow instead of downloading every pharmacy into the browser.
+ */
+export async function getSuperAdminPharmaciesPage({
+  page = 1,
+  pageSize = 30,
+  search = '',
+  status = 'all'
+} = {}) {
+  const safePage = Math.max(1, Number(page) || 1);
+  const safeSize = [25, 30, 50].includes(Number(pageSize)) ? Number(pageSize) : 30;
+  const from = (safePage - 1) * safeSize;
+  const to = from + safeSize - 1;
+
+  let query = supabase
+    .from('pharmacies')
+    .select('*', { count: 'exact' })
+    .order('created_at', { ascending: false })
+    .range(from, to);
+
+  const term = String(search || '').trim().replace(/[%_(),\"']/g, ' ').replace(/\s+/g, ' ').slice(0, 80);
+  if (term) query = query.or(`name.ilike.%${term}%,email.ilike.%${term}%,phone.ilike.%${term}%,address.ilike.%${term}%`);
+  if (status === 'active') query = query.eq('is_active', true);
+  if (status === 'disabled') query = query.eq('platform_status', 'disabled');
+  if (status === 'suspended') query = query.eq('platform_status', 'suspended');
+  if (status === 'archived') query = query.eq('platform_status', 'archived');
+
+  const { data, error, count } = await query;
+  if (error) throw error;
+  return {
+    rows: data || [],
+    count: count || 0,
+    page: safePage,
+    pageSize: safeSize,
+    pageCount: Math.max(1, Math.ceil((count || 0) / safeSize))
+  };
+}
+
+/**
+ * Operational snapshot for one tenant, used by the Super Admin pharmacy
+ * workspace. Financial values are management metrics, not accounting profit.
+ */
+export async function getSuperAdminPharmacyProfile(pharmacyId) {
+  if (!pharmacyId) throw new Error('Pharmacy is required.');
+  const now = new Date();
+  const todayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())).toISOString();
+  const tomorrow = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1)).toISOString();
+  const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString();
+
+  const [pharmacyRes, usersRes, activeUsersRes, branchesRes, productsRes, lowStockRes, todaySalesRes, monthSalesRes, expensesRes, lastSaleRes] = await Promise.all([
+    supabase.from('pharmacies').select('*').eq('id', pharmacyId).single(),
+    supabase.from('profiles').select('id,full_name,email,role,is_active,created_at', { count: 'exact' }).eq('pharmacy_id', pharmacyId).order('created_at', { ascending: false }).limit(12),
+    supabase.from('profiles').select('id', { count: 'exact', head: true }).eq('pharmacy_id', pharmacyId).eq('is_active', true),
+    supabase.from('branches').select('id,name,address,is_active,created_at', { count: 'exact' }).eq('pharmacy_id', pharmacyId).order('created_at', { ascending: true }),
+    supabase.from('products').select('id', { count: 'exact', head: true }).eq('pharmacy_id', pharmacyId).eq('is_active', true),
+    supabase.from('products').select('id,stock_boxes,low_stock_threshold').eq('pharmacy_id', pharmacyId).eq('is_active', true).limit(5000),
+    supabase.from('sales').select('id,total_amount,created_at').eq('pharmacy_id', pharmacyId).eq('status', 'completed').gte('created_at', todayStart).lt('created_at', tomorrow).limit(5000),
+    supabase.from('sales').select('id,total_amount,created_at').eq('pharmacy_id', pharmacyId).eq('status', 'completed').gte('created_at', monthStart).lt('created_at', tomorrow).limit(10000),
+    supabase.from('expenses').select('id,amount,is_approved,expense_date').eq('pharmacy_id', pharmacyId).eq('is_approved', true).gte('expense_date', monthStart.slice(0,10)).lte('expense_date', tomorrow.slice(0,10)).limit(5000),
+    supabase.from('sales').select('id,invoice_number,total_amount,created_at').eq('pharmacy_id', pharmacyId).eq('status', 'completed').order('created_at', { ascending: false }).limit(1)
+  ]);
+
+  for (const result of [pharmacyRes, usersRes, activeUsersRes, branchesRes, productsRes, lowStockRes, todaySalesRes, monthSalesRes, expensesRes, lastSaleRes]) {
+    if (result.error) throw result.error;
+  }
+
+  const products = lowStockRes.data || [];
+  const lowStock = products.filter(p => Number(p.stock_boxes || 0) <= Number(p.low_stock_threshold || 0)).length;
+  const todaySales = todaySalesRes.data || [];
+  const monthSales = monthSalesRes.data || [];
+  const expenses = expensesRes.data || [];
+  return {
+    pharmacy: pharmacyRes.data,
+    users: usersRes.data || [],
+    branches: branchesRes.data || [],
+    summary: {
+      totalUsers: usersRes.count || 0,
+      activeUsers: activeUsersRes.count || 0,
+      branches: (branchesRes.data || []).filter(b => b.is_active !== false).length,
+      products: productsRes.count || 0,
+      lowStock,
+      todayRevenue: todaySales.reduce((sum, row) => sum + Number(row.total_amount || 0), 0),
+      todayTransactions: todaySales.length,
+      monthRevenue: monthSales.reduce((sum, row) => sum + Number(row.total_amount || 0), 0),
+      monthTransactions: monthSales.length,
+      monthExpenses: expenses.reduce((sum, row) => sum + Number(row.amount || 0), 0),
+      operatingBalance: monthSales.reduce((sum, row) => sum + Number(row.total_amount || 0), 0) - expenses.reduce((sum, row) => sum + Number(row.amount || 0), 0),
+      lastSale: (lastSaleRes.data || [])[0] || null
+    }
+  };
+}
+
+function utcMidnight(timestamp) {
+  const d = new Date(timestamp);
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
 }
 
 // ===================== SUPPLIERS =====================

@@ -617,6 +617,8 @@ async function showProductStockHistory(product, user) {
 
 function showProductModal(product, user, updateView, branchList) {
   const isEdit = !!product;
+  const configuredThreshold = Number(window.pharmacySettings?.operational_settings?.default_low_stock_threshold);
+  const defaultLowStockThreshold = Number.isFinite(configuredThreshold) && configuredThreshold >= 0 ? configuredThreshold : 5;
   // Pre-select the currently viewed branch when adding a new product
   const preSelectedBranchId = isEdit ? product?.branch_id : selectedBranchId;
   const { overlay, closeModal } = createModal({
@@ -724,7 +726,7 @@ function showProductModal(product, user, updateView, branchList) {
           </div>
           <div class="form-group">
             <label class="form-label">Low Stock Threshold (boxes)</label>
-            <input type="number" class="form-input" id="prod-threshold" value="${product?.low_stock_threshold || 5}" min="0" />
+            <input type="number" class="form-input" id="prod-threshold" value="${product?.low_stock_threshold ?? defaultLowStockThreshold}" min="0" />
           </div>
         </div>
         <div class="form-group">
@@ -758,7 +760,7 @@ function showProductModal(product, user, updateView, branchList) {
       stock_units: parseInt(overlay.querySelector('#prod-units').value) || 0,
       stock_unit_type: overlay.querySelector('#prod-stock-unit-type').value || 'box',
       expiry_date: overlay.querySelector('#prod-expiry').value || null,
-      low_stock_threshold: parseInt(overlay.querySelector('#prod-threshold').value) || 5,
+      low_stock_threshold: (() => { const value = parseInt(overlay.querySelector('#prod-threshold').value, 10); return Number.isFinite(value) && value >= 0 ? value : defaultLowStockThreshold; })(),
       description: overlay.querySelector('#prod-desc').value.trim(),
       pharmacy_id: user.profile.pharmacy_id,
       branch_id: overlay.querySelector('#prod-branch').value

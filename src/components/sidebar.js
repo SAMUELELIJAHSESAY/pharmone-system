@@ -1,8 +1,28 @@
-export function renderSidebar(user, features = null) {
+const DEFAULT_MODULE_FEATURES = {
+  inventory: true,
+  sales: true,
+  customers: true,
+  patients: true,
+  suppliers: true,
+  purchases: true,
+  returns: true,
+  alerts: true,
+  stock_transfers: true,
+  staff: true,
+  branches: true,
+  expenses: true,
+  reports: true,
+  sales_reports: true,
+  daily_records: true
+};
+
+export function renderSidebar(user, features = null, moduleFeatures = null) {
   const role = user.profile?.role || 'salesman';
   const name = user.profile?.full_name || user.email || 'User';
   const initials = name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
   const pharmacyName = user.profile?.pharmacies?.name || 'Your pharmacy';
+  const modules = { ...DEFAULT_MODULE_FEATURES, ...(moduleFeatures || {}) };
+  const moduleEnabled = (key) => modules[key] !== false;
 
   let navItems = '';
 
@@ -24,81 +44,56 @@ export function renderSidebar(user, features = null) {
       </button>
     `;
   } else if (role === 'admin') {
+    const management = [
+      `<button class="nav-item" data-view="admin-dashboard"><span class="nav-icon">&#128200;</span> Dashboard</button>`,
+      moduleEnabled('inventory') ? `<button class="nav-item" data-view="inventory"><span class="nav-icon">&#128230;</span> Inventory</button>` : '',
+      moduleEnabled('sales') ? `<button class="nav-item" data-view="sales"><span class="nav-icon">&#128176;</span> Sales</button>` : '',
+      moduleEnabled('customers') ? `<button class="nav-item" data-view="customers"><span class="nav-icon">&#128100;</span> Customers</button>` : ''
+    ].join('');
+
+    const clinic = moduleEnabled('patients') ? `
+      <div class="sidebar-section-label">Clinic</div>
+      <button class="nav-item" data-view="patients"><span class="nav-icon">&#128104;</span> Patients</button>
+    ` : '';
+
+    const supplyItems = [
+      moduleEnabled('suppliers') ? `<button class="nav-item" data-view="suppliers"><span class="nav-icon">&#x1F6DB;</span> Suppliers</button>` : '',
+      moduleEnabled('purchases') ? `<button class="nav-item" data-view="purchases"><span class="nav-icon">&#x1F4E6;</span> Purchase Orders</button>` : '',
+      moduleEnabled('returns') ? `<button class="nav-item" data-view="returns"><span class="nav-icon">&#x21A9;</span> Returns</button>` : '',
+      moduleEnabled('returns') ? `<button class="nav-item" data-view="returns-management"><span class="nav-icon">📋</span> Return Requests</button>` : '',
+      moduleEnabled('alerts') ? `<button class="nav-item" data-view="alerts"><span class="nav-icon">&#x1F514;</span> Alerts</button>` : '',
+      moduleEnabled('stock_transfers') ? `<button class="nav-item" data-view="stock-transfers"><span class="nav-icon">&#x21C4;</span> Stock Transfers</button>` : ''
+    ].filter(Boolean).join('');
+    const supply = supplyItems ? `<div class="sidebar-section-label">Stock & Supply</div>${supplyItems}` : '';
+
+    const organizationItems = [
+      moduleEnabled('staff') ? `<button class="nav-item" data-view="staff"><span class="nav-icon">&#128101;</span> Staff</button>` : '',
+      moduleEnabled('branches') ? `<button class="nav-item" data-view="branches"><span class="nav-icon">&#127968;</span> Branches</button>` : '',
+      moduleEnabled('expenses') ? `<button class="nav-item" data-view="expenses"><span class="nav-icon">&#128181;</span> Expenses</button>` : '',
+      moduleEnabled('reports') ? `<button class="nav-item" data-view="reports"><span class="nav-icon">&#128202;</span> Reports</button>` : '',
+      moduleEnabled('sales_reports') ? `<button class="nav-item" data-view="sales-reports"><span class="nav-icon">&#128202;</span> Sales Reports</button>` : '',
+      moduleEnabled('daily_records') ? `<button class="nav-item" data-view="daily-reports"><span class="nav-icon">📊</span> Daily Records</button>` : ''
+    ].filter(Boolean).join('');
+    const organization = organizationItems ? `<div class="sidebar-section-label">Organization</div>${organizationItems}` : '';
+
     navItems = `
       <div class="sidebar-section-label">Management</div>
-      <button class="nav-item" data-view="admin-dashboard">
-        <span class="nav-icon">&#128200;</span> Dashboard
-      </button>
-      <button class="nav-item" data-view="inventory">
-        <span class="nav-icon">&#128230;</span> Inventory
-      </button>
-      <button class="nav-item" data-view="sales">
-        <span class="nav-icon">&#128176;</span> Sales
-      </button>
-      <button class="nav-item" data-view="customers">
-        <span class="nav-icon">&#128100;</span> Customers
-      </button>
-      <div class="sidebar-section-label">Clinic</div>
-      <button class="nav-item" data-view="patients">
-        <span class="nav-icon">&#128104;</span> Patients
-      </button>
-      <div class="sidebar-section-label">Stock & Supply</div>
-      <button class="nav-item" data-view="suppliers">
-        <span class="nav-icon">&#x1F6DB;</span> Suppliers
-      </button>
-      <button class="nav-item" data-view="purchases">
-        <span class="nav-icon">&#x1F4E6;</span> Purchase Orders
-      </button>
-      <button class="nav-item" data-view="returns">
-        <span class="nav-icon">&#x21A9;</span> Returns
-      </button>
-      <button class="nav-item" data-view="returns-management">
-        <span class="nav-icon">📋</span> Return Requests
-      </button>
-      <button class="nav-item" data-view="alerts">
-        <span class="nav-icon">&#x1F514;</span> Alerts
-      </button>
-      <button class="nav-item" data-view="stock-transfers">
-        <span class="nav-icon">&#x21C4;</span> Stock Transfers
-      </button>
-      <div class="sidebar-section-label">Organization</div>
-      <button class="nav-item" data-view="staff">
-        <span class="nav-icon">&#128101;</span> Staff
-      </button>
-      <button class="nav-item" data-view="branches">
-        <span class="nav-icon">&#127968;</span> Branches
-      </button>
-      <button class="nav-item" data-view="expenses">
-        <span class="nav-icon">&#128181;</span> Expenses
-      </button>
-      <button class="nav-item" data-view="reports">
-        <span class="nav-icon">&#128202;</span> Reports
-      </button>
-      <button class="nav-item" data-view="sales-reports">
-        <span class="nav-icon">&#128202;</span> Sales Reports
-      </button>
-      <button class="nav-item" data-view="daily-reports">
-        <span class="nav-icon">📊</span> Daily Records
-      </button>
+      ${management}
+      ${clinic}
+      ${supply}
+      ${organization}
       <div class="sidebar-section-label">Configuration</div>
-      <button class="nav-item" data-view="salesman-features">
-        <span class="nav-icon">⚙️</span> Salesman Features
-      </button>
+      <button class="nav-item" data-view="salesman-features"><span class="nav-icon">⚙️</span> Salesman Features</button>
     `;
   } else if (role === 'inventory_manager') {
-    navItems = `
-      <div class="sidebar-section-label">Inventory</div>
-      <button class="nav-item" data-view="inventory">
-        <span class="nav-icon">&#128230;</span> Inventory
-      </button>
-      <div class="sidebar-section-label">Organization</div>
-      <button class="nav-item" data-view="branches">
-        <span class="nav-icon">&#127968;</span> Branches
-      </button>
-    `;
+    const items = [
+      moduleEnabled('inventory') ? `<div class="sidebar-section-label">Inventory</div><button class="nav-item" data-view="inventory"><span class="nav-icon">&#128230;</span> Inventory</button>` : '',
+      moduleEnabled('branches') ? `<div class="sidebar-section-label">Organization</div><button class="nav-item" data-view="branches"><span class="nav-icon">&#127968;</span> Branches</button>` : ''
+    ];
+    navItems = items.join('');
   } else {
-    // Salesman navigation with feature filtering
-    // Default to all features enabled for backward compatibility if features not provided
+    // Salesman navigation is filtered by both pharmacy-level module availability
+    // and the pharmacy Admin's salesman feature settings.
     const feat = features || {
       pos: true,
       customers: true,
@@ -111,75 +106,35 @@ export function renderSidebar(user, features = null) {
     };
 
     let salesSection = '<div class="sidebar-section-label">Sales</div>';
-    
     if (feat.dashboard) {
-      salesSection += `
-        <button class="nav-item" data-view="salesman-dashboard">
-          <span class="nav-icon">&#128200;</span> Dashboard
-        </button>
-      `;
+      salesSection += `<button class="nav-item" data-view="salesman-dashboard"><span class="nav-icon">&#128200;</span> Dashboard</button>`;
     }
-    
-    if (feat.pos) {
-      salesSection += `
-        <button class="nav-item" data-view="pos">
-          <span class="nav-icon">&#128179;</span> Point of Sale
-        </button>
-      `;
+    if (feat.pos && moduleEnabled('sales')) {
+      salesSection += `<button class="nav-item" data-view="pos"><span class="nav-icon">&#128179;</span> Point of Sale</button>`;
     }
-    
-    if (feat.sales_history) {
-      salesSection += `
-        <button class="nav-item" data-view="sales-history">
-          <span class="nav-icon">&#128202;</span> Sales History
-        </button>
-      `;
+    if (feat.sales_history && moduleEnabled('sales')) {
+      salesSection += `<button class="nav-item" data-view="sales-history"><span class="nav-icon">&#128202;</span> Sales History</button>`;
     }
-    
-    if (feat.daily_records) {
-      salesSection += `
-        <button class="nav-item" data-view="daily-reports">
-          <span class="nav-icon">📊</span> Daily Records
-        </button>
-      `;
+    if (feat.daily_records && moduleEnabled('daily_records')) {
+      salesSection += `<button class="nav-item" data-view="daily-reports"><span class="nav-icon">📊</span> Daily Records</button>`;
     }
-    
-    if (feat.customers) {
-      salesSection += `
-        <button class="nav-item" data-view="customers">
-          <span class="nav-icon">&#128100;</span> Customers
-        </button>
-      `;
+    if (feat.customers && moduleEnabled('customers')) {
+      salesSection += `<button class="nav-item" data-view="customers"><span class="nav-icon">&#128100;</span> Customers</button>`;
     }
-    
+
     let clinicSection = '';
-    if (feat.patients) {
-      clinicSection = `
-        <div class="sidebar-section-label">Clinic</div>
-        <button class="nav-item" data-view="patients">
-          <span class="nav-icon">&#128104;</span> Patients
-        </button>
-      `;
+    if (feat.patients && moduleEnabled('patients')) {
+      clinicSection = `<div class="sidebar-section-label">Clinic</div><button class="nav-item" data-view="patients"><span class="nav-icon">&#128104;</span> Patients</button>`;
     }
-    
-    let operationsSection = '<div class="sidebar-section-label">Operations</div>';
-    
-    if (feat.returns_request) {
-      operationsSection += `
-        <button class="nav-item" data-view="returns-request">
-          <span class="nav-icon">&#x21A9;</span> Return Requests
-        </button>
-      `;
+
+    let operationsItems = '';
+    if (feat.returns_request && moduleEnabled('returns')) {
+      operationsItems += `<button class="nav-item" data-view="returns-request"><span class="nav-icon">&#x21A9;</span> Return Requests</button>`;
     }
-    
-    if (feat.expenses) {
-      operationsSection += `
-        <button class="nav-item" data-view="expenses">
-          <span class="nav-icon">&#128181;</span> Expenses
-        </button>
-      `;
+    if (feat.expenses && moduleEnabled('expenses')) {
+      operationsItems += `<button class="nav-item" data-view="expenses"><span class="nav-icon">&#128181;</span> Expenses</button>`;
     }
-    
+    const operationsSection = operationsItems ? `<div class="sidebar-section-label">Operations</div>${operationsItems}` : '';
     navItems = salesSection + clinicSection + operationsSection;
   }
 

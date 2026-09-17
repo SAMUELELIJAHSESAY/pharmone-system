@@ -12,6 +12,21 @@ let staffBranchId = null;
 let currentLifecycleToken = null;
 let cleanupPOSInteractions = null;
 
+function escapeReceiptText(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+function getConfiguredReceiptFooter(branchName = 'Pharmacy') {
+  const configured = window.pharmacySettings?.operational_settings?.receipt_footer;
+  const fallback = `${getConfiguredReceiptFooter(branchName)}`;
+  return escapeReceiptText(String(configured || '').trim() || fallback);
+}
+
 export async function renderPOS(container, user, lifecycleToken = null) {
   if (cleanupPOSInteractions) {
     cleanupPOSInteractions();
@@ -636,7 +651,7 @@ function showReceiptModal(sale, items, total, discount, paymentMethod, branchDet
             <div class="row total success"><span>TOTAL:</span><span>${window.pharmacySettings?.currency_symbol || 'Le'}${total.toFixed(2)}</span></div>
             <div class="row"><span>Payment:</span><span>${paymentMethod.replace('_', ' ')}</span></div>
             <div class="divider"></div>
-            <div style="text-align: center; font-size: 10px; margin-top: 10px;">Thank you for visiting, ${branchName}!</div>
+            <div style="text-align: center; font-size: 10px; margin-top: 10px;">${getConfiguredReceiptFooter(branchName)}</div>
           </div>
           <script>window.print(); window.close();</script>
         </body>
@@ -746,7 +761,7 @@ function showReceiptPreview() {
               <div class="row total success"><span>TOTAL:</span><span>${window.pharmacySettings?.currency_symbol || 'Le'}${total.toFixed(2)}</span></div>
               <div class="row"><span>Payment:</span><span>${paymentMethod.replace('_', ' ')}</span></div>
               <div class="divider"></div>
-              <div style="text-align: center; font-size: 10px; margin-top: 10px;">Thank you for visiting, ${branchName}!</div>
+              <div style="text-align: center; font-size: 10px; margin-top: 10px;">${getConfiguredReceiptFooter(branchName)}</div>
             </div>
             <script>window.print(); window.close();</script>
           </body>
@@ -832,7 +847,7 @@ function showReceiptPreview() {
               <div class="row total success"><span>TOTAL:</span><span>${window.pharmacySettings?.currency_symbol || 'Le'}${total.toFixed(2)}</span></div>
               <div class="row"><span>Payment:</span><span>${paymentMethod.replace('_', ' ')}</span></div>
               <div class="divider"></div>
-              <div style="text-align: center; font-size: 10px; margin-top: 10px;">Thank you for visiting, Pharmacy!</div>
+              <div style="text-align: center; font-size: 10px; margin-top: 10px;">${getConfiguredReceiptFooter('Pharmacy')}</div>
             </div>
             <script>window.print(); window.close();</script>
           </body>

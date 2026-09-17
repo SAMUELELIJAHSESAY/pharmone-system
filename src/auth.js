@@ -51,11 +51,26 @@ export async function getCurrentUser() {
     .eq('id', user.id)
     .maybeSingle();
 
-  // Check if user is disabled
-  if (profile && !profile.is_active) {
-    // User is disabled, sign them out
+  // Check if user is disabled or locked
+  if (profile && (!profile.is_active || profile.account_status === 'disabled' || profile.account_status === 'locked')) {
     await signOut().catch(() => {}); // Ignore errors
     return null;
+  }
+
+  // Lightweight activity heartbeat used by Super Admin account monitoring.
+  // Touch at most once every 10 minutes per browser to avoid noisy writes.
+  if (profile) {
+    try {
+      const key = `sammia-last-activity-${user.id}`;
+      const previous = Number(localStorage.getItem(key) || 0);
+      const now = Date.now();
+      if (!previous || now - previous > 10 * 60 * 1000) {
+        localStorage.setItem(key, String(now));
+        supabase.from('profiles').update({ last_activity_at: new Date(now).toISOString() }).eq('id', user.id).then(() => {}).catch(() => {});
+      }
+    } catch (_) {
+      // Activity tracking is non-blocking and must never interrupt authentication.
+    }
   }
 
   // For salesman/non-super-admin users, also check if their admin is disabled
