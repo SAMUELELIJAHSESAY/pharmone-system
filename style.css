@@ -8129,7 +8129,7 @@ body {
 /* ===== POS SEARCH VISIBILITY + HOLD SALE + CASH CHANGE FIX ===== */
 .pos-search-box {
   border: 2px solid var(--primary);
-  background: var(--primary-50);
+  background: #fff;
   box-shadow: 0 0 0 3px var(--primary-100), 0 6px 18px rgba(15, 23, 42, .06);
   min-height: 48px;
 }
@@ -8415,4 +8415,31 @@ body {
   .pos-product-cart-badge {
     font-size: .66rem;
   }
+}
+
+
+/* ===== POS RECEIPT PREVIEW + COMPACT CASH AREA ===== */
+.pos-preview-btn {
+  min-height: 44px;
+  border-color: var(--primary);
+  color: var(--primary);
+  background: #fff;
+  font-weight: 700;
+  justify-content: center;
+}
+.pos-preview-btn:hover:not(:disabled) {
+  background: var(--primary-50);
+  border-color: var(--primary-dark);
+  color: var(--primary-dark);
+}
+.pos-preview-btn:disabled {
+  background: var(--gray-50);
+  border-color: var(--gray-200);
+  color: var(--gray-400);
+}
+.pos-payment-extra .form-label { margin-bottom: .35rem; }
+.pos-payment-extra .form-input { min-height: 40px; }
+@media (min-width: 901px) {
+  .pos-payment-extra { padding: .5rem .6rem; }
+  .pos-change-row { margin-top: .45rem; padding-top: .45rem; }
 }

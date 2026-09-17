@@ -195,7 +195,6 @@ function renderPOSView(container) {
           <div id="cash-payment-fields" class="pos-payment-extra">
             <label class="form-label">Cash Received <span class="text-muted" style="font-weight:500;">(optional)</span></label>
             <input type="text" inputmode="decimal" class="form-input" id="cash-received" autocomplete="off" placeholder="Optional — enter amount received" />
-            <div class="pos-payment-helper">Leave blank to complete a normal cash sale. Enter an amount only when you want SamMia Pharm to calculate change.</div>
             <div class="pos-change-row pos-cash-balance-row" id="cash-balance-row"><span id="cash-balance-label">Change Due</span><strong id="change-due">—</strong></div>
           </div>
 
@@ -209,8 +208,8 @@ function renderPOSView(container) {
           </div>
 
           <div class="pos-checkout-actions">
-            <button class="btn btn-ghost" id="preview-receipt-btn" disabled>Preview</button>
-            <button class="btn btn-primary btn-lg" id="checkout-btn" disabled>Complete Sale</button>
+            <button type="button" class="btn btn-outline pos-preview-btn" id="preview-receipt-btn" disabled>&#128196; Receipt Preview</button>
+            <button type="button" class="btn btn-primary btn-lg" id="checkout-btn" disabled>Complete Sale</button>
           </div>
         </div>
       </div>
@@ -1008,6 +1007,8 @@ function showReceiptPreview() {
   const discount = parseFloat(document.getElementById('discount-input')?.value || 0) || 0;
   const total = Math.max(0, subtotal - discount);
   const paymentMethod = document.getElementById('payment-method').value;
+  const paymentState = getPaymentState();
+  const paymentDetails = paymentMethod === 'split' ? paymentState.details : null;
   const previewDate = new Date().toISOString();
   
   // Generate preview invoice number
@@ -1023,11 +1024,11 @@ function showReceiptPreview() {
 
     const { overlay, closeModal } = createModal({
       id: 'receipt-modal',
-      title: 'Sale Complete!',
+      title: 'Receipt Preview',
       body: `
         <div id="receipt-content" style="font-family:monospace;font-size:0.9rem">
           <div style="text-align:center;margin-bottom:1.25rem">
-            <div style="font-size:3rem;margin-bottom:0.5rem">&#9989;</div>
+            <div style="font-size:2.4rem;margin-bottom:0.5rem">&#129534;</div>
             <div style="font-size:1.25rem;font-weight:700;color:var(--success)">${formatCurrency(total)}</div>
             <div class="text-sm text-muted">${previewInvoiceNumber}</div>
             <div class="text-xs text-muted" style="margin-top:0.25rem">${previewDateFormatted}</div>
@@ -1115,11 +1116,11 @@ function showReceiptPreview() {
     // Fallback with basic receipt
     const { overlay, closeModal } = createModal({
       id: 'receipt-modal',
-      title: 'Sale Complete!',
+      title: 'Receipt Preview',
       body: `
         <div id="receipt-content" style="font-family:monospace;font-size:0.9rem">
           <div style="text-align:center;margin-bottom:1.25rem">
-            <div style="font-size:3rem;margin-bottom:0.5rem">&#9989;</div>
+            <div style="font-size:2.4rem;margin-bottom:0.5rem">&#129534;</div>
             <div style="font-size:1.25rem;font-weight:700;color:var(--success)">${formatCurrency(total)}</div>
             <div class="text-sm text-muted">${previewInvoiceNumber}</div>
             <div class="text-xs text-muted" style="margin-top:0.25rem">${previewDateFormatted}</div>
