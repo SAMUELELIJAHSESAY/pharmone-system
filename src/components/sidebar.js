@@ -1,3 +1,18 @@
+function safeImageUrl(value) {
+  const url = String(value || '').trim();
+  if (/^https?:\/\//i.test(url) || url.startsWith('/')) return url;
+  return '';
+}
+
+function esc(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
 const DEFAULT_MODULE_FEATURES = {
   inventory: true,
   sales: true,
@@ -20,7 +35,8 @@ export function renderSidebar(user, features = null, moduleFeatures = null) {
   const role = user.profile?.role || 'salesman';
   const name = user.profile?.full_name || user.email || 'User';
   const initials = name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
-  const pharmacyName = user.profile?.pharmacies?.name || 'Your pharmacy';
+  const pharmacyName = user.profile?.pharmacies?.name || window.pharmacySettings?.name || 'Your pharmacy';
+  const pharmacyLogo = role === 'super_admin' ? '' : safeImageUrl(window.pharmacySettings?.logo_url || user.profile?.pharmacies?.logo_url || '');
   const modules = { ...DEFAULT_MODULE_FEATURES, ...(moduleFeatures || {}) };
   const moduleEnabled = (key) => modules[key] !== false;
 
@@ -84,6 +100,7 @@ export function renderSidebar(user, features = null, moduleFeatures = null) {
       ${organization}
       <div class="sidebar-section-label">Configuration</div>
       <button class="nav-item" data-view="salesman-features"><span class="nav-icon">⚙️</span> Salesman Features</button>
+      <button class="nav-item" data-view="branding"><span class="nav-icon">🎨</span> Branding</button>
     `;
   } else if (role === 'inventory_manager') {
     const items = [
@@ -147,10 +164,10 @@ export function renderSidebar(user, features = null, moduleFeatures = null) {
 
   return `
     <div class="sidebar-brand">
-      <div class="sidebar-brand-icon"><img src="/brand/sammia-mark.png" alt="" aria-hidden="true" /></div>
+      <div class="sidebar-brand-icon ${pharmacyLogo ? 'has-pharmacy-logo' : ''}"><img src="${pharmacyLogo || '/brand/sammia-mark.png'}" alt="${pharmacyLogo ? esc(pharmacyName) + ' logo' : ''}" ${pharmacyLogo ? '' : 'aria-hidden="true"'} /></div>
       <div class="sidebar-brand-copy">
         <div class="sidebar-brand-name"><span>SamMia</span> <strong>Pharm</strong></div>
-        <div class="sidebar-brand-sub" title="${pharmacyName} · ${roleLabel}">${pharmacyName} · ${roleLabel}</div>
+        <div class="sidebar-brand-sub" title="${esc(pharmacyName)} · ${roleLabel}">${esc(pharmacyName)} · ${roleLabel}</div>
       </div>
       <button class="sidebar-mobile-close" id="sidebar-mobile-close" type="button" aria-label="Close navigation menu">&#10005;</button>
     </div>

@@ -1,6 +1,7 @@
 // Salesman Sales History View - View receipts printed and detailed sales information
 import { getSales, enrichSalesWithItems, getPharmacySettings, getBranchDetails } from '../../database.js';
 import { formatCurrency, formatDate, showToast, formatUTCDate, formatUTCTime, formatUTCDateTime } from '../../utils.js';
+import { resolveReceiptFooter, getPharmacyLogoUrl } from '../../branding.js';
 
 function escapeReceiptText(value) {
   return String(value ?? '')
@@ -11,9 +12,20 @@ function escapeReceiptText(value) {
     .replace(/'/g, '&#039;');
 }
 
-function getConfiguredReceiptFooter(branchName = 'Pharmacy') {
-  const configured = window.pharmacySettings?.operational_settings?.receipt_footer;
-  return escapeReceiptText(String(configured || '').trim() || `${getConfiguredReceiptFooter(branchName)}`);
+function getConfiguredReceiptFooter(branchDetails = {}) {
+  const branchName = typeof branchDetails === 'string' ? branchDetails : (branchDetails?.name || 'Pharmacy');
+  const branchId = typeof branchDetails === 'string' ? null : branchDetails?.id;
+  const resolved = resolveReceiptFooter(window.pharmacySettings || {}, {
+    branchId,
+    branchName,
+    pharmacyName: window.pharmacySettings?.name || branchName
+  });
+  return escapeReceiptText(resolved).replace(/\n/g, '<br>');
+}
+
+function getReceiptLogoHtml() {
+  const logo = getPharmacyLogoUrl(window.pharmacySettings || {});
+  return logo ? `<img src="${escapeReceiptText(logo)}" alt="" style="max-width:74px;max-height:74px;object-fit:contain;margin:0 auto 6px;display:block" />` : '';
 }
 
 export async function renderSalesHistory(container, user) {
@@ -277,6 +289,7 @@ function renderSalesHistoryView(container, sales, user, pharmacyId, branchId) {
 
       let receiptHTML = `
         <div style="text-align:center;margin-bottom:1rem;border-bottom:1px dashed;padding-bottom:1rem">
+          ${getReceiptLogoHtml()}
           <div style="font-weight:bold;font-size:1rem">${branchName}</div>
           ${branchAddress ? `<div style="font-size:0.8rem;margin-bottom:0.25rem">${branchAddress}</div>` : ''}
           ${branchEmail ? `<div style="font-size:0.8rem;margin-bottom:0.5rem">${branchEmail}</div>` : ''}
@@ -343,7 +356,7 @@ function renderSalesHistoryView(container, sales, user, pharmacyId, branchId) {
         ` : ''}
 
         <div style="margin-top:1rem;text-align:center;border-top:1px dashed;padding-top:1rem;font-size:0.75rem;color:var(--gray-500)">
-          ${getConfiguredReceiptFooter(branchName)}
+          ${getConfiguredReceiptFooter(branchDetails)}
         </div>
       `;
 

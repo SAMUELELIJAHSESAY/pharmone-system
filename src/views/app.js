@@ -31,6 +31,8 @@ import { renderSettings } from './super-admin/settings.js';
 import { showToast, formatCurrency } from '../utils.js';
 import { showProfileModal } from '../components/profile.js';
 import { beginViewLifecycle, cleanupActiveView } from '../view-lifecycle.js';
+import { applyPharmacyBranding, resetPharmacyBranding } from '../branding.js';
+import { renderBranding } from './admin/branding.js';
 
 let currentUser = null;
 let activeUser = null;
@@ -73,7 +75,8 @@ const PAGE_TITLES = {
   'pos': 'Point of Sale',
   'sales-history': 'My Sales History',
   'returns-request': 'Return Requests',
-  'salesman-features': 'Salesman Features'
+  'salesman-features': 'Salesman Features',
+  'branding': 'Branding'
 };
 
 function applyPageTitle(view, overrideTitle = '') {
@@ -257,14 +260,16 @@ export function renderApp(user) {
   activeUser = getActiveUser();
   const role = activeUser.profile?.role || 'salesman';
 
-  // Load pharmacy settings globally for currency display and tenant-level
-  // module availability. Module controls are a workspace/UI control; RLS remains
-  // the database security boundary.
+  // Load pharmacy settings globally for currency, tenant branding and module availability.
+  // Reset first so switching/impersonating pharmacies never leaks the previous tenant color/logo.
   currentModuleFeatures = { ...DEFAULT_MODULE_FEATURES };
+  window.pharmacySettings = null;
+  resetPharmacyBranding();
   if (activeUser.profile?.pharmacy_id) {
     getPharmacySettings(activeUser.profile.pharmacy_id)
       .then(settings => {
         window.pharmacySettings = settings || { currency_symbol: 'Le', currency_code: 'NLE' };
+        applyPharmacyBranding(window.pharmacySettings);
         currentModuleFeatures = { ...DEFAULT_MODULE_FEATURES, ...(settings?.module_features || {}) };
         refreshSidebarNavigation(activeUser);
 
@@ -490,6 +495,15 @@ function updateSidebarWithFeatures(user, features) {
   refreshSidebarNavigation(user);
 }
 
+window.addEventListener('pharmacy-branding-updated', (event) => {
+  const settings = event.detail?.settings;
+  if (!settings || !activeUser?.profile?.pharmacy_id) return;
+  if (settings.id && settings.id !== activeUser.profile.pharmacy_id) return;
+  window.pharmacySettings = settings;
+  applyPharmacyBranding(settings);
+  refreshSidebarNavigation(activeUser);
+});
+
 const VIEW_MODULE_MAP = {
   inventory: 'inventory',
   sales: 'sales',
@@ -659,6 +673,7 @@ export function navigate(view, params = {}) {
     case 'sales-history': renderSalesHistory(content, activeUser); break;
     case 'returns-request': renderSalesmanReturnsRequest(content, activeUser); break;
     case 'salesman-features': renderSalesmanFeatures(content, activeUser); break;
+    case 'branding': renderBranding(content, activeUser); break;
     default:
       applyPageTitle(view, 'Page Not Found');
       content.innerHTML = '<div class="empty-state"><div class="empty-state-icon">&#128269;</div><div class="empty-state-title">Page not found</div><div class="empty-state-desc">The requested page is not available.</div></div>';

@@ -2,6 +2,7 @@ import { getProducts, getCustomers, createCustomer, createSale, getStaffBranch, 
 import { formatCurrency, showToast, debounce, formatUTCDateTime } from '../../utils.js';
 import { createModal } from '../../components/modal.js';
 import { isViewLifecycleActive, registerViewCleanup } from '../../view-lifecycle.js';
+import { resolveReceiptFooter, getPharmacyLogoUrl } from '../../branding.js';
 
 let cart = [];
 let allProducts = [];
@@ -21,10 +22,20 @@ function escapeReceiptText(value) {
     .replace(/'/g, '&#039;');
 }
 
-function getConfiguredReceiptFooter(branchName = 'Pharmacy') {
-  const configured = window.pharmacySettings?.operational_settings?.receipt_footer;
-  const fallback = `${getConfiguredReceiptFooter(branchName)}`;
-  return escapeReceiptText(String(configured || '').trim() || fallback);
+function getConfiguredReceiptFooter(branchDetails = {}) {
+  const branchName = typeof branchDetails === 'string' ? branchDetails : (branchDetails?.name || 'Pharmacy');
+  const branchId = typeof branchDetails === 'string' ? staffBranchId : (branchDetails?.id || staffBranchId);
+  const resolved = resolveReceiptFooter(window.pharmacySettings || {}, {
+    branchId,
+    branchName,
+    pharmacyName: window.pharmacySettings?.name || branchName
+  });
+  return escapeReceiptText(resolved).replace(/\n/g, '<br>');
+}
+
+function getReceiptLogoHtml() {
+  const logo = getPharmacyLogoUrl(window.pharmacySettings || {});
+  return logo ? `<img src="${escapeReceiptText(logo)}" alt="" style="max-width:74px;max-height:74px;object-fit:contain;margin:0 auto 6px;display:block" />` : '';
 }
 
 export async function renderPOS(container, user, lifecycleToken = null) {
@@ -633,6 +644,7 @@ function showReceiptModal(sale, items, total, discount, paymentMethod, branchDet
         <body>
           <div class="receipt">
             <div style="text-align: center; margin-bottom: 10px; border-bottom: 1px dashed #000; padding-bottom: 10px;">
+              ${getReceiptLogoHtml()}
               <div class="title" style="font-size: 14px; font-weight: bold; margin-bottom: 5px;">${branchName}</div>
               ${branchAddress ? `<div style="font-size: 10px; margin-bottom: 3px;">${branchAddress}</div>` : ''}
               ${branchEmail ? `<div style="font-size: 10px; margin-bottom: 3px;">${branchEmail}</div>` : ''}
@@ -651,7 +663,7 @@ function showReceiptModal(sale, items, total, discount, paymentMethod, branchDet
             <div class="row total success"><span>TOTAL:</span><span>${window.pharmacySettings?.currency_symbol || 'Le'}${total.toFixed(2)}</span></div>
             <div class="row"><span>Payment:</span><span>${paymentMethod.replace('_', ' ')}</span></div>
             <div class="divider"></div>
-            <div style="text-align: center; font-size: 10px; margin-top: 10px;">${getConfiguredReceiptFooter(branchName)}</div>
+            <div style="text-align: center; font-size: 10px; margin-top: 10px;">${getConfiguredReceiptFooter(branchDetails)}</div>
           </div>
           <script>window.print(); window.close();</script>
         </body>
@@ -743,7 +755,8 @@ function showReceiptPreview() {
           <body>
             <div class="receipt">
               <div style="text-align: center; margin-bottom: 10px; border-bottom: 1px dashed #000; padding-bottom: 10px;">
-                <div class="title" style="font-size: 14px; font-weight: bold; margin-bottom: 5px;">${branchName}</div>
+                ${getReceiptLogoHtml()}
+              <div class="title" style="font-size: 14px; font-weight: bold; margin-bottom: 5px;">${branchName}</div>
                 ${branchAddress ? `<div style="font-size: 10px; margin-bottom: 3px;">${branchAddress}</div>` : ''}
                 ${branchEmail ? `<div style="font-size: 10px; margin-bottom: 3px;">${branchEmail}</div>` : ''}
               </div>
@@ -761,7 +774,7 @@ function showReceiptPreview() {
               <div class="row total success"><span>TOTAL:</span><span>${window.pharmacySettings?.currency_symbol || 'Le'}${total.toFixed(2)}</span></div>
               <div class="row"><span>Payment:</span><span>${paymentMethod.replace('_', ' ')}</span></div>
               <div class="divider"></div>
-              <div style="text-align: center; font-size: 10px; margin-top: 10px;">${getConfiguredReceiptFooter(branchName)}</div>
+              <div style="text-align: center; font-size: 10px; margin-top: 10px;">${getConfiguredReceiptFooter(branchDetails)}</div>
             </div>
             <script>window.print(); window.close();</script>
           </body>
@@ -831,6 +844,7 @@ function showReceiptPreview() {
           <body>
             <div class="receipt">
               <div style="text-align: center; margin-bottom: 10px; border-bottom: 1px dashed #000; padding-bottom: 10px;">
+                ${getReceiptLogoHtml()}
                 <div class="title" style="font-size: 14px; font-weight: bold; margin-bottom: 5px;">Pharmacy</div>
               </div>
               <div class="title">Receipt</div>
@@ -847,7 +861,7 @@ function showReceiptPreview() {
               <div class="row total success"><span>TOTAL:</span><span>${window.pharmacySettings?.currency_symbol || 'Le'}${total.toFixed(2)}</span></div>
               <div class="row"><span>Payment:</span><span>${paymentMethod.replace('_', ' ')}</span></div>
               <div class="divider"></div>
-              <div style="text-align: center; font-size: 10px; margin-top: 10px;">${getConfiguredReceiptFooter('Pharmacy')}</div>
+              <div style="text-align: center; font-size: 10px; margin-top: 10px;">${getConfiguredReceiptFooter({ id: staffBranchId, name: 'Pharmacy' })}</div>
             </div>
             <script>window.print(); window.close();</script>
           </body>

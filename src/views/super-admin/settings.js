@@ -5,7 +5,10 @@ import {
   getSuperAdminPharmacyConfiguration,
   updateSuperAdminPharmacyConfiguration,
   resetSuperAdminPharmacyConfiguration,
-  getSuperAdminSettingsAuditPage
+  getSuperAdminSettingsAuditPage,
+  getBranches,
+  uploadPharmacyLogo,
+  removePharmacyLogo
 } from '../../database.js';
 import { showToast, showConfirm } from '../../utils.js';
 import { createModal } from '../../components/modal.js';
@@ -81,7 +84,7 @@ function formatDate(value) {
 function getOperational(pharmacy = {}) {
   return {
     default_low_stock_threshold: 5,
-    receipt_footer: 'Thank you for choosing SamMia Pharm.',
+    receipt_footer: 'Thank you for choosing {branch_name}.',
     ...(pharmacy.operational_settings || {})
   };
 }
@@ -297,8 +300,8 @@ function renderPlatformDefaults() {
           </label>
           <label class="form-group settings-form-span-2">
             <span class="form-label">Default Receipt Footer</span>
-            <textarea class="form-input" id="platform-receipt-footer" rows="3" maxlength="300">${esc(settings.receipt_footer || 'Thank you for choosing SamMia Pharm.')}</textarea>
-            <small class="text-muted">Shown on POS and sales-history printed receipts.</small>
+            <textarea class="form-input" id="platform-receipt-footer" rows="3" maxlength="300">${esc(settings.receipt_footer || 'Thank you for choosing {branch_name}.')}</textarea>
+            <small class="text-muted">Shown on POS and sales-history printed receipts. Supports {branch_name} and {pharmacy_name}.</small>
           </label>
         </div>
       </div>
@@ -686,10 +689,19 @@ async function refreshSettingsData(container, user) {
 
 async function showPharmacySettingsModal(pharmacyId, container, user) {
   try {
-    const detail = await getSuperAdminPharmacyConfiguration(pharmacyId);
+    const [detail, branches] = await Promise.all([
+      getSuperAdminPharmacyConfiguration(pharmacyId),
+      getBranches(pharmacyId)
+    ]);
     const pharmacy = detail.pharmacy || {};
     const operational = getOperational(pharmacy);
     const rules = pharmacy.discount_rules || {};
+    const branchFooters = operational.branch_receipt_footers && typeof operational.branch_receipt_footers === 'object'
+      ? operational.branch_receipt_footers : {};
+    let pendingLogoFile = null;
+    let removeLogo = false;
+    let previewObjectUrl = '';
+
     const { overlay, closeModal } = createModal({
       id: 'super-admin-pharmacy-settings',
       title: `Settings: ${esc(pharmacy.name || 'Pharmacy')}`,
@@ -700,7 +712,16 @@ async function showPharmacySettingsModal(pharmacyId, container, user) {
           <section class="settings-modal-section">
             <h4>Brand & Locale</h4>
             <div class="settings-form-grid">
-              <label class="form-group settings-form-span-2"><span class="form-label">Logo URL</span><input type="url" class="form-input" id="ph-logo-url" value="${esc(pharmacy.logo_url || '')}" placeholder="https://…" /></label>
+              <div class="form-group settings-form-span-2">
+                <span class="form-label">Pharmacy Logo</span>
+                <div class="branding-logo-row compact">
+                  <div class="branding-logo-preview" id="ph-logo-preview">${pharmacy.logo_url ? `<img src="${esc(pharmacy.logo_url)}" alt="${esc(pharmacy.name)} logo" />` : '<span>No logo</span>'}</div>
+                  <div class="branding-logo-actions">
+                    <div class="branding-dropzone" id="ph-logo-dropzone" tabindex="0" role="button"><strong>Drop logo here</strong><span>or click to choose PNG, JPG or WebP · max 2 MB</span><input type="file" id="ph-logo-file" accept="image/png,image/jpeg,image/webp" hidden /></div>
+                    <button type="button" class="btn btn-ghost btn-sm" id="ph-logo-remove" ${pharmacy.logo_url ? '' : 'disabled'}>Remove Logo</button>
+                  </div>
+                </div>
+              </div>
               <label class="form-group"><span class="form-label">Branding Color</span><input type="color" class="form-input settings-color-input" id="ph-branding-color" value="${esc(pharmacy.branding_color || '#2563eb')}" /></label>
               <label class="form-group"><span class="form-label">Currency</span><select class="form-select" id="ph-currency-code">${currencyOptions(pharmacy.currency_code || 'NLE')}</select></label>
               <label class="form-group"><span class="form-label">Currency Symbol</span><input class="form-input" id="ph-currency-symbol" maxlength="6" value="${esc(pharmacy.currency_symbol || 'Le')}" /></label>
@@ -723,8 +744,9 @@ async function showPharmacySettingsModal(pharmacyId, container, user) {
             <h4>Inventory & Receipts</h4>
             <div class="settings-form-grid">
               <label class="form-group"><span class="form-label">Default Low Stock Threshold</span><input type="number" class="form-input" id="ph-low-stock" min="0" step="1" value="${Number(operational.default_low_stock_threshold ?? 5)}" /></label>
-              <label class="form-group settings-form-span-2"><span class="form-label">Receipt Footer</span><textarea class="form-input" id="ph-receipt-footer" rows="3" maxlength="300">${esc(operational.receipt_footer || '')}</textarea></label>
+              <label class="form-group settings-form-span-2"><span class="form-label">Default Receipt Footer</span><textarea class="form-input" id="ph-receipt-footer" rows="3" maxlength="300">${esc(operational.receipt_footer || 'Thank you for choosing {branch_name}.')}</textarea><small class="text-muted">Tokens: <strong>{branch_name}</strong> and <strong>{pharmacy_name}</strong>. The correct branch name is inserted automatically on receipts.</small></label>
             </div>
+            ${branches?.length ? `<div class="branding-branch-footers settings-branch-footers">${branches.map(branch => `<label class="branding-branch-footer-card"><span><strong>${esc(branch.name)}</strong><small>Optional branch-specific override</small></span><textarea class="form-input" rows="2" maxlength="300" data-super-branch-footer="${branch.id}" placeholder="Use default receipt footer">${esc(branchFooters[branch.id] || '')}</textarea></label>`).join('')}</div>` : ''}
           </section>
 
           <section class="settings-modal-section">
@@ -740,13 +762,50 @@ async function showPharmacySettingsModal(pharmacyId, container, user) {
       `
     });
 
+    const dropzone = overlay.querySelector('#ph-logo-dropzone');
+    const logoInput = overlay.querySelector('#ph-logo-file');
+    const logoPreview = overlay.querySelector('#ph-logo-preview');
+    const removeButton = overlay.querySelector('#ph-logo-remove');
+    const setLogoFile = (file) => {
+      if (!file) return;
+      if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) return showToast('Logo must be PNG, JPG or WebP.', 'warning');
+      if (file.size > 2 * 1024 * 1024) return showToast('Logo must be 2 MB or smaller.', 'warning');
+      pendingLogoFile = file;
+      removeLogo = false;
+      if (previewObjectUrl) URL.revokeObjectURL(previewObjectUrl);
+      previewObjectUrl = URL.createObjectURL(file);
+      logoPreview.innerHTML = `<img src="${previewObjectUrl}" alt="New logo preview" />`;
+      removeButton.disabled = false;
+    };
+    dropzone?.addEventListener('click', () => logoInput?.click());
+    dropzone?.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); logoInput?.click(); } });
+    ['dragenter','dragover'].forEach(type => dropzone?.addEventListener(type, e => { e.preventDefault(); dropzone.classList.add('dragging'); }));
+    ['dragleave','drop'].forEach(type => dropzone?.addEventListener(type, e => { e.preventDefault(); dropzone.classList.remove('dragging'); }));
+    dropzone?.addEventListener('drop', e => setLogoFile(e.dataTransfer?.files?.[0]));
+    logoInput?.addEventListener('change', () => setLogoFile(logoInput.files?.[0]));
+    removeButton?.addEventListener('click', () => {
+      pendingLogoFile = null;
+      removeLogo = true;
+      if (previewObjectUrl) { URL.revokeObjectURL(previewObjectUrl); previewObjectUrl = ''; }
+      logoPreview.innerHTML = '<span>No logo</span>';
+      removeButton.disabled = true;
+    });
+
     overlay.querySelector('#ph-settings-cancel')?.addEventListener('click', closeModal);
     overlay.querySelector('#ph-settings-save')?.addEventListener('click', async event => {
       const button = event.currentTarget;
       button.disabled = true;
+      let uploaded = null;
       try {
+        if (pendingLogoFile) uploaded = await uploadPharmacyLogo(pharmacy.id, pendingLogoFile);
+        const nextLogoUrl = removeLogo ? '' : (uploaded?.url || pharmacy.logo_url || '');
+        const branchReceiptFooters = {};
+        overlay.querySelectorAll('[data-super-branch-footer]').forEach(field => {
+          const value = String(field.value || '').trim();
+          if (value) branchReceiptFooters[field.dataset.superBranchFooter] = value;
+        });
         const payload = {
-          logo_url: overlay.querySelector('#ph-logo-url')?.value?.trim() || '',
+          logo_url: nextLogoUrl,
           branding_color: overlay.querySelector('#ph-branding-color')?.value || '#2563eb',
           currency_code: overlay.querySelector('#ph-currency-code')?.value || 'NLE',
           currency_symbol: overlay.querySelector('#ph-currency-symbol')?.value?.trim() || 'Le',
@@ -760,15 +819,18 @@ async function showPharmacySettingsModal(pharmacyId, container, user) {
           },
           operational_settings: {
             default_low_stock_threshold: Number(overlay.querySelector('#ph-low-stock')?.value || 0),
-            receipt_footer: overlay.querySelector('#ph-receipt-footer')?.value?.trim() || ''
+            receipt_footer: overlay.querySelector('#ph-receipt-footer')?.value?.trim() || '',
+            branch_receipt_footers: branchReceiptFooters
           }
         };
         validateSettingsPayload(payload);
         await updateSuperAdminPharmacyConfiguration(pharmacy.id, payload, overlay.querySelector('#ph-change-note')?.value || '', 'pharmacy_overrides');
+        if ((uploaded || removeLogo) && pharmacy.logo_url && pharmacy.logo_url !== nextLogoUrl) removePharmacyLogo(pharmacy.logo_url).catch(() => {});
         showToast(`${pharmacy.name} settings updated`, 'success');
         closeModal();
         await refreshSettingsData(container, user);
       } catch (error) {
+        if (uploaded?.url) removePharmacyLogo(uploaded.url).catch(() => {});
         showToast(error.message || 'Failed to update pharmacy settings', 'error');
         button.disabled = false;
       }

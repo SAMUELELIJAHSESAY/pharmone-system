@@ -141,6 +141,52 @@ export async function getPharmacySettings(pharmacyId) {
   };
 }
 
+export async function uploadPharmacyLogo(pharmacyId, file) {
+  if (!pharmacyId) throw new Error('Pharmacy ID is required');
+  if (!file) throw new Error('Choose a logo file first');
+
+  const allowedTypes = ['image/png', 'image/jpeg', 'image/webp'];
+  if (!allowedTypes.includes(file.type)) throw new Error('Logo must be a PNG, JPG, or WebP image.');
+  if (file.size > 2 * 1024 * 1024) throw new Error('Logo must be 2 MB or smaller.');
+
+  const extension = file.type === 'image/png' ? 'png' : file.type === 'image/webp' ? 'webp' : 'jpg';
+  const objectPath = `${pharmacyId}/logo-${Date.now()}.${extension}`;
+  const { error } = await supabase.storage
+    .from('pharmacy-branding')
+    .upload(objectPath, file, { cacheControl: '3600', upsert: false, contentType: file.type });
+  if (error) throw new Error(`Logo upload failed: ${error.message}`);
+
+  const { data } = supabase.storage.from('pharmacy-branding').getPublicUrl(objectPath);
+  return { path: objectPath, url: data?.publicUrl || '' };
+}
+
+export async function removePharmacyLogo(logoUrlOrPath) {
+  const value = String(logoUrlOrPath || '').trim();
+  if (!value) return;
+  const marker = '/storage/v1/object/public/pharmacy-branding/';
+  let objectPath = value;
+  if (value.includes(marker)) objectPath = decodeURIComponent(value.split(marker)[1] || '');
+  if (!objectPath || objectPath.includes('://')) return;
+  const { error } = await supabase.storage.from('pharmacy-branding').remove([objectPath]);
+  if (error) console.warn('Failed to remove old pharmacy logo:', error.message);
+}
+
+export async function updateAdminPharmacyBranding(pharmacyId, settings, note = '') {
+  if (!pharmacyId) throw new Error('Pharmacy is required.');
+  const { data, error } = await supabase.rpc('update_pharmacy_branding', {
+    p_pharmacy_id: pharmacyId,
+    p_settings: settings || {},
+    p_note: String(note || '').trim() || null
+  });
+  if (error) {
+    if (['PGRST202', '42883'].includes(error.code) || /update_pharmacy_branding/i.test(error.message || '')) {
+      throw new Error('Apply the Pharmacy Branding migration before saving branding settings.');
+    }
+    throw error;
+  }
+  return data;
+}
+
 export async function updatePharmacySettings(pharmacyId, settings) {
   // Validate required fields
   if (!pharmacyId) throw new Error('Pharmacy ID is required');
@@ -209,7 +255,7 @@ function fallbackPlatformSettings() {
       discount_enabled: true,
       discount_rules: { max_discount: 10, min_cart_amount: 0 },
       default_low_stock_threshold: 5,
-      receipt_footer: 'Thank you for choosing SamMia Pharm.',
+      receipt_footer: 'Thank you for choosing {branch_name}.',
       module_features: { ...SUPER_ADMIN_DEFAULT_MODULE_FEATURES },
       updated_at: null
     },
@@ -269,7 +315,7 @@ export async function getSuperAdminPharmacyConfiguration(pharmacyId) {
           module_features: { ...SUPER_ADMIN_DEFAULT_MODULE_FEATURES, ...(settings?.module_features || {}) },
           operational_settings: {
             default_low_stock_threshold: 5,
-            receipt_footer: 'Thank you for choosing SamMia Pharm.',
+            receipt_footer: 'Thank you for choosing {branch_name}.',
             ...(settings?.operational_settings || {})
           }
         },
