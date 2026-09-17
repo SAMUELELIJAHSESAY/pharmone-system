@@ -555,8 +555,10 @@ tr:hover td { background: var(--gray-50); }
   border-radius: var(--radius-lg);
   width: 100%;
   max-width: 520px;
-  max-height: 90vh;
-  overflow-y: auto;
+  max-height: min(90vh, calc(100dvh - 2rem));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   transform: translateY(16px) scale(0.98);
   transition: transform 0.2s ease;
   box-shadow: var(--shadow-lg);
@@ -637,7 +639,19 @@ tr:hover td { background: var(--gray-50); }
 :root.theme-pharmacy .modal-close:hover {
   background: var(--gray-600);
 }
-.modal-body { padding: 1.5rem; }
+.modal-body {
+  padding: 1.5rem;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.modal-header,
+.modal-footer {
+  flex: 0 0 auto;
+}
+
 
 :root.theme-dark .modal-body {
   background: var(--bg-secondary);
@@ -656,6 +670,24 @@ tr:hover td { background: var(--gray-50); }
   align-items: center;
   justify-content: flex-end;
   gap: 0.75rem;
+}
+
+/* Keep inventory add/edit actions visible on laptop and desktop screens.
+   Only the form body scrolls; the footer never drops below the viewport. */
+#product-modal-overlay .modal-footer {
+  position: relative;
+  z-index: 2;
+  background: white;
+  box-shadow: 0 -8px 18px rgba(15, 23, 42, 0.05);
+}
+
+#product-modal-overlay .modal-body {
+  scrollbar-gutter: stable;
+}
+
+:root.theme-dark #product-modal-overlay .modal-footer,
+:root.theme-pharmacy #product-modal-overlay .modal-footer {
+  background: var(--bg-secondary);
 }
 
 :root.theme-dark .modal-footer {

@@ -707,7 +707,6 @@ function showProductModal(product, user, updateView, branchList) {
           </select>
           <div class="text-xs text-muted" style="margin-top: 0.25rem;">How is stock tracked/stored (boxes, strips, cups, etc)?</div>
         </div>
-        </div>
         <div class="grid-2">
           <div class="form-group">
             <label class="form-label">Stock (Boxes)</label>
