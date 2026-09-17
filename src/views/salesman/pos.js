@@ -51,6 +51,13 @@ function getReceiptLogoHtml() {
   return logo ? `<img src="${escapeReceiptText(logo)}" alt="" style="max-width:74px;max-height:74px;object-fit:contain;margin:0 auto 6px;display:block" />` : '';
 }
 
+function getReceiptCashierName(sale = {}, fallbackUser = currentUser) {
+  const historicalName = sale?.staff_name || sale?.staff?.full_name || sale?.creator?.full_name || '';
+  if (historicalName) return historicalName;
+  if (sale?.created_by && fallbackUser?.id && sale.created_by !== fallbackUser.id) return 'Staff member';
+  return fallbackUser?.profile?.full_name || fallbackUser?.email || 'Staff member';
+}
+
 export async function renderPOS(container, user, lifecycleToken = null) {
   if (cleanupPOSInteractions) {
     cleanupPOSInteractions();
@@ -788,6 +795,7 @@ function showReceiptModal(sale, items, total, discount, paymentMethod, branchDet
   const branchName = branchDetails?.name || 'Pharmacy';
   const branchAddress = branchDetails?.address || '';
   const branchEmail = branchDetails?.email || '';
+  const cashierName = getReceiptCashierName(sale);
   const { overlay, closeModal } = createModal({
     id: 'receipt-modal',
     title: 'Sale Complete!',
@@ -798,6 +806,7 @@ function showReceiptModal(sale, items, total, discount, paymentMethod, branchDet
           <div style="font-size:1.25rem;font-weight:700;color:var(--success)">${formatCurrency(total)}</div>
           <div class="text-sm text-muted">${sale.invoice_number}</div>
           <div class="text-xs text-muted" style="margin-top:0.25rem">${saleDate}</div>
+          <div class="text-xs text-muted" style="margin-top:0.2rem">Cashier: ${escapeReceiptText(cashierName)}</div>
         </div>
         <div style="background:var(--gray-50);border-radius:var(--radius);padding:1rem;margin-bottom:1rem">
           ${items.map(i => {
@@ -856,6 +865,7 @@ function showReceiptModal(sale, items, total, discount, paymentMethod, branchDet
             <div class="title">Receipt</div>
             <div class="row"><span>Invoice:</span><span><strong>${sale.invoice_number}</strong></span></div>
             <div class="row"><span>Date:</span><span>${formatUTCDateTime(sale.created_at)}</span></div>
+            <div class="row"><span>Cashier:</span><span>${escapeReceiptText(cashierName)}</span></div>
             <div class="divider"></div>
             ${items.map(i => {
               const packagingInfo = getPackagingInfo(i.packaging_type || 'unit', i.units_per_box || 10);
@@ -894,6 +904,7 @@ function showReceiptPreview() {
   // Generate preview invoice number
   const previewInvoiceNumber = 'INV-' + Math.floor(Math.random() * 100000000).toString().padStart(8, '0');
   const previewDateFormatted = formatUTCDateTime(previewDate);
+  const previewCashierName = getReceiptCashierName({}, currentUser);
 
   // Get branch details for receipt header
   getBranchDetails(staffBranchId).then(branchDetails => {
@@ -911,6 +922,7 @@ function showReceiptPreview() {
             <div style="font-size:1.25rem;font-weight:700;color:var(--success)">${formatCurrency(total)}</div>
             <div class="text-sm text-muted">${previewInvoiceNumber}</div>
             <div class="text-xs text-muted" style="margin-top:0.25rem">${previewDateFormatted}</div>
+            <div class="text-xs text-muted" style="margin-top:0.2rem">Cashier: ${escapeReceiptText(previewCashierName)}</div>
           </div>
           <div style="background:var(--gray-50);border-radius:var(--radius);padding:1rem;margin-bottom:1rem">
             ${cart.map(i => {
@@ -969,6 +981,7 @@ function showReceiptPreview() {
               <div class="title">Receipt</div>
               <div class="row"><span>Invoice:</span><span><strong>${previewInvoiceNumber}</strong></span></div>
               <div class="row"><span>Date:</span><span>${previewDateFormatted}</span></div>
+              <div class="row"><span>Cashier:</span><span>${escapeReceiptText(previewCashierName)}</span></div>
               <div class="divider"></div>
               ${cart.map(i => {
                 const packagingInfo = getPackagingInfo(i.packaging_type || 'unit', i.units_per_box || 10);
@@ -1001,6 +1014,7 @@ function showReceiptPreview() {
             <div style="font-size:1.25rem;font-weight:700;color:var(--success)">${formatCurrency(total)}</div>
             <div class="text-sm text-muted">${previewInvoiceNumber}</div>
             <div class="text-xs text-muted" style="margin-top:0.25rem">${previewDateFormatted}</div>
+            <div class="text-xs text-muted" style="margin-top:0.2rem">Cashier: ${escapeReceiptText(previewCashierName)}</div>
           </div>
           <div style="background:var(--gray-50);border-radius:var(--radius);padding:1rem;margin-bottom:1rem">
             ${cart.map(i => {
@@ -1056,6 +1070,7 @@ function showReceiptPreview() {
               <div class="title">Receipt</div>
               <div class="row"><span>Invoice:</span><span><strong>${previewInvoiceNumber}</strong></span></div>
               <div class="row"><span>Date:</span><span>${previewDateFormatted}</span></div>
+              <div class="row"><span>Cashier:</span><span>${escapeReceiptText(previewCashierName)}</span></div>
               <div class="divider"></div>
               ${cart.map(i => {
                 const packagingInfo = getPackagingInfo(i.packaging_type || 'unit', i.units_per_box || 10);
