@@ -134,8 +134,8 @@ function renderPOSView(container) {
       <div class="pos-products">
         <div class="pos-toolbar">
           <div class="search-box pos-search-box">
-            <span style="color:var(--gray-400)">&#128269;</span>
-            <input type="search" id="pos-search" placeholder="Search products... (F2)" autocomplete="off" />
+            <span class="pos-search-icon" aria-hidden="true">&#128269;</span>
+            <input type="search" id="pos-search" placeholder="Search products... (F2)" autocomplete="off" aria-label="Search products" />
           </div>
           <select class="form-select" id="pos-cat-filter">
             <option value="">All Categories</option>
@@ -193,9 +193,10 @@ function renderPOSView(container) {
           </div>
 
           <div id="cash-payment-fields" class="pos-payment-extra">
-            <label class="form-label">Cash Received</label>
-            <input type="number" class="form-input" id="cash-received" min="0" step="0.01" placeholder="0.00" />
-            <div class="pos-change-row"><span>Change Due</span><strong id="change-due">${formatCurrency(0)}</strong></div>
+            <label class="form-label">Cash Received <span class="text-muted" style="font-weight:500;">(optional)</span></label>
+            <input type="text" inputmode="decimal" class="form-input" id="cash-received" autocomplete="off" placeholder="Optional — enter amount received" />
+            <div class="pos-payment-helper">Leave blank to complete a normal cash sale. Enter an amount only when you want SamMia Pharm to calculate change.</div>
+            <div class="pos-change-row pos-cash-balance-row" id="cash-balance-row"><span id="cash-balance-label">Change Due</span><strong id="change-due">—</strong></div>
           </div>
 
           <div id="split-payment-fields" class="pos-split-payment" hidden>
@@ -270,8 +271,11 @@ function renderPOSView(container) {
   document.getElementById('add-customer-quick').addEventListener('click', showQuickAddCustomer);
   document.getElementById('discount-input').addEventListener('input', updateCartTotals);
   document.getElementById('payment-method').addEventListener('change', updatePaymentUI);
-  document.getElementById('cash-received').addEventListener('input', updatePaymentUI);
-  document.querySelectorAll('.split-pay-input').forEach(el => el.addEventListener('input', updatePaymentUI));
+  const cashReceivedInput = document.getElementById('cash-received');
+  ['input', 'change', 'keyup'].forEach(eventName => cashReceivedInput?.addEventListener(eventName, updatePaymentUI));
+  document.querySelectorAll('.split-pay-input').forEach(el => {
+    ['input', 'change', 'keyup'].forEach(eventName => el.addEventListener(eventName, updatePaymentUI));
+  });
   document.getElementById('checkout-btn').addEventListener('click', processCheckout);
   document.getElementById('preview-receipt-btn').addEventListener('click', showReceiptPreview);
   document.getElementById('hold-sale-btn').addEventListener('click', holdCurrentSale);
@@ -349,15 +353,17 @@ function renderProductCards(products) {
     const outOfStock = totalUnits <= 0;
     const unitType = (p.unit_type || 'box').charAt(0).toUpperCase() + (p.unit_type || 'box').slice(1);
     const favorite = readPOSLocalList('favorites').includes(p.id);
+    const stockTone = outOfStock ? 'empty' : totalUnits <= 10 ? 'low' : 'good';
     return `
-      <div class="pos-product-card ${outOfStock ? 'out-of-stock' : ''}" data-id="${p.id}" data-stock="${totalUnits}">
+      <div class="pos-product-card ${outOfStock ? 'out-of-stock' : ''} ${inCart ? 'in-cart' : ''}" data-id="${p.id}" data-stock="${totalUnits}">
+        <div class="pos-product-accent" aria-hidden="true"></div>
         <button type="button" class="pos-product-favorite ${favorite ? 'active' : ''}" data-id="${p.id}" aria-label="${favorite ? 'Remove from favorites' : 'Add to favorites'}">${favorite ? '★' : '☆'}</button>
         <div class="pos-product-category">${escapeReceiptText(p.category || 'Other')}</div>
         <div class="pos-product-name">${escapeReceiptText(p.name)}</div>
-        <div style="font-size:0.75rem;color:var(--primary);font-weight:600;margin-top:0.25rem">Sold by: ${unitType}</div>
-        <div class="pos-product-price">${formatCurrency(p.price)} per ${unitType.toLowerCase()}</div>
-        <div class="pos-product-stock">${outOfStock ? 'Out of stock' : totalUnits + ' units'}</div>
-        ${inCart ? `<div style="margin-top:0.375rem"><span class="badge badge-primary">${inCart.quantity} ${unitType.toLowerCase()}s in cart</span></div>` : ''}
+        <div class="pos-product-unit-chip">Sold by ${unitType}</div>
+        <div class="pos-product-price">${formatCurrency(p.price)} <span>per ${unitType.toLowerCase()}</span></div>
+        <div class="pos-product-stock pos-stock-${stockTone}">${outOfStock ? 'Out of stock' : `${totalUnits} units available`}</div>
+        ${inCart ? `<div class="pos-product-cart-badge">${inCart.quantity} ${unitType.toLowerCase()}${Number(inCart.quantity) === 1 ? '' : 's'} in cart</div>` : ''}
       </div>
     `;
   }).join('');
@@ -588,18 +594,43 @@ function getCartTotals() {
   return { subtotal, discount, total: Math.max(0, subtotal - discount) };
 }
 
+function parsePaymentAmount(value) {
+  const normalized = String(value ?? '')
+    .replace(/,/g, '')
+    .replace(/[^0-9.\-]/g, '')
+    .trim();
+  const parsed = Number.parseFloat(normalized);
+  return Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
+}
+
 function getPaymentState() {
   const { total } = getCartTotals();
   const method = document.getElementById('payment-method')?.value || 'cash';
   if (method === 'split') {
-    const cash = Math.max(0, Number(document.getElementById('split-cash')?.value || 0));
-    const mobileMoney = Math.max(0, Number(document.getElementById('split-mobile')?.value || 0));
-    const card = Math.max(0, Number(document.getElementById('split-card')?.value || 0));
+    const cash = parsePaymentAmount(document.getElementById('split-cash')?.value);
+    const mobileMoney = parsePaymentAmount(document.getElementById('split-mobile')?.value);
+    const card = parsePaymentAmount(document.getElementById('split-card')?.value);
     const paid = cash + mobileMoney + card;
     return { method, details: { cash, mobile_money: mobileMoney, card }, paid, remaining: Math.max(0, total - paid), changeDue: Math.max(0, paid - total) };
   }
-  const cashReceived = method === 'cash' ? Math.max(0, Number(document.getElementById('cash-received')?.value || 0)) : total;
-  return { method, details: { [method]: total }, paid: method === 'cash' ? cashReceived : total, remaining: method === 'cash' ? Math.max(0, total - cashReceived) : 0, changeDue: method === 'cash' ? Math.max(0, cashReceived - total) : 0 };
+  const cashInput = document.getElementById('cash-received');
+  const cashRaw = method === 'cash' ? String(cashInput?.value ?? '').trim() : '';
+  const cashReceivedEntered = method === 'cash' && cashRaw !== '';
+  const cashReceived = cashReceivedEntered ? parsePaymentAmount(cashRaw) : 0;
+
+  // Cash Received is optional. When it is blank, the cashier may complete the
+  // sale normally and we treat the tender as exactly the sale total for
+  // checkout validation only. We still persist cash_received as 0 so the
+  // receipt does not imply that a tender amount was captured.
+  return {
+    method,
+    details: { [method]: total },
+    paid: method === 'cash' ? (cashReceivedEntered ? cashReceived : total) : total,
+    remaining: method === 'cash' && cashReceivedEntered ? Math.max(0, total - cashReceived) : 0,
+    changeDue: method === 'cash' && cashReceivedEntered ? Math.max(0, cashReceived - total) : 0,
+    cashReceivedEntered,
+    cashReceived
+  };
 }
 
 function updatePaymentUI() {
@@ -608,39 +639,123 @@ function updatePaymentUI() {
   const splitFields = document.getElementById('split-payment-fields');
   if (cashFields) cashFields.hidden = method !== 'cash';
   if (splitFields) splitFields.hidden = method !== 'split';
+
   const payment = getPaymentState();
   const change = document.getElementById('change-due');
-  if (change) change.textContent = formatCurrency(payment.changeDue);
+  const balanceLabel = document.getElementById('cash-balance-label');
+  const balanceRow = document.getElementById('cash-balance-row');
+  if (change && method === 'cash') {
+    if (!payment.cashReceivedEntered) {
+      if (balanceLabel) balanceLabel.textContent = 'Change Due';
+      change.textContent = '—';
+      balanceRow?.classList.remove('is-short', 'has-change');
+    } else {
+      const short = payment.remaining > 0.009;
+      if (balanceLabel) balanceLabel.textContent = short ? 'Amount Still Due' : 'Change Due';
+      change.textContent = formatCurrency(short ? payment.remaining : payment.changeDue);
+      balanceRow?.classList.toggle('is-short', short);
+      balanceRow?.classList.toggle('has-change', !short && payment.changeDue > 0.009);
+    }
+  } else if (change) {
+    change.textContent = formatCurrency(0);
+    balanceRow?.classList.remove('is-short', 'has-change');
+  }
+
   const remaining = document.getElementById('split-remaining');
   if (remaining) remaining.textContent = formatCurrency(payment.remaining);
 }
 
-async function holdCurrentSale() {
+function holdCurrentSale() {
   if (!cart.length) return;
-  const name = window.prompt('Name this held sale (optional):', selectedCustomer ? 'Customer order' : 'Walk-in customer');
-  if (name === null) return;
-  const { discount } = getCartTotals();
-  try {
-    const held = await createPOSHeldSale({
-      pharmacy_id: currentUser.profile.pharmacy_id,
-      branch_id: staffBranchId,
-      created_by: currentUser.id,
-      customer_id: selectedCustomer || null,
-      label: name.trim() || 'Held sale',
-      cart_json: cart,
-      discount,
-      notes: ''
-    });
-    heldSales = [held, ...heldSales.filter(h => h.id !== held.id)];
-    cart = [];
-    selectedCustomer = null;
-    document.getElementById('customer-select').value = '';
-    document.getElementById('discount-input').value = '0';
-    document.getElementById('held-sales-count').textContent = heldSales.length;
-    renderCart();
-    filterProducts();
-    showToast('Sale held');
-  } catch (err) { showToast(`Could not hold sale: ${err.message}`, 'error'); }
+
+  const selected = allCustomers.find(customer => customer.id === selectedCustomer);
+  const { total, discount } = getCartTotals();
+  const itemCount = cart.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
+  const customerOptions = allCustomers.map(customer => `
+    <option value="${customer.id}" ${customer.id === selectedCustomer ? 'selected' : ''}>${escapeReceiptText(customer.name)}${customer.phone ? ` (${escapeReceiptText(customer.phone)})` : ''}</option>`).join('');
+
+  const { overlay, closeModal } = createModal({
+    id: 'hold-sale-confirm-modal',
+    title: 'Hold Current Sale',
+    body: `
+      <div class="pos-hold-summary">
+        <div><span>Cart</span><strong>${itemCount} item(s)</strong></div>
+        <div><span>Total</span><strong>${formatCurrency(total)}</strong></div>
+      </div>
+      <div class="pos-hold-help">
+        Save this cart temporarily so you can serve another customer and resume it later.
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="hold-customer">Customer</label>
+        <select class="form-select" id="hold-customer">
+          <option value="">Walk-in Customer</option>
+          ${customerOptions}
+        </select>
+        <div class="form-help">Choose a customer if known, or leave this as Walk-in Customer.</div>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="hold-reference">Reference / customer name</label>
+        <input class="form-input" id="hold-reference" maxlength="80" placeholder="e.g. Mariama - coming back in 10 minutes" value="${escapeReceiptText(selected?.name || '')}" />
+        <div class="form-help">Optional. This makes the held sale easy to identify later.</div>
+      </div>
+      <div id="hold-sale-error" class="alert alert-danger hidden"></div>
+    `,
+    footer: `
+      <button type="button" class="btn btn-ghost" id="hold-sale-cancel">Cancel</button>
+      <button type="button" class="btn btn-primary" id="hold-sale-confirm">Hold Sale</button>
+    `
+  });
+
+  const customerSelect = overlay.querySelector('#hold-customer');
+  const referenceInput = overlay.querySelector('#hold-reference');
+  const confirmBtn = overlay.querySelector('#hold-sale-confirm');
+  const errorEl = overlay.querySelector('#hold-sale-error');
+
+  overlay.querySelector('#hold-sale-cancel')?.addEventListener('click', closeModal);
+  referenceInput?.focus();
+
+  const saveHeldSale = async () => {
+    confirmBtn.disabled = true;
+    confirmBtn.textContent = 'Holding…';
+    errorEl?.classList.add('hidden');
+    const holdCustomerId = customerSelect?.value || null;
+    const reference = referenceInput?.value.trim() || '';
+    const chosenCustomer = allCustomers.find(customer => customer.id === holdCustomerId);
+    const label = reference || chosenCustomer?.name || 'Walk-in customer';
+
+    try {
+      const held = await createPOSHeldSale({
+        pharmacy_id: currentUser.profile.pharmacy_id,
+        branch_id: staffBranchId,
+        created_by: currentUser.id,
+        customer_id: holdCustomerId,
+        label,
+        cart_json: cart,
+        discount,
+        notes: ''
+      });
+      heldSales = [held, ...heldSales.filter(h => h.id !== held.id)];
+      cart = [];
+      selectedCustomer = null;
+      document.getElementById('customer-select').value = '';
+      document.getElementById('discount-input').value = '0';
+      document.getElementById('cash-received').value = '';
+      document.getElementById('held-sales-count').textContent = heldSales.length;
+      renderCart();
+      filterProducts();
+      closeModal();
+      showToast(`Sale held as “${label}”`);
+    } catch (err) {
+      if (errorEl) { errorEl.textContent = `Could not hold sale: ${err.message}`; errorEl.classList.remove('hidden'); }
+      confirmBtn.disabled = false;
+      confirmBtn.textContent = 'Hold Sale';
+    }
+  };
+
+  confirmBtn?.addEventListener('click', saveHeldSale);
+  referenceInput?.addEventListener('keydown', event => {
+    if (event.key === 'Enter') { event.preventDefault(); saveHeldSale(); }
+  });
 }
 
 function showHeldSalesModal() {
@@ -758,7 +873,7 @@ async function processCheckout() {
     branch_id: staffBranchId,
     status: 'completed',
     payment_details: payment.details,
-    cash_received: paymentMethod === 'cash' ? payment.paid : Number(payment.details.cash || 0),
+    cash_received: paymentMethod === 'cash' ? (payment.cashReceivedEntered ? payment.cashReceived : 0) : Number(payment.details.cash || 0),
     change_due: payment.changeDue,
     created_at: new Date().toISOString()
   };
