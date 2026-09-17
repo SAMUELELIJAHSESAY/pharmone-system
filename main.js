@@ -1,7 +1,7 @@
 import { getCurrentUser, getSession, onAuthStateChange } from './src/auth.js';
 import { renderLanding } from './src/views/landing.js';
 import { renderLogin } from './src/views/login.js';
-import { renderApp } from './src/views/app.js';
+import { renderApp, clearStoredNavigationState } from './src/views/app.js';
 import { initTheme } from './src/theme.js';
 import { initPWA } from './src/pwa.js';
 import { cleanupActiveView } from './src/view-lifecycle.js';
@@ -120,6 +120,7 @@ async function init() {
 
     if (event === 'SIGNED_OUT') {
       authResolutionGeneration += 1;
+      clearStoredNavigationState();
       currentUser = null;
       showPublicEntry({ force: true });
     }

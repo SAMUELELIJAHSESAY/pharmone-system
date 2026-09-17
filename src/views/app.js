@@ -48,6 +48,90 @@ let currentModuleFeatures = { ...DEFAULT_MODULE_FEATURES };
 let currentImpersonation = null;
 let globalSearchDocumentController = new AbortController();
 
+const NAVIGATION_STORAGE_PREFIX = 'sammia-navigation:';
+
+function getDefaultViewForRole(role) {
+  if (role === 'super_admin') return 'super-dashboard';
+  if (role === 'admin') return 'admin-dashboard';
+  if (role === 'inventory_manager') return 'inventory';
+  // Salespeople should open directly into the working POS screen after login.
+  return 'pos';
+}
+
+function getNavigationStorageKey(user = activeUser) {
+  const userId = user?.id || user?.profile?.id || 'anonymous';
+  const role = user?.profile?.role || 'salesman';
+  const pharmacyId = user?.profile?.pharmacy_id || 'platform';
+  return `${NAVIGATION_STORAGE_PREFIX}${userId}:${role}:${pharmacyId}`;
+}
+
+function isViewAllowedForRole(view, role) {
+  if (!view) return false;
+  const allowed = {
+    super_admin: new Set(['super-dashboard', 'pharmacies', 'all-users', 'settings']),
+    admin: new Set([
+      'admin-dashboard', 'inventory', 'sales', 'customers', 'patients', 'expenses',
+      'stock-transfers', 'suppliers', 'purchases', 'returns', 'returns-management',
+      'alerts', 'reports', 'sales-reports', 'daily-reports', 'staff', 'branches',
+      'branch-details', 'salesman-features', 'branding', 'pos'
+    ]),
+    inventory_manager: new Set(['inventory', 'branches', 'branch-details']),
+    salesman: new Set([
+      'pos', 'salesman-dashboard', 'sales-history', 'customers', 'patients',
+      'expenses', 'returns-request', 'daily-reports'
+    ])
+  };
+  return (allowed[role] || allowed.salesman).has(view);
+}
+
+function readStoredNavigation(user = activeUser) {
+  try {
+    const raw = sessionStorage.getItem(getNavigationStorageKey(user));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    const role = user?.profile?.role || 'salesman';
+    if (!isViewAllowedForRole(parsed?.view, role)) return null;
+    return {
+      view: parsed.view,
+      params: parsed?.params && typeof parsed.params === 'object' ? parsed.params : {}
+    };
+  } catch (_) {
+    return null;
+  }
+}
+
+function storeNavigation(view, params = {}) {
+  try {
+    if (!activeUser || !isViewAllowedForRole(view, activeUser.profile?.role || 'salesman')) return;
+    sessionStorage.setItem(getNavigationStorageKey(activeUser), JSON.stringify({ view, params }));
+  } catch (_) {
+    // Navigation persistence is optional and must never break routing.
+  }
+}
+
+export function clearStoredNavigationState() {
+  currentView = null;
+  currentParams = {};
+  currentImpersonation = null;
+
+  // Remove the old global keys from previous builds so one role can never inherit
+  // another role's last page after this upgrade.
+  try {
+    localStorage.removeItem('currentView');
+    localStorage.removeItem('currentParams');
+    localStorage.removeItem('impersonation');
+  } catch (_) {}
+
+  try {
+    const keys = [];
+    for (let i = 0; i < sessionStorage.length; i += 1) {
+      const key = sessionStorage.key(i);
+      if (key?.startsWith(NAVIGATION_STORAGE_PREFIX)) keys.push(key);
+    }
+    keys.forEach((key) => sessionStorage.removeItem(key));
+  } catch (_) {}
+}
+
 const PAGE_TITLES = {
   'super-dashboard': 'Overview',
   'pharmacies': 'Pharmacies',
@@ -259,6 +343,9 @@ export function renderApp(user) {
   }
   activeUser = getActiveUser();
   const role = activeUser.profile?.role || 'salesman';
+  // Feature flags are tenant/account-specific. Never carry the previous account's
+  // salesman permissions into a newly rendered authenticated workspace.
+  currentSalesmanFeatures = null;
 
   // Load pharmacy settings globally for currency, tenant branding and module availability.
   // Reset first so switching/impersonating pharmacies never leaks the previous tenant color/logo.
@@ -294,6 +381,27 @@ export function renderApp(user) {
         .then(features => {
           currentSalesmanFeatures = features;
           updateSidebarWithFeatures(activeUser, features);
+
+          const featureMapping = {
+            'salesman-dashboard': 'dashboard',
+            'sales-history': 'sales_history',
+            'daily-reports': 'daily_records',
+            'pos': 'pos',
+            'customers': 'customers',
+            'patients': 'patients',
+            'expenses': 'expenses',
+            'returns-request': 'returns_request'
+          };
+          const requiredFeature = featureMapping[currentView];
+          if (requiredFeature && features?.[requiredFeature] === false) {
+            const fallback = features?.pos !== false && currentModuleFeatures.sales !== false ? 'pos'
+              : features?.dashboard !== false ? 'salesman-dashboard'
+              : features?.sales_history !== false ? 'sales-history'
+              : features?.customers !== false && currentModuleFeatures.customers !== false ? 'customers'
+              : features?.patients !== false && currentModuleFeatures.patients !== false ? 'patients'
+              : null;
+            if (fallback && fallback !== currentView) navigate(fallback);
+          }
         })
         .catch(err => {
           console.error('Failed to load salesman features:', err);
@@ -362,6 +470,7 @@ export function renderApp(user) {
 
   document.getElementById('signout-btn').addEventListener('click', async () => {
     cleanupActiveView();
+    clearStoredNavigationState();
     await signOut();
   });
 
@@ -451,19 +560,19 @@ export function renderApp(user) {
   // after a short debounce instead of downloading entire modules to the browser.
   initGlobalSearch(activeUser);
 
-  const defaultView = role === 'super_admin' ? 'super-dashboard'
-    : role === 'admin' ? 'admin-dashboard'
-    : role === 'inventory_manager' ? 'inventory'
-    : 'salesman-dashboard';
+  const defaultView = getDefaultViewForRole(role);
 
-  // Try to restore last visited view from localStorage
-  const savedView = localStorage.getItem('currentView');
-  const savedParams = localStorage.getItem('currentParams');
-  let viewToLoad = savedView || defaultView;
-  if (role === 'inventory_manager' && !['inventory', 'branches', 'branch-details'].includes(viewToLoad)) {
-    viewToLoad = defaultView;
-  }
-  const paramsToLoad = savedParams ? JSON.parse(savedParams) : {};
+  // Remove legacy global route keys from older builds. Navigation persistence is
+  // now scoped to the signed-in user/role in sessionStorage, so a different user
+  // can never inherit the previous account's Inventory, Sales, POS, etc. page.
+  try {
+    localStorage.removeItem('currentView');
+    localStorage.removeItem('currentParams');
+  } catch (_) {}
+
+  const storedNavigation = readStoredNavigation(activeUser);
+  const viewToLoad = storedNavigation?.view || defaultView;
+  const paramsToLoad = storedNavigation?.params || {};
 
   navigate(viewToLoad, paramsToLoad);
 
@@ -558,9 +667,10 @@ export function navigate(view, params = {}) {
   currentView = view;
   currentParams = params;
 
-  // Save current view to localStorage for persistence on refresh
-  localStorage.setItem('currentView', view);
-  localStorage.setItem('currentParams', JSON.stringify(params));
+  // Persist only inside this signed-in browser session and scope it to the
+  // current user + role + pharmacy. Logout clears this state, so the next account
+  // always opens on its own role home page instead of inheriting the prior route.
+  storeNavigation(view, params);
 
   document.querySelectorAll('.nav-item').forEach(item => {
     item.classList.toggle('active', item.dataset.view === view);
