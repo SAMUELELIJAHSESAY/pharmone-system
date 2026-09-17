@@ -3162,6 +3162,24 @@ code {
 /* =============================================
    SAMMIA PHARM — BRAND SYSTEM & PUBLIC WEBSITE
    ============================================= */
+/* Public surfaces are permanently platform-branded. These local custom
+   properties deliberately shadow any tenant variables that may still exist on
+   :root during an auth/navigation transition. */
+.public-site,
+.sammia-auth-page {
+  --sammia-blue: #2563eb;
+  --sammia-blue-hover: #1d4ed8;
+  --sammia-blue-soft: #eff6ff;
+  --primary: #2563eb;
+  --primary-dark: #1d4ed8;
+  --primary-light: #60a5fa;
+  --primary-50: #eff6ff;
+  --primary-100: #dbeafe;
+  --blue-50: #eff6ff;
+  --blue-300: #93c5fd;
+  --blue-700: #1d4ed8;
+}
+
 :root.theme-light,
 :root.theme-dark,
 :root.theme-pharmacy {

@@ -31,7 +31,7 @@ import { renderSettings } from './super-admin/settings.js';
 import { showToast, formatCurrency } from '../utils.js';
 import { showProfileModal } from '../components/profile.js';
 import { beginViewLifecycle, cleanupActiveView } from '../view-lifecycle.js';
-import { applyPharmacyBranding, resetPharmacyBranding } from '../branding.js';
+import { applyPharmacyBranding, resetPharmacyBranding, setPharmacyBrandingScope } from '../branding.js';
 import { renderBranding } from './admin/branding.js';
 
 let currentUser = null;
@@ -266,8 +266,12 @@ export function renderApp(user) {
   window.pharmacySettings = null;
   resetPharmacyBranding();
   if (activeUser.profile?.pharmacy_id) {
-    getPharmacySettings(activeUser.profile.pharmacy_id)
+    const brandingPharmacyId = activeUser.profile.pharmacy_id;
+    setPharmacyBrandingScope(brandingPharmacyId);
+    getPharmacySettings(brandingPharmacyId)
       .then(settings => {
+        const root = document.documentElement;
+        if (root.dataset.brandingScope !== 'pharmacy' || root.dataset.pharmacyBrandTarget !== String(brandingPharmacyId)) return;
         window.pharmacySettings = settings || { currency_symbol: 'Le', currency_code: 'NLE' };
         applyPharmacyBranding(window.pharmacySettings);
         currentModuleFeatures = { ...DEFAULT_MODULE_FEATURES, ...(settings?.module_features || {}) };

@@ -5,6 +5,7 @@ import { renderApp } from './src/views/app.js';
 import { initTheme } from './src/theme.js';
 import { initPWA } from './src/pwa.js';
 import { cleanupActiveView } from './src/view-lifecycle.js';
+import { resetPharmacyBranding } from './src/branding.js';
 
 let renderedMode = null;
 let renderedUserId = null;
@@ -16,6 +17,12 @@ function isLoginRoute() {
 }
 
 function showPublicEntry({ force = false } = {}) {
+  // Public SamMia Pharm pages always use the platform brand. Clear any tenant
+  // CSS variables before rendering (and before any early return) so a pharmacy
+  // color can never persist onto Landing/Login after logout or workspace exit.
+  resetPharmacyBranding();
+  window.pharmacySettings = null;
+
   if (currentUser) {
     showAuthenticatedApp(currentUser);
     return;

@@ -31,8 +31,23 @@ function mix(hex, targetHex, amount) {
   });
 }
 
+export function setPharmacyBrandingScope(pharmacyId = '') {
+  const root = document.documentElement;
+  root.dataset.brandingScope = 'pharmacy';
+  root.dataset.pharmacyBrandTarget = String(pharmacyId || '');
+}
+
 export function applyPharmacyBranding(settings = {}) {
   const root = document.documentElement;
+  const settingsId = String(settings?.id || '');
+  const targetId = String(root.dataset.pharmacyBrandTarget || '');
+
+  // Tenant colors are allowed only while an authenticated pharmacy workspace
+  // explicitly owns the branding scope. This prevents delayed async settings
+  // responses from recoloring the public website after logout/navigation.
+  if (root.dataset.brandingScope !== 'pharmacy') return null;
+  if (targetId && settingsId && targetId !== settingsId) return null;
+  if (!document.querySelector('.app-shell')) return null;
   const color = normalizeHex(settings?.branding_color);
   const hover = mix(color, '#000000', 0.18);
   const soft = mix(color, '#ffffff', 0.92);
@@ -64,6 +79,8 @@ export function resetPharmacyBranding() {
   ].forEach((name) => root.style.removeProperty(name));
   delete root.dataset.pharmacyBrand;
   delete root.dataset.pharmacyBrandColor;
+  delete root.dataset.pharmacyBrandTarget;
+  root.dataset.brandingScope = 'platform';
 }
 
 export function getPharmacyLogoUrl(settings = {}) {
