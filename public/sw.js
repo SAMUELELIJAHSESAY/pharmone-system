@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'v2.0.33';
+const CACHE_VERSION = 'v2.0.34';
 const CACHE_NAME = `sammia-pharm-shell-${CACHE_VERSION}`;
 const CACHE_PREFIX = 'sammia-pharm-shell-';
 const LEGACY_CACHE_PREFIX = 'pharmacare-shell-';
@@ -100,7 +100,7 @@ self.addEventListener('fetch', (event) => {
         return networkResponse;
       } catch {
         const cache = await caches.open(CACHE_NAME);
-        return (await cache.match(OFFLINE_URL)) || (await cache.match('/')) || Response.error();
+        return (await cache.match('/')) || (await cache.match(OFFLINE_URL)) || Response.error();
       }
     })());
     return;
@@ -141,3 +141,12 @@ self.addEventListener('fetch', (event) => {
 });
 
 // Landing inventory screenshot cache refresh: v9
+
+
+self.addEventListener('sync', (event) => {
+  if (event.tag !== 'sammia-pos-sync') return;
+  event.waitUntil((async () => {
+    const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    clients.forEach((client) => client.postMessage({ type: 'SAMMIA_POS_SYNC_REQUESTED' }));
+  })());
+});

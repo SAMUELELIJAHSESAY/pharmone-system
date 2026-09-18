@@ -1,8 +1,10 @@
-import { getPOSProductsPage, getPOSProductsByIds, getProductCategories, getCustomers, createCustomer, createSale, getStaffBranch, getPharmacySettings, getBranchDetails, getSalesPage, getPOSHeldSales, createPOSHeldSale, deletePOSHeldSale } from '../../database.js';
+import { getPOSProductsPage, getPOSProductsByIds, getProductCategories, getCustomers, createCustomer, createPOSSaleAtomic, getStaffBranch, getPharmacySettings, getBranchDetails, getSalesPage, getPOSHeldSales, createPOSHeldSale, deletePOSHeldSale } from '../../database.js';
 import { formatCurrency, showToast, debounce, formatUTCDateTime } from '../../utils.js';
 import { createModal } from '../../components/modal.js';
 import { isViewLifecycleActive, registerViewCleanup } from '../../view-lifecycle.js';
 import { resolveReceiptFooter, getPharmacyLogoUrl } from '../../branding.js';
+import { makeOfflineScope, cachePOSBootstrap, getCachedPOSBootstrap, mergeCachedPOSProducts, replaceCachedPOSProducts, queryCachedPOSProducts, queueOfflinePOSSale, getPendingPOSSales, countCachedProducts, getCachedPOSProductsByIds } from '../../offline-db.js';
+import { getOfflineSyncSnapshot, requestOfflineSync } from '../../offline-sync.js';
 
 let cart = [];
 let allProducts = [];
@@ -25,6 +27,9 @@ let currentUser = null;
 let staffBranchId = null;
 let currentLifecycleToken = null;
 let cleanupPOSInteractions = null;
+let currentBranchDetails = null;
+let offlineScope = null;
+let offlineCacheWarmPromise = null;
 
 function escapeReceiptText(value) {
   return String(value ?? '')
@@ -75,11 +80,16 @@ export async function renderPOS(container, user, lifecycleToken = null) {
   productSearch = '';
   productCategory = '';
   inStockOnly = true;
+  currentBranchDetails = null;
+  offlineScope = null;
 
   const pharmacyId = user.profile?.pharmacy_id;
   if (!pharmacyId) { container.innerHTML = `<div class="alert alert-warning">No pharmacy linked.</div>`; return; }
 
+  let loadedFromCache = false;
   try {
+    if (!navigator.onLine) throw new TypeError('Offline');
+
     const settings = await getPharmacySettings(pharmacyId);
     if (lifecycleToken && !isViewLifecycleActive(lifecycleToken)) return;
     window.pharmacySettings = settings || { currency_symbol: 'Le', currency_code: 'NLE' };
@@ -91,7 +101,8 @@ export async function renderPOS(container, user, lifecycleToken = null) {
       return;
     }
 
-    const [customers, categories, held, recent] = await Promise.all([
+    const [branchDetails, customers, categories, held, recent] = await Promise.all([
+      getBranchDetails(staffBranchId),
       getCustomers(pharmacyId),
       getProductCategories(pharmacyId, staffBranchId),
       getPOSHeldSales(pharmacyId, staffBranchId, user.id).catch(() => []),
@@ -99,17 +110,171 @@ export async function renderPOS(container, user, lifecycleToken = null) {
     ]);
     if (lifecycleToken && !isViewLifecycleActive(lifecycleToken)) return;
 
+    currentBranchDetails = branchDetails || null;
     allCustomers = customers || [];
     productCategories = categories || [];
     heldSales = held || [];
     recentSales = recent || [];
+    offlineScope = makeOfflineScope(user.id, pharmacyId, staffBranchId);
 
-    renderPOSView(container);
-    await loadPOSProducts({ reset: true });
+    await cachePOSBootstrap({
+      userId: user.id,
+      pharmacyId,
+      branchId: staffBranchId,
+      settings: window.pharmacySettings,
+      branchDetails: currentBranchDetails,
+      categories: productCategories,
+      customers: allCustomers,
+      heldSales,
+      recentSales
+    }).catch(() => {});
   } catch (err) {
-    if (lifecycleToken && !isViewLifecycleActive(lifecycleToken)) return;
-    container.innerHTML = `<div class="alert alert-danger">Failed to load POS: ${err.message}</div>`;
+    const cached = await getCachedPOSBootstrap(user.id, pharmacyId).catch(() => null);
+    if (!cached || (navigator.onLine && !isLikelyNetworkError(err))) {
+      if (lifecycleToken && !isViewLifecycleActive(lifecycleToken)) return;
+      container.innerHTML = `<div class="alert alert-danger">Failed to load POS: ${escapeReceiptText(err.message || 'POS data is unavailable')}</div>`;
+      return;
+    }
+
+    loadedFromCache = true;
+    staffBranchId = cached.branch_id;
+    offlineScope = cached.scope || makeOfflineScope(user.id, pharmacyId, staffBranchId);
+    window.pharmacySettings = cached.settings || user.profile?.pharmacies || { currency_symbol: 'Le', currency_code: 'NLE' };
+    currentBranchDetails = cached.branch_details || null;
+    allCustomers = cached.customers || [];
+    productCategories = cached.categories || [];
+    heldSales = cached.held_sales || [];
+    recentSales = cached.recent_sales || [];
   }
+
+  renderPOSView(container);
+  await loadPOSProducts({ reset: true });
+  await refreshPOSSyncStatus();
+
+  if (!loadedFromCache && navigator.onLine) {
+    offlineCacheWarmPromise = requestOfflineSync({ reason: 'pos_opened' })
+      .catch(() => null)
+      .then(() => warmPOSOfflineCache())
+      .catch((error) => console.warn('POS offline cache warm failed:', error));
+  }
+}
+
+function isLikelyNetworkError(error) {
+  if (!navigator.onLine) return true;
+  const message = String(error?.message || error || '');
+  return /failed to fetch|network|load failed|timeout|connection|fetch/i.test(message);
+}
+
+function makeClientTransactionId() {
+  return globalThis.crypto?.randomUUID?.() || `pos-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function makeOfflineInvoiceNumber(clientTransactionId) {
+  const date = new Date();
+  const y = String(date.getFullYear()).slice(-2);
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  const short = String(clientTransactionId || '').replace(/[^a-z0-9]/gi, '').slice(0, 8).toUpperCase();
+  return `OFF-${y}${m}${d}-${short || Date.now().toString().slice(-6)}`;
+}
+
+async function warmPOSOfflineCache() {
+  if (!navigator.onLine || !offlineScope || !currentUser?.profile?.pharmacy_id || !staffBranchId) return;
+  const rows = [];
+  let page = 1;
+  const pageSize = 60;
+  let total = Infinity;
+
+  while (navigator.onLine && rows.length < total) {
+    const result = await getPOSProductsPage(currentUser.profile.pharmacy_id, {
+      branchId: staffBranchId,
+      page,
+      pageSize,
+      search: '',
+      category: '',
+      inStockOnly: false
+    });
+    rows.push(...(result.products || []));
+    total = Number(result.count || rows.length);
+    if (!(result.products || []).length || rows.length >= total) break;
+    page += 1;
+  }
+
+  if (rows.length) {
+    await replaceCachedPOSProducts(offlineScope, rows);
+    window.dispatchEvent(new CustomEvent('sammia:offline-cache-updated', { detail: { scope: offlineScope, products: rows.length } }));
+    await refreshPOSSyncStatus();
+  }
+}
+
+async function refreshPOSSyncStatus() {
+  const button = document.getElementById('pos-sync-status');
+  if (!button || !offlineScope) return;
+  const snapshot = await getOfflineSyncSnapshot({ scope: offlineScope }).catch(() => ({ online: navigator.onLine, pendingCount: 0, syncing: false }));
+  const cachedCount = await countCachedProducts(offlineScope).catch(() => 0);
+  button.classList.remove('is-online', 'is-offline', 'is-pending', 'is-syncing', 'is-warning');
+
+  if (!snapshot.online) {
+    button.classList.add('is-offline');
+    button.innerHTML = `● Offline${snapshot.pendingCount ? ` · ${snapshot.pendingCount} waiting` : ''}`;
+    button.title = `${cachedCount} products available from this device cache`;
+  } else if (snapshot.syncing) {
+    button.classList.add('is-syncing');
+    button.innerHTML = `↻ Syncing${snapshot.pendingCount ? ` ${snapshot.pendingCount}` : ''}…`;
+  } else if (snapshot.pendingCount) {
+    button.classList.add('is-pending');
+    button.innerHTML = `↻ ${snapshot.pendingCount} sale${snapshot.pendingCount === 1 ? '' : 's'} waiting`;
+  } else if (snapshot.lastConflictCount) {
+    button.classList.add('is-warning');
+    button.innerHTML = `⚠ Synced · ${snapshot.lastConflictCount} conflict${snapshot.lastConflictCount === 1 ? '' : 's'}`;
+  } else {
+    button.classList.add('is-online');
+    button.innerHTML = '✓ Online · Synced';
+  }
+}
+
+async function showPOSSyncCenter() {
+  if (!offlineScope) return;
+  const snapshot = await getOfflineSyncSnapshot({ scope: offlineScope }).catch(() => ({ online: navigator.onLine, pendingCount: 0, pending: [] }));
+  const cachedCount = await countCachedProducts(offlineScope).catch(() => 0);
+  const pendingRows = (snapshot.pending || []).slice(0, 12).map((sale) => `
+    <div class="pos-sync-sale-row">
+      <div><strong>${escapeReceiptText(sale.invoice_number || 'Offline sale')}</strong><span>${formatUTCDateTime(sale.created_at)}</span></div>
+      <div><strong>${formatCurrency(Number(sale.sale_payload?.total_amount || 0))}</strong><span>${sale.last_error ? escapeReceiptText(sale.last_error) : 'Waiting to sync'}</span></div>
+    </div>`).join('');
+
+  const { overlay, closeModal } = createModal({
+    id: 'pos-sync-center',
+    title: 'SamMia Pharm Sync',
+    body: `
+      <div class="pos-sync-summary-grid">
+        <div><span>Connection</span><strong class="${snapshot.online ? 'text-success' : 'text-warning'}">${snapshot.online ? '● Online' : '● Offline'}</strong></div>
+        <div><span>Waiting</span><strong>${snapshot.pendingCount || 0} sale${snapshot.pendingCount === 1 ? '' : 's'}</strong></div>
+        <div><span>Cached products</span><strong>${cachedCount}</strong></div>
+        <div><span>Last sync</span><strong>${snapshot.lastSyncAt ? formatUTCDateTime(snapshot.lastSyncAt) : 'Not yet'}</strong></div>
+      </div>
+      ${snapshot.lastConflictCount ? `<div class="alert alert-warning">${snapshot.lastConflictCount} stock reconciliation conflict${snapshot.lastConflictCount === 1 ? '' : 's'} was detected during the last sync. An Admin should review physical stock.</div>` : ''}
+      ${snapshot.pendingCount ? `<div class="pos-sync-list">${pendingRows}</div>` : `<div class="empty-state" style="padding:1.2rem"><div class="empty-state-title">Everything is synced</div><div class="empty-state-desc">There are no offline POS sales waiting on this device.</div></div>`}
+    `,
+    footer: `
+      <button type="button" class="btn btn-ghost" id="sync-center-close">Close</button>
+      <button type="button" class="btn btn-primary" id="sync-center-now" ${snapshot.online && snapshot.pendingCount ? '' : 'disabled'}>Sync Now</button>
+    `
+  });
+  overlay.querySelector('#sync-center-close')?.addEventListener('click', closeModal);
+  overlay.querySelector('#sync-center-now')?.addEventListener('click', async (event) => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    button.textContent = 'Syncing…';
+    const result = await requestOfflineSync({ reason: 'pos_sync_center' }).catch((error) => ({ error }));
+    if (result?.error) showToast(`Sync failed: ${result.error.message}`, 'error');
+    else if (result?.migrationRequired) showToast('Apply the Offline POS Sync migration before queued sales can be uploaded.', 'warning');
+    else showToast(result?.pending ? `${result.pending} sale(s) still waiting to sync.` : 'Offline sales synced successfully.', result?.pending ? 'warning' : 'success');
+    if (!result?.pending && navigator.onLine) await warmPOSOfflineCache().catch(() => {});
+    closeModal();
+    await refreshPOSSyncStatus();
+    await loadPOSProducts({ reset: true });
+  });
 }
 
 function renderPOSView(container) {
@@ -120,6 +285,7 @@ function renderPOSView(container) {
         <div class="page-subtitle">Fast checkout for your assigned branch</div>
       </div>
       <div class="pos-head-actions">
+        <button type="button" class="pos-sync-chip" id="pos-sync-status" title="Open Sync Center">Checking sync…</button>
         <button class="btn btn-ghost" id="pos-held-sales">⏸ Held Sales <span class="badge badge-gray" id="held-sales-count">${heldSales.length}</span></button>
         <button class="btn btn-ghost" id="pos-recent-sales">🧾 Recent Sales</button>
         <select class="form-select pos-customer-select" id="customer-select" aria-label="Select customer">
@@ -128,6 +294,10 @@ function renderPOSView(container) {
         </select>
         <button class="btn btn-ghost pos-new-customer-btn" id="add-customer-quick">+ New Customer</button>
       </div>
+    </div>
+    <div class="pos-offline-notice" id="pos-offline-notice" ${navigator.onLine ? 'hidden' : ''}>
+      <strong>Offline Mode</strong>
+      <span>Sales will be saved safely on this device and synchronized when internet returns.</span>
     </div>
 
     <div class="pos-layout">
@@ -282,10 +452,33 @@ function renderPOSView(container) {
   document.getElementById('pos-recent-sales').addEventListener('click', showRecentSalesModal);
   document.getElementById('pos-favorites').addEventListener('click', showFavoriteProducts);
   document.getElementById('pos-recent-products').addEventListener('click', showRecentProducts);
+  document.getElementById('pos-sync-status')?.addEventListener('click', showPOSSyncCenter);
+
+  const handlePOSConnectivityChange = async () => {
+    const notice = document.getElementById('pos-offline-notice');
+    if (notice) notice.hidden = navigator.onLine;
+    await refreshPOSSyncStatus();
+    if (navigator.onLine) {
+      const result = await requestOfflineSync({ reason: 'pos_connectivity_change' }).catch(() => null);
+      if (result && !result.pending) await warmPOSOfflineCache().catch(() => {});
+      await loadPOSProducts({ reset: true });
+    }
+  };
+  const handlePOSSyncStatus = () => refreshPOSSyncStatus();
+  window.addEventListener('online', handlePOSConnectivityChange);
+  window.addEventListener('offline', handlePOSConnectivityChange);
+  window.addEventListener('sammia:offline-sync-status', handlePOSSyncStatus);
+  window.addEventListener('sammia:offline-queue-changed', handlePOSSyncStatus);
+  window.addEventListener('sammia:offline-cache-updated', handlePOSSyncStatus);
 
   cleanupPOSInteractions = () => {
     mobileCartMedia.removeEventListener?.('change', handleMobileCartMediaChange);
     document.removeEventListener('keydown', handlePOSKeydown);
+    window.removeEventListener('online', handlePOSConnectivityChange);
+    window.removeEventListener('offline', handlePOSConnectivityChange);
+    window.removeEventListener('sammia:offline-sync-status', handlePOSSyncStatus);
+    window.removeEventListener('sammia:offline-queue-changed', handlePOSSyncStatus);
+    window.removeEventListener('sammia:offline-cache-updated', handlePOSSyncStatus);
     document.body.classList.remove('mobile-pos-cart-open');
   };
   if (currentLifecycleToken && isViewLifecycleActive(currentLifecycleToken)) registerViewCleanup(currentLifecycleToken, () => cleanupPOSInteractions?.());
@@ -293,7 +486,7 @@ function renderPOSView(container) {
 }
 
 async function loadPOSProducts({ reset = false } = {}) {
-  if (!currentUser?.profile?.pharmacy_id || !staffBranchId || productLoading) return;
+  if (!currentUser?.profile?.pharmacy_id || !staffBranchId || !offlineScope || productLoading) return;
   const seq = ++productLoadSeq;
   productLoading = true;
   const grid = document.getElementById('pos-product-grid');
@@ -306,14 +499,36 @@ async function loadPOSProducts({ reset = false } = {}) {
   if (loadMore) { loadMore.disabled = true; loadMore.textContent = 'Loading…'; }
 
   try {
-    const result = await getPOSProductsPage(currentUser.profile.pharmacy_id, {
-      branchId: staffBranchId,
-      page: productPage,
-      pageSize: productPageSize,
-      search: productSearch,
-      category: productCategory,
-      inStockOnly
-    });
+    let result;
+    let usingOfflineCache = !navigator.onLine;
+
+    if (!usingOfflineCache) {
+      try {
+        result = await getPOSProductsPage(currentUser.profile.pharmacy_id, {
+          branchId: staffBranchId,
+          page: productPage,
+          pageSize: productPageSize,
+          search: productSearch,
+          category: productCategory,
+          inStockOnly
+        });
+        await mergeCachedPOSProducts(offlineScope, result.products || []).catch(() => {});
+      } catch (error) {
+        if (!isLikelyNetworkError(error)) throw error;
+        usingOfflineCache = true;
+      }
+    }
+
+    if (usingOfflineCache) {
+      result = await queryCachedPOSProducts(offlineScope, {
+        page: productPage,
+        pageSize: productPageSize,
+        search: productSearch,
+        category: productCategory,
+        inStockOnly
+      });
+    }
+
     if (seq !== productLoadSeq) return;
     const rows = result.products || [];
     const byId = new Map(allProducts.map(p => [p.id, p]));
@@ -324,7 +539,7 @@ async function loadPOSProducts({ reset = false } = {}) {
     if (grid) grid.innerHTML = renderProductCards(allProducts);
     bindProductClicks();
     const count = document.getElementById('pos-product-count');
-    if (count) count.textContent = `Showing ${allProducts.length} of ${productTotal} matching products`;
+    if (count) count.textContent = `${usingOfflineCache ? 'Offline cache · ' : ''}Showing ${allProducts.length} of ${productTotal} matching products`;
     const wrap = document.getElementById('pos-load-more-wrap');
     if (wrap) wrap.hidden = !productHasMore;
     if (productHasMore) productPage += 1;
@@ -714,6 +929,10 @@ function holdCurrentSale() {
   referenceInput?.focus();
 
   const saveHeldSale = async () => {
+    if (!navigator.onLine) {
+      if (errorEl) { errorEl.textContent = 'Hold Sale is not available offline yet. Complete the sale offline or reconnect first.'; errorEl.classList.remove('hidden'); }
+      return;
+    }
     confirmBtn.disabled = true;
     confirmBtn.textContent = 'Holding…';
     errorEl?.classList.add('hidden');
@@ -793,20 +1012,33 @@ function showRecentSalesModal() {
   overlay.querySelector('#recent-close').addEventListener('click', closeModal);
   overlay.querySelectorAll('.pos-recent-sale-row').forEach(btn => btn.addEventListener('click', async () => {
     const sale = recentSales.find(s => s.id === btn.dataset.id); if (!sale) return;
-    const branchDetails = await getBranchDetails(staffBranchId).catch(() => ({}));
+    const branchDetails = currentBranchDetails || (navigator.onLine ? await getBranchDetails(staffBranchId).catch(() => ({})) : {});
     showReceiptModal(sale, (sale.sale_items || []).map(i => ({ product_name:i.product_name, quantity:Number(i.packaging_quantity || i.quantity), unit_price:Number(i.total_price || 0) / Math.max(1, Number(i.packaging_quantity || i.quantity)), packaging_type:i.packaging_type || 'unit', units_per_box:1 })), Number(sale.total_amount||0), Number(sale.discount||0), sale.payment_method || 'cash', branchDetails, sale.payment_details || null, Number(sale.change_due||0));
   }));
+}
+
+async function loadQuickProductList(ids, label) {
+  if (!ids.length) return [];
+  if (!navigator.onLine) return getCachedPOSProductsByIds(offlineScope, ids);
+  try {
+    const rows = await getPOSProductsByIds(currentUser.profile.pharmacy_id, staffBranchId, ids);
+    await mergeCachedPOSProducts(offlineScope, rows).catch(() => {});
+    return rows;
+  } catch (error) {
+    if (!isLikelyNetworkError(error)) throw error;
+    return getCachedPOSProductsByIds(offlineScope, ids);
+  }
 }
 
 async function showFavoriteProducts() {
   const ids = readPOSLocalList('favorites');
   if (!ids.length) { showToast('No favorite products yet. Use the star on a product card.', 'warning'); return; }
   try {
-    const rows = await getPOSProductsByIds(currentUser.profile.pharmacy_id, staffBranchId, ids);
+    const rows = await loadQuickProductList(ids, 'favorites');
     allProducts = rows;
     document.getElementById('pos-product-grid').innerHTML = renderProductCards(rows);
     bindProductClicks();
-    document.getElementById('pos-product-count').textContent = `${rows.length} favorite product(s)`;
+    document.getElementById('pos-product-count').textContent = `${navigator.onLine ? '' : 'Offline cache · '}${rows.length} favorite product(s)`;
     document.getElementById('pos-load-more-wrap').hidden = true;
   } catch (err) { showToast(`Could not load favorites: ${err.message}`, 'error'); }
 }
@@ -814,11 +1046,11 @@ async function showRecentProducts() {
   const ids = readPOSLocalList('recent_products');
   if (!ids.length) { showToast('No recent products yet.', 'warning'); return; }
   try {
-    const rows = await getPOSProductsByIds(currentUser.profile.pharmacy_id, staffBranchId, ids);
+    const rows = await loadQuickProductList(ids, 'recent');
     allProducts = rows;
     document.getElementById('pos-product-grid').innerHTML = renderProductCards(rows);
     bindProductClicks();
-    document.getElementById('pos-product-count').textContent = `${rows.length} recently selected product(s)`;
+    document.getElementById('pos-product-count').textContent = `${navigator.onLine ? '' : 'Offline cache · '}${rows.length} recently selected product(s)`;
     document.getElementById('pos-load-more-wrap').hidden = true;
   } catch (err) { showToast(`Could not load recent products: ${err.message}`, 'error'); }
 }
@@ -827,14 +1059,14 @@ async function processCheckout() {
   if (cart.length === 0) { showToast('Cart is empty', 'error'); return; }
   const checkoutBtn = document.getElementById('checkout-btn');
   checkoutBtn.disabled = true;
-  checkoutBtn.textContent = 'Processing...';
+  checkoutBtn.textContent = navigator.onLine ? 'Processing...' : 'Saving Offline...';
 
   const { subtotal, discount, total } = getCartTotals();
   const payment = getPaymentState();
   const paymentMethod = payment.method;
   const notes = '';
 
-  if (!staffBranchId) {
+  if (!staffBranchId || !offlineScope) {
     showToast('Error: Your branch assignment could not be determined', 'error');
     checkoutBtn.disabled = false; checkoutBtn.textContent = 'Complete Sale'; return;
   }
@@ -847,6 +1079,7 @@ async function processCheckout() {
     checkoutBtn.disabled = false; checkoutBtn.textContent = 'Complete Sale'; return;
   }
 
+  const receiptItems = cart.map(item => ({ ...item }));
   const cartItemsForSale = cart.map(item => {
     const product = allProducts.find(p => p.id === item.product_id);
     const packagingInfo = getPackagingInfo(item.packaging_type, product?.units_per_box || item.units_per_box || 1);
@@ -877,26 +1110,98 @@ async function processCheckout() {
     created_at: new Date().toISOString()
   };
 
+  const clientTransactionId = makeClientTransactionId();
+  const onlineInvoiceNumber = `INV-${Date.now().toString().slice(-8)}`;
+  const offlineInvoiceNumber = makeOfflineInvoiceNumber(clientTransactionId);
+
+  const queueSaleLocally = async (invoiceNumber, originalError = null) => {
+    const record = {
+      scope: offlineScope,
+      user_id: currentUser.id,
+      pharmacy_id: currentUser.profile.pharmacy_id,
+      branch_id: staffBranchId,
+      client_transaction_id: clientTransactionId,
+      invoice_number: invoiceNumber,
+      created_at: salePayload.created_at,
+      sale_payload: salePayload,
+      sale_items: cartItemsForSale,
+      receipt_items: receiptItems,
+      original_error: originalError ? String(originalError.message || originalError).slice(0, 500) : ''
+    };
+    await queueOfflinePOSSale(record, cartItemsForSale);
+    const offlineSale = {
+      id: null,
+      invoice_number: invoiceNumber,
+      created_at: salePayload.created_at,
+      created_by: currentUser.id,
+      staff_name: getReceiptCashierName({}, currentUser),
+      offline_pending: true,
+      client_transaction_id: clientTransactionId
+    };
+    showReceiptModal(offlineSale, receiptItems, total, discount, paymentMethod, currentBranchDetails || {}, payment.details, payment.changeDue);
+    showToast(`Sale saved offline. ${invoiceNumber} will sync automatically when internet returns.`, 'success');
+    cart = [];
+    selectedCustomer = null;
+    const customerSelect = document.getElementById('customer-select');
+    if (customerSelect) customerSelect.value = '';
+    const discountInput = document.getElementById('discount-input');
+    if (discountInput) discountInput.value = '0';
+    const cashInput = document.getElementById('cash-received');
+    if (cashInput) cashInput.value = '';
+    renderCart();
+    filterProducts();
+    await loadPOSProducts({ reset: true });
+    await refreshPOSSyncStatus();
+  };
+
+  if (!navigator.onLine) {
+    try {
+      await queueSaleLocally(offlineInvoiceNumber);
+    } catch (error) {
+      showToast(`Could not save offline sale: ${error.message}`, 'error');
+      checkoutBtn.disabled = false;
+      checkoutBtn.textContent = 'Complete Sale';
+    }
+    return;
+  }
+
   try {
-    const sale = await createSale(salePayload, cartItemsForSale);
+    const sale = await createPOSSaleAtomic(salePayload, cartItemsForSale, {
+      clientTransactionId,
+      invoiceNumber: onlineInvoiceNumber
+    });
     showToast(`Sale completed! Invoice: ${sale.invoice_number}`);
-    const branchDetails = await getBranchDetails(staffBranchId);
-    showReceiptModal(sale, cart.slice(), total, discount, paymentMethod, branchDetails, payment.details, payment.changeDue);
+    const branchDetails = currentBranchDetails || await getBranchDetails(staffBranchId).catch(() => ({}));
+    currentBranchDetails = branchDetails || currentBranchDetails;
+    showReceiptModal(sale, receiptItems, total, discount, paymentMethod, branchDetails, payment.details, payment.changeDue);
     cart = [];
     selectedCustomer = null;
     await renderPOS(document.getElementById('page-content'), currentUser, currentLifecycleToken);
   } catch (err) {
-    let errorMsg = err.message || 'Unknown error occurred';
-    if (errorMsg.includes('branch_id')) errorMsg = 'Branch information missing. Please contact administrator.';
-    else if (errorMsg.includes('expired')) errorMsg = 'Cannot sell expired products. Remove them and try again.';
-    else if (errorMsg.includes('stock')) errorMsg = 'Insufficient stock for some items. Refresh and try again.';
-    else if (errorMsg.includes('payment_method')) errorMsg = 'Split payment support requires the latest POS database migration.';
-    else if (err.code === '42703' || err.code === 'PGRST204') errorMsg = 'POS database upgrade required. Apply the latest Supabase migration.';
-    showToast('Failed to complete sale: ' + errorMsg, 'error');
+    if (isLikelyNetworkError(err)) {
+      try {
+        // Use the same client transaction ID after an uncertain network failure.
+        // If the server actually committed the sale before the response was lost,
+        // the later sync RPC returns the existing sale instead of duplicating it.
+        await queueSaleLocally(onlineInvoiceNumber, err);
+        return;
+      } catch (queueError) {
+        showToast(`Connection was lost and the sale could not be saved locally: ${queueError.message}`, 'error');
+      }
+    } else {
+      let errorMsg = err.message || 'Unknown error occurred';
+      if (errorMsg.includes('branch_id')) errorMsg = 'Branch information missing. Please contact administrator.';
+      else if (errorMsg.includes('expired')) errorMsg = 'Cannot sell expired products. Remove them and try again.';
+      else if (errorMsg.includes('stock')) errorMsg = 'Insufficient stock for some items. Refresh and try again.';
+      else if (errorMsg.includes('payment_method')) errorMsg = 'Split payment support requires the latest POS database migration.';
+      else if (err.code === '42703' || err.code === 'PGRST204') errorMsg = 'POS database upgrade required. Apply the latest Supabase migration.';
+      showToast('Failed to complete sale: ' + errorMsg, 'error');
+    }
     checkoutBtn.disabled = false;
     checkoutBtn.textContent = 'Complete Sale';
   }
 }
+
 
 function showReceiptModal(sale, items, total, discount, paymentMethod, branchDetails = {}, paymentDetails = null, changeDue = 0) {
   const saleDate = formatUTCDateTime(sale.created_at);
@@ -906,13 +1211,14 @@ function showReceiptModal(sale, items, total, discount, paymentMethod, branchDet
   const cashierName = getReceiptCashierName(sale);
   const { overlay, closeModal } = createModal({
     id: 'receipt-modal',
-    title: 'Sale Complete!',
+    title: sale.offline_pending ? 'Sale Saved Offline' : 'Sale Complete!',
     body: `
       <div id="receipt-content" style="font-family:monospace;font-size:0.9rem">
         <div style="text-align:center;margin-bottom:1.25rem">
           <div style="font-size:3rem;margin-bottom:0.5rem">&#9989;</div>
           <div style="font-size:1.25rem;font-weight:700;color:var(--success)">${formatCurrency(total)}</div>
           <div class="text-sm text-muted">${sale.invoice_number}</div>
+          ${sale.offline_pending ? '<div class="pos-receipt-offline-badge">Waiting to sync</div>' : ''}
           <div class="text-xs text-muted" style="margin-top:0.25rem">${saleDate}</div>
           <div class="text-xs text-muted" style="margin-top:0.2rem">Cashier: ${escapeReceiptText(cashierName)}</div>
         </div>
@@ -1016,8 +1322,11 @@ function showReceiptPreview() {
   const previewDateFormatted = formatUTCDateTime(previewDate);
   const previewCashierName = getReceiptCashierName({}, currentUser);
 
-  // Get branch details for receipt header
-  getBranchDetails(staffBranchId).then(branchDetails => {
+  // Use cached branch details when offline so receipt preview still contains the branch identity.
+  const branchDetailsPromise = currentBranchDetails
+    ? Promise.resolve(currentBranchDetails)
+    : (navigator.onLine ? getBranchDetails(staffBranchId) : Promise.resolve({}));
+  branchDetailsPromise.then(branchDetails => {
     const branchName = branchDetails?.name || 'Pharmacy';
     const branchAddress = branchDetails?.address || '';
     const branchEmail = branchDetails?.email || '';
@@ -1204,6 +1513,10 @@ function showReceiptPreview() {
 }
 
 function showQuickAddCustomer() {
+  if (!navigator.onLine) {
+    showToast('New customers require internet in this first offline POS phase. Existing cached customers and walk-in sales still work offline.', 'warning');
+    return;
+  }
   const { overlay, closeModal } = createModal({
     id: 'quick-customer',
     title: 'Add Quick Customer',

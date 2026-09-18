@@ -6,6 +6,7 @@ import { initTheme } from './src/theme.js';
 import { initPWA } from './src/pwa.js';
 import { cleanupActiveView } from './src/view-lifecycle.js';
 import { resetPharmacyBranding } from './src/branding.js';
+import { initOfflineSync, configureOfflineSyncUser } from './src/offline-sync.js';
 
 let renderedMode = null;
 let renderedUserId = null;
@@ -50,6 +51,7 @@ function showAuthenticatedApp(user) {
   }
 
   currentUser = user;
+  configureOfflineSyncUser(user);
 
   // Remove the public login hash once an account is authenticated. This keeps
   // the app URL clean and returns signed-out users to the public landing page.
@@ -89,6 +91,7 @@ function resolveSignedInSession(session) {
       if (generation !== authResolutionGeneration) return;
       console.error('Failed to resolve authenticated user:', error);
       currentUser = null;
+      configureOfflineSyncUser(null);
       showPublicEntry({ force: true });
     }
   }, 0);
@@ -97,6 +100,7 @@ function resolveSignedInSession(session) {
 async function init() {
   initTheme();
   initPWA();
+  initOfflineSync();
 
   try {
     const user = await getCurrentUser();
@@ -104,6 +108,7 @@ async function init() {
       showAuthenticatedApp(user);
     } else {
       currentUser = null;
+      configureOfflineSyncUser(null);
       showPublicEntry({ force: true });
     }
   } catch (error) {
@@ -122,6 +127,7 @@ async function init() {
       authResolutionGeneration += 1;
       clearStoredNavigationState();
       currentUser = null;
+      configureOfflineSyncUser(null);
       showPublicEntry({ force: true });
     }
   });

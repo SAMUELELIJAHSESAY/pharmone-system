@@ -1862,6 +1862,40 @@ export async function getSalesToday(pharmacyId, branchId = null) {
   return data;
 }
 
+export async function syncQueuedPOSSale(record) {
+  if (!record?.client_transaction_id) throw new Error('Missing offline transaction ID.');
+  const { data, error } = await supabase.rpc('sync_offline_pos_sale', {
+    p_client_transaction_id: record.client_transaction_id,
+    p_invoice_number: record.invoice_number || null,
+    p_sale: record.sale_payload || {},
+    p_items: record.sale_items || []
+  });
+  if (error) throw error;
+  return data || {};
+}
+
+export async function createPOSSaleAtomic(salePayload, items, { clientTransactionId, invoiceNumber } = {}) {
+  const record = {
+    client_transaction_id: clientTransactionId || (globalThis.crypto?.randomUUID?.() || `pos-${Date.now()}-${Math.random().toString(16).slice(2)}`),
+    invoice_number: invoiceNumber || `INV-${Date.now().toString().slice(-8)}`,
+    sale_payload: salePayload || {},
+    sale_items: items || []
+  };
+
+  try {
+    const result = await syncQueuedPOSSale(record);
+    return result?.sale || result;
+  } catch (error) {
+    const message = String(error?.message || '');
+    const migrationMissing = ['PGRST202', '42883'].includes(error?.code) || /sync_offline_pos_sale/i.test(message);
+    if (!migrationMissing) throw error;
+    // Preserve normal online checkout during rollout before the offline migration
+    // has been applied. Offline queued sales themselves never use this fallback,
+    // because only the idempotent RPC is safe to retry after reconnecting.
+    return createSale(salePayload, items);
+  }
+}
+
 export async function createSale(salePayload, items) {
   const invoiceNumber = `INV-${Date.now().toString().slice(-8)}`;
 

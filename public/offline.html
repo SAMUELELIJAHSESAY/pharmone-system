@@ -22,9 +22,9 @@
   <main>
     <div class="icon" aria-hidden="true"><img src="/brand/sammia-mark.png" alt="" /></div>
     <h1>You’re offline</h1>
-    <p>SamMia Pharm is installed, but live pharmacy data and secure account operations require an internet connection. Reconnect, then try again.</p>
+    <p>This device could not load the cached SamMia Pharm app shell. If this is the first time using this device, connect to the internet once so the POS can prepare its offline cache.</p>
     <button type="button" onclick="location.reload()">Try again</button>
-    <small>This screen does not create or change pharmacy records.</small>
+    <small>Once the app has been opened and prepared online, supported POS sales can continue offline from the cached application.</small>
   </main>
   <script>
     window.addEventListener('online', () => location.reload(), { once: true });

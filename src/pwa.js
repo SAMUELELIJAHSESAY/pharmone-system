@@ -179,7 +179,7 @@ function updateConnectivityUI() {
       banner.className = 'pwa-network-banner';
       banner.setAttribute('role', 'status');
       banner.setAttribute('aria-live', 'assertive');
-      banner.innerHTML = '<span aria-hidden="true">●</span><strong>Offline</strong><span>Reconnect before saving or syncing pharmacy data.</span>';
+      banner.innerHTML = '<span aria-hidden="true">●</span><strong>Offline Mode</strong><span>POS sales can be saved on this device and will sync when internet returns. Other modules may still require internet.</span>';
       document.body.appendChild(banner);
       requestAnimationFrame(() => banner.classList.add('show'));
     }

@@ -33,6 +33,7 @@ import { showProfileModal } from '../components/profile.js';
 import { beginViewLifecycle, cleanupActiveView } from '../view-lifecycle.js';
 import { applyPharmacyBranding, resetPharmacyBranding, setPharmacyBrandingScope } from '../branding.js';
 import { renderBranding } from './admin/branding.js';
+import { getCachedPOSBootstrap } from '../offline-db.js';
 
 let currentUser = null;
 let activeUser = null;
@@ -373,7 +374,21 @@ export function renderApp(user) {
           if (fallback && currentView && currentView !== fallback) navigate(fallback);
         }
       })
-      .catch(err => console.error('Failed to load pharmacy settings:', err));
+      .catch(async err => {
+        console.error('Failed to load pharmacy settings:', err);
+        if (!navigator.onLine && activeUser?.id) {
+          const cached = await getCachedPOSBootstrap(activeUser.id, brandingPharmacyId).catch(() => null);
+          if (cached?.settings) {
+            const root = document.documentElement;
+            if (root.dataset.brandingScope === 'pharmacy' && root.dataset.pharmacyBrandTarget === String(brandingPharmacyId)) {
+              window.pharmacySettings = cached.settings;
+              applyPharmacyBranding(cached.settings);
+              currentModuleFeatures = { ...DEFAULT_MODULE_FEATURES, ...(cached.settings?.module_features || {}) };
+              refreshSidebarNavigation(activeUser);
+            }
+          }
+        }
+      });
 
     // Load salesman features for feature-based navigation filtering
     if (role === 'salesman') {
