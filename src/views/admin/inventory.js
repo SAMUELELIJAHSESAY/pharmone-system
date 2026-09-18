@@ -3,14 +3,28 @@ import {
   getInventorySummary,
   getProductCategories,
   getProductStockLogs,
-  createProduct,
   updateProduct,
   deleteProduct,
-  addStock,
-  getStockLogs,
   getBranches,
-  getPharmacySettings
+  getPharmacySettings,
+  getInventoryCachePage,
+  resolveOfflineInventoryConflict
 } from '../../database.js';
+import {
+  makeOfflineScope,
+  cacheInventoryBootstrap,
+  getCachedInventoryBootstrap,
+  mergeCachedPOSProducts,
+  replaceCachedPOSProducts,
+  getCachedPOSProductsByIds,
+  queryCachedInventoryProducts,
+  queueOfflineInventoryOperation,
+  getInventoryConflicts,
+  acceptServerInventoryConflict,
+  retryInventoryConflictWithLocalChanges,
+  countCachedProducts
+} from '../../offline-db.js';
+import { getOfflineSyncSnapshot, requestOfflineSync } from '../../offline-sync.js';
 import { formatCurrency, formatDate, formatDateTime, showToast, showConfirm, isExpired, isExpiringSoon, debounce } from '../../utils.js';
 import { createModal } from '../../components/modal.js';
 
@@ -20,6 +34,12 @@ let selectedBranchId = null;
 let currentFilterType = null;
 let currentSearchTerm = '';
 let containerRef = null;
+let inventoryOfflineScope = null;
+let inventoryOfflineMode = false;
+let inventoryUser = null;
+const inventoryCachePriming = new Set();
+let inventorySyncHandler = null;
+let inventoryRefreshAfterSync = false;
 
 const inventoryState = {
   page: 1,
@@ -63,40 +83,122 @@ function getInventoryQueryOptions() {
   };
 }
 
-async function fetchInventoryData(user, { refreshMeta = false } = {}) {
-  const pharmacyId = user.profile.pharmacy_id;
-  const pagePromise = getProductsPage(pharmacyId, getInventoryQueryOptions());
+function getInventoryScope(user, branchId = selectedBranchId) {
+  return makeOfflineScope(user?.id, user?.profile?.pharmacy_id, branchId);
+}
 
-  if (refreshMeta) {
-    const [pageResult, summary, categories] = await Promise.all([
-      pagePromise,
-      getInventorySummary(pharmacyId, selectedBranchId),
-      getProductCategories(pharmacyId, selectedBranchId)
-    ]);
-    inventoryState.summary = summary;
-    inventoryState.categories = categories;
-    inventoryState.totalCount = pageResult.count;
-    allProducts = pageResult.products;
-  } else {
-    const pageResult = await pagePromise;
-    inventoryState.totalCount = pageResult.count;
-    allProducts = pageResult.products;
+async function primeInventoryBranchCache(user, branchId) {
+  if (!navigator.onLine || !user?.id || !branchId || inventoryCachePriming.has(branchId)) return;
+  inventoryCachePriming.add(branchId);
+  const scope = getInventoryScope(user, branchId);
+  try {
+    const rows = [];
+    const pageSize = 250;
+    let page = 1;
+    let total = Infinity;
+    while (rows.length < total && navigator.onLine) {
+      const result = await getInventoryCachePage(user.profile.pharmacy_id, branchId, { page, pageSize });
+      rows.push(...(result.products || []));
+      total = Number(result.count || 0);
+      if (!result.products?.length || rows.length >= total) break;
+      page += 1;
+    }
+    if (navigator.onLine) {
+      await replaceCachedPOSProducts(scope, rows);
+      window.dispatchEvent(new CustomEvent('sammia:offline-cache-updated', { detail: { scope, products: rows.length, inventory: true } }));
+    }
+  } catch (error) {
+    console.warn('Inventory offline cache refresh failed:', error?.message || error);
+  } finally {
+    inventoryCachePriming.delete(branchId);
   }
+}
+
+async function primeInventoryWorkspaceCache(user, branchList = []) {
+  if (!navigator.onLine) return;
+  for (const branch of branchList) {
+    if (!navigator.onLine) break;
+    await primeInventoryBranchCache(user, branch.id);
+  }
+}
+
+async function loadCachedInventory(user) {
+  inventoryOfflineScope = getInventoryScope(user);
+  const cached = await queryCachedInventoryProducts(inventoryOfflineScope, getInventoryQueryOptions());
+  inventoryState.summary = cached.summary;
+  inventoryState.categories = cached.categories;
+  inventoryState.totalCount = cached.count;
+  allProducts = cached.products;
+  inventoryOfflineMode = true;
 
   const totalPages = Math.max(1, Math.ceil(inventoryState.totalCount / inventoryState.pageSize));
   if (inventoryState.page > totalPages) {
     inventoryState.page = totalPages;
-    const corrected = await getProductsPage(pharmacyId, getInventoryQueryOptions());
+    const corrected = await queryCachedInventoryProducts(inventoryOfflineScope, getInventoryQueryOptions());
     inventoryState.totalCount = corrected.count;
     allProducts = corrected.products;
+  }
+  return cached;
+}
+
+async function fetchInventoryData(user, { refreshMeta = false, preferCache = false } = {}) {
+  const pharmacyId = user.profile.pharmacy_id;
+  inventoryOfflineScope = getInventoryScope(user);
+
+  if (preferCache || !navigator.onLine) {
+    return loadCachedInventory(user);
+  }
+
+  try {
+    const pagePromise = getProductsPage(pharmacyId, getInventoryQueryOptions());
+    let pageResult;
+    if (refreshMeta) {
+      const [result, summary, categories] = await Promise.all([
+        pagePromise,
+        getInventorySummary(pharmacyId, selectedBranchId),
+        getProductCategories(pharmacyId, selectedBranchId)
+      ]);
+      pageResult = result;
+      inventoryState.summary = summary;
+      inventoryState.categories = categories;
+    } else {
+      pageResult = await pagePromise;
+    }
+
+    await mergeCachedPOSProducts(inventoryOfflineScope, pageResult.products || []);
+    const cachedVisible = await getCachedPOSProductsByIds(inventoryOfflineScope, (pageResult.products || []).map((product) => product.id));
+    const cachedById = new Map(cachedVisible.map((product) => [product.id, product]));
+    inventoryState.totalCount = pageResult.count;
+    allProducts = (pageResult.products || []).map((product) => cachedById.get(product.id) || product);
+    inventoryOfflineMode = false;
+
+    const totalPages = Math.max(1, Math.ceil(inventoryState.totalCount / inventoryState.pageSize));
+    if (inventoryState.page > totalPages) {
+      inventoryState.page = totalPages;
+      const corrected = await getProductsPage(pharmacyId, getInventoryQueryOptions());
+      await mergeCachedPOSProducts(inventoryOfflineScope, corrected.products || []);
+      const correctedCached = await getCachedPOSProductsByIds(inventoryOfflineScope, (corrected.products || []).map((product) => product.id));
+      const correctedById = new Map(correctedCached.map((product) => [product.id, product]));
+      inventoryState.totalCount = corrected.count;
+      allProducts = (corrected.products || []).map((product) => correctedById.get(product.id) || product);
+    }
+
+    if (refreshMeta) primeInventoryBranchCache(user, selectedBranchId).catch(() => {});
+    return pageResult;
+  } catch (error) {
+    const bootstrap = await getCachedInventoryBootstrap(user.id, pharmacyId).catch(() => null);
+    if (!bootstrap) throw error;
+    await loadCachedInventory(user);
+    return { offline: true };
   }
 }
 
 async function refreshInventory(container, user, branchList, options = {}) {
-  const { refreshMeta = false, focusSearch = false } = options;
+  const { refreshMeta = false, focusSearch = false, preferCache = false } = options;
   try {
-    await fetchInventoryData(user, { refreshMeta });
+    await fetchInventoryData(user, { refreshMeta, preferCache });
     renderView(container, allProducts, user, branchList);
+    updateInventoryConnectivityUI(user).catch(() => {});
     if (focusSearch) {
       const input = document.getElementById('product-search');
       if (input) {
@@ -113,6 +215,7 @@ async function refreshInventory(container, user, branchList, options = {}) {
 export async function renderInventory(container, user, filterType = null, initialSearch = '', initialBranchId = null) {
   currentFilterType = normalizeFilterType(filterType);
   currentSearchTerm = String(initialSearch || '').trim();
+  inventoryUser = user;
 
   if (!user) {
     container.innerHTML = `<div class="alert alert-warning">User not authenticated. Please refresh the page.</div>`;
@@ -126,16 +229,41 @@ export async function renderInventory(container, user, filterType = null, initia
   }
 
   try {
+    const cachedBootstrap = await getCachedInventoryBootstrap(user.id, pharmacyId).catch(() => null);
+    let settings = cachedBootstrap?.settings || window.pharmacySettings || null;
+    let branchRows = cachedBootstrap?.branches || [];
+
+    if (navigator.onLine) {
+      try {
+        [settings, branchRows] = await Promise.all([
+          getPharmacySettings(pharmacyId),
+          getBranches(pharmacyId)
+        ]);
+        window.pharmacySettings = settings || { currency_symbol: 'Le', currency_code: 'NLE' };
+        await cacheInventoryBootstrap({ userId: user.id, pharmacyId, branches: branchRows, settings: window.pharmacySettings });
+      } catch (error) {
+        if (!cachedBootstrap) throw error;
+        inventoryOfflineMode = true;
+      }
+    } else if (!cachedBootstrap) {
+      throw new Error('Inventory is not prepared for offline use on this device yet. Connect to the internet and open Inventory once.');
+    }
+
     if (!window.pharmacySettings?.currency_symbol) {
-      const settings = await getPharmacySettings(pharmacyId);
       window.pharmacySettings = settings || { currency_symbol: 'Le', currency_code: 'NLE' };
     }
 
-    branches = await getBranches(pharmacyId);
+    branches = branchRows || [];
     selectedBranchId = initialBranchId && branches.some((branch) => branch.id === initialBranchId)
       ? initialBranchId
       : (branches.length > 0 ? branches[0].id : null);
 
+    if (!selectedBranchId) {
+      container.innerHTML = `<div class="alert alert-warning">No branch is available for inventory management.</div>`;
+      return;
+    }
+
+    inventoryOfflineScope = getInventoryScope(user, selectedBranchId);
     inventoryState.page = 1;
     inventoryState.pageSize = 30;
     inventoryState.search = currentSearchTerm;
@@ -143,11 +271,225 @@ export async function renderInventory(container, user, filterType = null, initia
     inventoryState.filterType = currentFilterType;
     inventoryState.sortType = '';
 
-    await fetchInventoryData(user, { refreshMeta: true });
+    await fetchInventoryData(user, { refreshMeta: true, preferCache: !navigator.onLine });
     renderView(container, allProducts, user, branches);
+    bindInventorySyncEvents(user);
+    updateInventoryConnectivityUI(user).catch(() => {});
+    if (navigator.onLine) primeInventoryWorkspaceCache(user, branches).catch(() => {});
   } catch (err) {
     container.innerHTML = `<div class="alert alert-danger">Failed to load inventory: ${escapeHtml(err.message)}</div>`;
   }
+}
+
+function bindInventorySyncEvents(user) {
+  if (inventorySyncHandler) {
+    window.removeEventListener('sammia:offline-sync-status', inventorySyncHandler);
+    window.removeEventListener('sammia:offline-queue-changed', inventorySyncHandler);
+    window.removeEventListener('sammia:offline-cache-updated', inventorySyncHandler);
+  }
+
+  inventorySyncHandler = async (event) => {
+    await updateInventoryConnectivityUI(user).catch(() => {});
+    const detail = event?.detail || {};
+    const shouldRefreshFromServer = detail.type === 'online'
+      || (detail.type === 'sync_finished' && (Number(detail.syncedInventory || 0) > 0 || Number(detail.inventoryConflictCount || 0) > 0));
+    if (shouldRefreshFromServer && navigator.onLine && containerRef && !inventoryRefreshAfterSync) {
+      inventoryRefreshAfterSync = true;
+      window.setTimeout(async () => {
+        try {
+          await refreshInventory(containerRef, user, branches, { refreshMeta: true });
+        } finally {
+          inventoryRefreshAfterSync = false;
+        }
+      }, 250);
+    }
+  };
+
+  window.addEventListener('sammia:offline-sync-status', inventorySyncHandler);
+  window.addEventListener('sammia:offline-queue-changed', inventorySyncHandler);
+  window.addEventListener('sammia:offline-cache-updated', inventorySyncHandler);
+}
+
+async function updateInventoryConnectivityUI(user = inventoryUser) {
+  if (!user?.id || !inventoryOfflineScope) return;
+  const snapshot = await getOfflineSyncSnapshot({ scope: inventoryOfflineScope }).catch(() => ({
+    online: navigator.onLine,
+    syncing: false,
+    inventoryPendingCount: 0,
+    inventoryConflictCount: 0
+  }));
+  const effectivelyOffline = !snapshot.online || inventoryOfflineMode;
+  const pending = Number(snapshot.inventoryPendingCount || 0);
+  const conflicts = Number(snapshot.inventoryConflictCount || 0);
+  const chip = document.getElementById('inventory-sync-status');
+  const banner = document.getElementById('inventory-offline-banner');
+  const conflictBtn = document.getElementById('inventory-conflicts-btn');
+  const bannerSync = document.getElementById('inventory-banner-sync');
+
+  if (chip) {
+    chip.className = 'inventory-sync-chip';
+    if (conflicts > 0) {
+      chip.classList.add('conflict');
+      chip.textContent = `⚠ ${conflicts} conflict${conflicts === 1 ? '' : 's'}`;
+    } else if (effectivelyOffline) {
+      chip.classList.add('offline');
+      chip.textContent = `● Offline${pending ? ` · ${pending} waiting` : ''}`;
+    } else if (snapshot.syncing) {
+      chip.classList.add('syncing');
+      chip.textContent = `↻ Syncing${pending ? ` ${pending}` : ''}…`;
+    } else if (pending > 0) {
+      chip.classList.add('pending');
+      chip.textContent = `↻ ${pending} change${pending === 1 ? '' : 's'} waiting`;
+    } else {
+      chip.classList.add('synced');
+      chip.textContent = '✓ Inventory synced';
+    }
+  }
+
+  if (banner) {
+    banner.style.display = effectivelyOffline ? 'flex' : 'none';
+    const span = banner.querySelector('span');
+    if (span) span.textContent = pending
+      ? `${pending} inventory change${pending === 1 ? '' : 's'} ${pending === 1 ? 'is' : 'are'} safely stored on this device and will synchronize when internet returns.`
+      : 'Cached inventory is available on this device. New changes will synchronize when internet returns.';
+  }
+  if (bannerSync) bannerSync.disabled = !snapshot.online || snapshot.syncing || pending === 0;
+  if (conflictBtn) conflictBtn.classList.toggle('hidden', conflicts === 0);
+
+  document.querySelectorAll('[data-online-only="true"]').forEach((button) => {
+    button.disabled = effectivelyOffline;
+    button.title = effectivelyOffline ? 'This bulk/server-history action requires internet.' : '';
+  });
+}
+
+function inventoryOperationLabel(operation) {
+  if (operation.operation_type === 'create_product') return `New product · ${operation.payload?.name || 'Product'}`;
+  if (operation.operation_type === 'update_product') return `Product details update`;
+  if (operation.operation_type === 'stock_delta') {
+    const delta = Number(operation.stock_delta_units || 0);
+    return `${operation.change_type === 'restock' ? 'Restock' : 'Stock adjustment'} · ${delta > 0 ? '+' : ''}${delta} base units`;
+  }
+  return operation.operation_type || 'Inventory change';
+}
+
+async function showInventorySyncCenter(user) {
+  const [snapshot, cachedCount] = await Promise.all([
+    getOfflineSyncSnapshot({ scope: inventoryOfflineScope }),
+    countCachedProducts(inventoryOfflineScope).catch(() => 0)
+  ]);
+  const pendingRows = (snapshot.pendingInventory || []).map((operation) => `
+    <div class="inventory-sync-list-row">
+      <div><strong>${escapeHtml(inventoryOperationLabel(operation))}</strong><span>${formatDateTime(operation.created_at)}</span></div>
+      <span class="badge badge-warning">Waiting</span>
+    </div>
+  `).join('');
+
+  const { overlay, closeModal } = createModal({
+    id: 'inventory-sync-center',
+    title: 'Inventory Sync Center',
+    size: 'modal-lg',
+    body: `
+      <div class="inventory-sync-overview">
+        <div><span>Connection</span><strong>${snapshot.online ? '● Online' : '● Offline'}</strong></div>
+        <div><span>Waiting to sync</span><strong>${snapshot.inventoryPendingCount || 0}</strong></div>
+        <div><span>Cached products</span><strong>${cachedCount.toLocaleString()}</strong></div>
+        <div><span>Conflicts</span><strong>${snapshot.inventoryConflictCount || 0}</strong></div>
+      </div>
+      <div class="text-xs text-muted" style="margin:0.75rem 0 1rem;">Last synchronization: ${snapshot.lastSyncAt ? formatDateTime(snapshot.lastSyncAt) : 'Not yet on this device'}</div>
+      ${pendingRows ? `<div class="inventory-sync-list">${pendingRows}</div>` : `<div class="empty-state" style="padding:1.4rem"><div class="empty-state-title">No inventory changes waiting</div><div class="empty-state-desc">This branch is synchronized with the server.</div></div>`}
+    `,
+    footer: `
+      <button type="button" class="btn btn-ghost" id="inventory-sync-close">Close</button>
+      ${snapshot.inventoryConflictCount ? '<button type="button" class="btn btn-warning" id="inventory-sync-review">Review Conflicts</button>' : ''}
+      <button type="button" class="btn btn-primary" id="inventory-sync-now" ${snapshot.online && snapshot.inventoryPendingCount ? '' : 'disabled'}>Sync Now</button>
+    `
+  });
+  overlay.querySelector('#inventory-sync-close')?.addEventListener('click', closeModal);
+  overlay.querySelector('#inventory-sync-review')?.addEventListener('click', () => {
+    closeModal();
+    showInventoryConflictCenter(user, async (options = {}) => refreshInventory(containerRef, user, branches, { refreshMeta: true, ...options }));
+  });
+  overlay.querySelector('#inventory-sync-now')?.addEventListener('click', async (event) => {
+    event.currentTarget.disabled = true;
+    event.currentTarget.textContent = 'Syncing…';
+    const result = await requestOfflineSync({ reason: 'inventory_sync_center' });
+    closeModal();
+    if (result.migrationRequired) showToast('Offline Inventory migration must be applied in Supabase before queued changes can sync.', 'warning');
+    else showToast(result.syncedInventory ? `${result.syncedInventory} inventory change${result.syncedInventory === 1 ? '' : 's'} synchronized` : 'Inventory is already synchronized');
+    await updateInventoryConnectivityUI(user);
+  });
+}
+
+function renderConflictDetails(conflict) {
+  if (conflict.conflict_type === 'stock') {
+    const details = conflict.operation || {};
+    return `
+      <div class="text-sm text-muted">${escapeHtml(conflict.message || 'Stock changed while this device was offline.')}</div>
+      <div class="text-xs text-muted" style="margin-top:0.5rem;">Queued change: ${Number(details.stock_delta_units || 0) > 0 ? '+' : ''}${Number(details.stock_delta_units || 0).toLocaleString()} base units</div>
+    `;
+  }
+  const patch = conflict.operation?.payload || {};
+  const server = conflict.server_product || {};
+  const rows = Object.entries(patch).filter(([key]) => !['pharmacy_id'].includes(key)).map(([key, value]) => `
+    <tr><td>${escapeHtml(key.replaceAll('_', ' '))}</td><td>${escapeHtml(value ?? '—')}</td><td>${escapeHtml(server[key] ?? '—')}</td></tr>
+  `).join('');
+  return `
+    <div class="text-sm text-muted" style="margin-bottom:0.6rem;">${escapeHtml(conflict.message || 'Product details changed on the server.')}</div>
+    <div class="table-container"><table><thead><tr><th>Field</th><th>Your offline value</th><th>Server value</th></tr></thead><tbody>${rows || '<tr><td colspan="3">No changed fields available.</td></tr>'}</tbody></table></div>
+  `;
+}
+
+async function showInventoryConflictCenter(user, updateView) {
+  const conflicts = await getInventoryConflicts({ scope: inventoryOfflineScope });
+  const { overlay, closeModal } = createModal({
+    id: 'inventory-conflict-center',
+    title: `Offline Inventory Conflicts${conflicts.length ? ` (${conflicts.length})` : ''}`,
+    size: 'modal-xl',
+    body: conflicts.length ? `
+      <div class="inventory-conflict-list">
+        ${conflicts.map((conflict) => `
+          <div class="inventory-conflict-card" data-conflict="${conflict.local_conflict_id}">
+            <div class="inventory-conflict-heading"><div><strong>${escapeHtml(conflict.product_name || 'Product')}</strong><span>${conflict.conflict_type === 'stock' ? 'Stock reconciliation' : 'Product details conflict'}</span></div><span class="badge badge-warning">Needs review</span></div>
+            ${renderConflictDetails(conflict)}
+            <div class="inventory-conflict-actions">
+              ${conflict.conflict_type === 'metadata' ? `<button type="button" class="btn btn-ghost btn-sm" data-conflict-action="server" data-id="${conflict.local_conflict_id}">Keep Server Value</button><button type="button" class="btn btn-primary btn-sm" data-conflict-action="local" data-id="${conflict.local_conflict_id}">Use My Offline Changes</button>` : `<button type="button" class="btn btn-primary btn-sm" data-conflict-action="ack" data-id="${conflict.local_conflict_id}">Acknowledge Reconciliation</button>`}
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    ` : `<div class="empty-state"><div class="empty-state-title">No conflicts</div><div class="empty-state-desc">All offline inventory changes have been reconciled.</div></div>`,
+    footer: `<button type="button" class="btn btn-ghost" id="inventory-conflicts-close">Close</button>`
+  });
+  overlay.querySelector('#inventory-conflicts-close')?.addEventListener('click', closeModal);
+
+  overlay.querySelectorAll('[data-conflict-action]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      if (!navigator.onLine) return showToast('Reconnect to the internet before resolving a synchronization conflict.', 'warning');
+      const localId = button.dataset.id;
+      const conflict = conflicts.find((item) => item.local_conflict_id === localId);
+      if (!conflict) return;
+      button.disabled = true;
+      try {
+        if (button.dataset.conflictAction === 'local') {
+          await retryInventoryConflictWithLocalChanges(localId);
+          await requestOfflineSync({ reason: 'inventory_conflict_use_local' });
+          showToast('Your offline changes were reapplied to the latest server version');
+        } else {
+          if (conflict.server_conflict_id) {
+            await resolveOfflineInventoryConflict(conflict.server_conflict_id, button.dataset.conflictAction === 'ack' ? 'acknowledged' : 'keep_server');
+          }
+          await acceptServerInventoryConflict(localId);
+          showToast(conflict.conflict_type === 'stock' ? 'Stock reconciliation acknowledged' : 'Server product values kept');
+        }
+        closeModal();
+        await updateView({ preferCache: !navigator.onLine });
+        await updateInventoryConnectivityUI(user);
+      } catch (error) {
+        button.disabled = false;
+        showToast(error.message, 'error');
+      }
+    });
+  });
 }
 
 function renderView(container, products, user, branchList) {
@@ -168,12 +510,19 @@ function renderView(container, products, user, branchList) {
           <div class="page-subtitle">Manage products, stock, expiry and movement history without loading the entire catalogue at once.</div>
         </div>
         <div class="flex gap-2 inventory-header-actions">
-          <button class="btn btn-ghost" id="stock-log-btn">Stock History</button>
+          <button type="button" class="inventory-sync-chip" id="inventory-sync-status" title="Open Inventory Sync Center">Checking sync…</button>
+          <button type="button" class="btn btn-ghost inventory-conflicts-btn hidden" id="inventory-conflicts-btn">⚠ Review Conflicts</button>
+          <button class="btn btn-ghost" id="stock-log-btn" data-online-only="true">Stock History</button>
           <button class="btn btn-ghost" id="download-template-btn">⬇️ Download Template</button>
-          <button class="btn btn-ghost" id="import-csv-btn">📥 Import CSV/Excel</button>
-          <button class="btn btn-ghost" id="add-multiple-btn">➕ Add Multiple</button>
+          <button class="btn btn-ghost" id="import-csv-btn" data-online-only="true">📥 Import CSV/Excel</button>
+          <button class="btn btn-ghost" id="add-multiple-btn" data-online-only="true">➕ Add Multiple</button>
           <button class="btn btn-primary" id="add-product-btn">+ Add Product</button>
         </div>
+      </div>
+
+      <div class="inventory-offline-banner" id="inventory-offline-banner" style="display:none">
+        <div><strong>Offline Inventory</strong><span>Changes are saved safely on this device and will synchronize automatically when internet returns.</span></div>
+        <button type="button" class="btn btn-sm btn-ghost" id="inventory-banner-sync">Sync Now</button>
       </div>
 
       <input type="file" id="csv-import-input" accept=".csv,.xlsx,.xls" style="display:none;" />
@@ -267,10 +616,10 @@ function renderView(container, products, user, branchList) {
 
         <div id="bulk-actions-bar" style="display:none;padding:1rem;background:var(--blue-light);border-bottom:1px solid var(--border);gap:1rem;align-items:center;flex-wrap:wrap">
           <span id="bulk-count" class="font-semibold"></span>
-          <button class="btn btn-ghost btn-sm" id="bulk-edit-btn">✏️ Bulk Edit</button>
-          <button class="btn btn-ghost btn-sm" id="bulk-deactivate-btn" style="color:var(--amber)">🔒 Deactivate</button>
-          <button class="btn btn-ghost btn-sm" id="bulk-activate-btn" style="color:var(--success)">✓ Activate</button>
-          <button class="btn btn-ghost btn-sm" id="bulk-delete-btn" style="color:var(--danger)">🗑️ Delete</button>
+          <button class="btn btn-ghost btn-sm" id="bulk-edit-btn" data-online-only="true">✏️ Bulk Edit</button>
+          <button class="btn btn-ghost btn-sm" id="bulk-deactivate-btn" data-online-only="true" style="color:var(--amber)">🔒 Deactivate</button>
+          <button class="btn btn-ghost btn-sm" id="bulk-activate-btn" data-online-only="true" style="color:var(--success)">✓ Activate</button>
+          <button class="btn btn-ghost btn-sm" id="bulk-delete-btn" data-online-only="true" style="color:var(--danger)">🗑️ Delete</button>
           <button class="btn btn-ghost btn-sm" id="bulk-cancel-btn">Cancel</button>
         </div>
 
@@ -304,20 +653,38 @@ function renderView(container, products, user, branchList) {
   `;
 
   const refreshPage = async (options = {}) => refreshInventory(containerRef, user, branchList, options);
-  const updateView = async () => refreshPage({ refreshMeta: true });
+  const updateView = async (options = {}) => refreshPage({ refreshMeta: true, ...options });
 
   document.getElementById('branch-selector')?.addEventListener('change', async (event) => {
     selectedBranchId = event.target.value || null;
+    inventoryOfflineScope = getInventoryScope(user, selectedBranchId);
     inventoryState.page = 1;
     inventoryState.category = '';
-    await refreshPage({ refreshMeta: true });
+    await refreshPage({ refreshMeta: true, preferCache: !navigator.onLine });
+  });
+
+  document.getElementById('inventory-sync-status')?.addEventListener('click', () => showInventorySyncCenter(user));
+  document.getElementById('inventory-conflicts-btn')?.addEventListener('click', () => showInventoryConflictCenter(user, updateView));
+  document.getElementById('inventory-banner-sync')?.addEventListener('click', async () => {
+    if (!navigator.onLine) return showToast('Internet connection is required to synchronize.', 'warning');
+    await requestOfflineSync({ reason: 'inventory_banner' });
+    await updateInventoryConnectivityUI(user);
   });
 
   document.getElementById('add-product-btn')?.addEventListener('click', () => showProductModal(null, user, updateView, branchList));
-  document.getElementById('add-multiple-btn')?.addEventListener('click', () => showAddMultipleModal(user, updateView, branchList));
-  document.getElementById('stock-log-btn')?.addEventListener('click', () => showStockLogs(user));
+  document.getElementById('add-multiple-btn')?.addEventListener('click', () => {
+    if (!navigator.onLine) return showToast('Add Multiple requires internet. Individual products can be added offline.', 'warning');
+    showAddMultipleModal(user, updateView, branchList);
+  });
+  document.getElementById('stock-log-btn')?.addEventListener('click', () => {
+    if (!navigator.onLine) return showToast('Server stock history is available when internet returns.', 'warning');
+    showStockLogs(user);
+  });
   document.getElementById('download-template-btn')?.addEventListener('click', () => downloadInventoryTemplate());
-  document.getElementById('import-csv-btn')?.addEventListener('click', () => document.getElementById('csv-import-input')?.click());
+  document.getElementById('import-csv-btn')?.addEventListener('click', () => {
+    if (!navigator.onLine) return showToast('CSV/Excel import requires internet. Individual products can be added offline.', 'warning');
+    document.getElementById('csv-import-input')?.click();
+  });
 
   document.getElementById('csv-import-input')?.addEventListener('change', async (event) => {
     const file = event.target.files?.[0];
@@ -458,6 +825,11 @@ function renderRows(products, branchList) {
     const costPrice = Number(product.cost_price || 0);
     const marginAmount = sellingPrice - costPrice;
     const marginPercent = sellingPrice > 0 ? (marginAmount / sellingPrice) * 100 : 0;
+    const syncBadge = product.offline_status === 'conflict'
+      ? '<span class="badge inventory-sync-badge conflict">Sync conflict</span>'
+      : (product.offline_status === 'pending' || product.offline_created)
+        ? '<span class="badge inventory-sync-badge pending">Waiting to sync</span>'
+        : '';
 
     let expiryHtml = '—';
     if (product.expiry_date) {
@@ -470,7 +842,7 @@ function renderRows(products, branchList) {
         <td>
           <div class="font-semibold inventory-product-name">${escapeHtml(product.name)}</div>
           <div class="text-xs text-muted">${escapeHtml(product.description || '')}</div>
-          <div style="margin-top:0.25rem"><span class="badge" style="background:var(--primary-light);color:var(--primary)">${escapeHtml(sellUnit.charAt(0).toUpperCase() + sellUnit.slice(1))}</span></div>
+          <div style="margin-top:0.25rem;display:flex;gap:0.35rem;flex-wrap:wrap"><span class="badge" style="background:var(--primary-light);color:var(--primary)">${escapeHtml(sellUnit.charAt(0).toUpperCase() + sellUnit.slice(1))}</span>${syncBadge}</div>
         </td>
         <td><span class="badge badge-blue">${escapeHtml(branchName)}</span></td>
         <td><span class="badge badge-gray">${escapeHtml(product.category || 'General')}</span></td>
@@ -495,6 +867,7 @@ function renderRows(products, branchList) {
           <div class="inventory-row-actions">
             <button class="btn btn-ghost btn-sm edit-product-btn" data-id="${product.id}">Edit</button>
             <button class="btn btn-ghost btn-sm restock-btn" data-id="${product.id}" data-name="${escapeHtml(product.name)}">Restock</button>
+            <button class="btn btn-ghost btn-sm adjust-stock-btn" data-id="${product.id}">Adjust</button>
             <button class="btn btn-ghost btn-sm history-product-btn" data-id="${product.id}">History</button>
             <button class="btn btn-ghost btn-sm delete-product-btn" data-id="${product.id}" style="color:var(--danger)">Delete</button>
           </div>
@@ -504,18 +877,109 @@ function renderRows(products, branchList) {
   }).join('');
 }
 
+function makeInventoryOperation(user, productId, branchId, operationType, extra = {}) {
+  const createdAt = new Date().toISOString();
+  return {
+    operation_id: crypto.randomUUID(),
+    operation_type: operationType,
+    product_id: productId,
+    user_id: user.id,
+    pharmacy_id: user.profile.pharmacy_id,
+    branch_id: branchId,
+    scope: getInventoryScope(user, branchId),
+    created_at: createdAt,
+    ...extra
+  };
+}
+
+async function queueProductCreateOffline(payload, user) {
+  const productId = crypto.randomUUID();
+  const unitsPerBox = Math.max(1, Number(payload.units_per_box || 1));
+  const initialTotal = Math.max(0, (Number(payload.stock_boxes || 0) * unitsPerBox) + Number(payload.stock_units || 0));
+  const normalizedPayload = {
+    ...payload,
+    stock_boxes: Math.floor(initialTotal / unitsPerBox),
+    stock_units: initialTotal % unitsPerBox
+  };
+  const operation = makeInventoryOperation(user, productId, payload.branch_id, 'create_product', {
+    payload: { ...normalizedPayload, id: productId, metadata_version: 1 }
+  });
+  await queueOfflineInventoryOperation(operation);
+  if (navigator.onLine) requestOfflineSync({ reason: 'inventory_create' }).catch(() => {});
+  return productId;
+}
+
+async function queueProductUpdateOffline(product, payload, user) {
+  const branchId = product.branch_id || selectedBranchId;
+  const metadataPayload = { ...payload };
+  delete metadataPayload.stock_boxes;
+  delete metadataPayload.stock_units;
+  delete metadataPayload.pharmacy_id;
+
+  const operation = makeInventoryOperation(user, product.id, branchId, 'update_product', {
+    payload: metadataPayload,
+    base_metadata_version: Number(product.metadata_version || 1)
+  });
+  await queueOfflineInventoryOperation(operation);
+
+  const newUnitsPerBox = Math.max(1, Number(payload.units_per_box || product.units_per_box || 1));
+  const baselineAfterMetadata = (Number(product.stock_boxes || 0) * newUnitsPerBox) + Number(product.stock_units || 0);
+  const desiredTotal = (Number(payload.stock_boxes || 0) * newUnitsPerBox) + Number(payload.stock_units || 0);
+  const delta = desiredTotal - baselineAfterMetadata;
+  if (delta !== 0) {
+    await queueOfflineInventoryOperation(makeInventoryOperation(user, product.id, branchId, 'stock_delta', {
+      stock_delta_units: delta,
+      stock_unit_type: payload.stock_unit_type || product.stock_unit_type || 'box',
+      change_type: 'adjustment',
+      notes: 'Stock quantity changed while editing product'
+    }));
+  }
+  if (navigator.onLine) requestOfflineSync({ reason: 'inventory_update' }).catch(() => {});
+}
+
+async function queueStockDeltaOffline(product, deltaUnits, user, { changeType = 'adjustment', notes = '', stockUnitType = null } = {}) {
+  const branchId = product.branch_id || selectedBranchId;
+  const requestedStockUnitType = stockUnitType || product.stock_unit_type || 'box';
+  if (requestedStockUnitType !== (product.stock_unit_type || 'box')) {
+    await queueOfflineInventoryOperation(makeInventoryOperation(user, product.id, branchId, 'update_product', {
+      payload: { stock_unit_type: requestedStockUnitType },
+      base_metadata_version: Number(product.metadata_version || 1)
+    }));
+  }
+  const operation = makeInventoryOperation(user, product.id, branchId, 'stock_delta', {
+    stock_delta_units: Number(deltaUnits || 0),
+    stock_unit_type: requestedStockUnitType,
+    change_type: changeType,
+    notes
+  });
+  await queueOfflineInventoryOperation(operation);
+  if (navigator.onLine) requestOfflineSync({ reason: `inventory_${changeType}` }).catch(() => {});
+}
+
+async function queueProductDeactivationOffline(product, user) {
+  const operation = makeInventoryOperation(user, product.id, product.branch_id || selectedBranchId, 'update_product', {
+    payload: { is_active: false },
+    base_metadata_version: Number(product.metadata_version || 1)
+  });
+  await queueOfflineInventoryOperation(operation);
+  if (navigator.onLine) requestOfflineSync({ reason: 'inventory_deactivate' }).catch(() => {});
+}
+
+
 function bindTableActions(products, user, updateView, branchList) {
   const productMap = Object.fromEntries(products.map((product) => [product.id, product]));
 
   document.querySelectorAll('.product-checkbox').forEach((checkbox) => checkbox.addEventListener('change', updateBulkActionsBar));
 
   document.getElementById('bulk-edit-btn')?.addEventListener('click', () => {
+    if (!navigator.onLine) return showToast('Bulk inventory actions require internet. Individual edits work offline.', 'warning');
     const selected = Array.from(document.querySelectorAll('.product-checkbox:checked')).map((checkbox) => checkbox.dataset.id);
     if (!selected.length) return;
     showBulkEditModal(selected, productMap, user, updateView);
   });
 
   document.getElementById('bulk-deactivate-btn')?.addEventListener('click', async () => {
+    if (!navigator.onLine) return showToast('Bulk inventory actions require internet. Individual edits work offline.', 'warning');
     const selected = Array.from(document.querySelectorAll('.product-checkbox:checked')).map((checkbox) => checkbox.dataset.id);
     if (!selected.length) return;
     if (!await showConfirm(`Deactivate ${selected.length} product(s)?`)) return;
@@ -523,6 +987,7 @@ function bindTableActions(products, user, updateView, branchList) {
   });
 
   document.getElementById('bulk-activate-btn')?.addEventListener('click', async () => {
+    if (!navigator.onLine) return showToast('Bulk inventory actions require internet. Individual edits work offline.', 'warning');
     const selected = Array.from(document.querySelectorAll('.product-checkbox:checked')).map((checkbox) => checkbox.dataset.id);
     if (!selected.length) return;
     if (!await showConfirm(`Activate ${selected.length} product(s)?`)) return;
@@ -530,6 +995,7 @@ function bindTableActions(products, user, updateView, branchList) {
   });
 
   document.getElementById('bulk-delete-btn')?.addEventListener('click', async () => {
+    if (!navigator.onLine) return showToast('Bulk inventory actions require internet. Individual edits work offline.', 'warning');
     const selected = Array.from(document.querySelectorAll('.product-checkbox:checked')).map((checkbox) => checkbox.dataset.id);
     if (!selected.length) return;
     if (!await showConfirm(`Delete ${selected.length} product(s)? This cannot be undone.`)) return;
@@ -551,23 +1017,36 @@ function bindTableActions(products, user, updateView, branchList) {
   });
 
   document.querySelectorAll('.restock-btn').forEach((button) => {
-    button.addEventListener('click', () => showRestockModal(button.dataset.id, button.dataset.name, user, updateView));
+    button.addEventListener('click', () => {
+      const product = productMap[button.dataset.id];
+      if (product) showRestockModal(product, user, updateView);
+    });
+  });
+
+  document.querySelectorAll('.adjust-stock-btn').forEach((button) => {
+    button.addEventListener('click', () => {
+      const product = productMap[button.dataset.id];
+      if (product) showStockAdjustmentModal(product, user, updateView);
+    });
   });
 
   document.querySelectorAll('.history-product-btn').forEach((button) => {
     button.addEventListener('click', () => {
       const product = productMap[button.dataset.id];
-      if (product) showProductStockHistory(product, user);
+      if (!product) return;
+      if (!navigator.onLine) return showOfflineProductActivity(product);
+      showProductStockHistory(product, user);
     });
   });
 
   document.querySelectorAll('.delete-product-btn').forEach((button) => {
     button.addEventListener('click', async () => {
-      if (!await showConfirm('Delete this product? This action cannot be undone.')) return;
+      const product = productMap[button.dataset.id];
+      if (!product || !await showConfirm('Deactivate this product? It will stop appearing in active inventory.')) return;
       try {
-        await deleteProduct(button.dataset.id);
-        showToast('Product deleted');
-        await updateView();
+        await queueProductDeactivationOffline(product, user);
+        showToast(navigator.onLine ? 'Product deactivation queued and syncing' : 'Product deactivation saved offline');
+        await updateView({ preferCache: !navigator.onLine });
       } catch (err) {
         showToast(err.message, 'error');
       }
@@ -774,16 +1253,26 @@ function showProductModal(product, user, updateView, branchList) {
     saveBtn.textContent = 'Saving...';
 
     try {
-      if (isEdit) {
+      if (isEdit && payload.branch_id !== product.branch_id) {
+        if (!navigator.onLine) {
+          throw new Error('Moving a product to another branch requires internet. Keep the current branch or reconnect first.');
+        }
         await updateProduct(product.id, payload);
-        showToast('Product updated successfully');
+        showToast('Product moved and updated successfully');
+        closeModal();
+        await updateView();
+        return;
+      }
+
+      if (isEdit) {
+        await queueProductUpdateOffline(product, payload, user);
+        showToast(navigator.onLine ? 'Product update saved and syncing' : 'Product update saved offline');
       } else {
-        await createProduct(payload);
-        showToast('Product added successfully');
+        await queueProductCreateOffline(payload, user);
+        showToast(navigator.onLine ? 'Product added locally and syncing' : 'Product added offline');
       }
       closeModal();
-      // Update the view without losing branch selection
-      await updateView();
+      await updateView({ preferCache: !navigator.onLine });
     } catch (err) {
       errEl.textContent = err.message;
       errEl.classList.remove('hidden');
@@ -793,19 +1282,24 @@ function showProductModal(product, user, updateView, branchList) {
   });
 }
 
-function showRestockModal(productId, productName, user, updateView) {
+function showRestockModal(product, user, updateView) {
   const stockUnitTypes = ['box', 'carton', 'strip', 'cup', 'packet', 'blister', 'sachet', 'bottle', 'vial', 'jar', 'tube', 'bag', 'pack', 'piece'];
-  
+  const unitsPerBox = Math.max(1, Number(product.units_per_box || 1));
+  const currentUnitType = product.stock_unit_type || 'box';
+
   const { overlay, closeModal } = createModal({
     id: 'restock-modal',
-    title: `Restock: ${productName}`,
+    title: `Restock: ${escapeHtml(product.name)}`,
     body: `
+      <div class="inventory-offline-action-note">
+        ${navigator.onLine ? 'This restock is saved locally first and synchronized immediately.' : 'You are offline. This restock will be saved on this device and synchronized later.'}
+      </div>
       <div class="form-group">
-        <label class="form-label">Stock Unit Type *</label>
+        <label class="form-label">Storage Unit Type *</label>
         <select class="form-select" id="restock-unit-type" required>
-          ${stockUnitTypes.map(unit => `<option value="${unit}" ${unit === 'box' ? 'selected' : ''}>${unit.charAt(0).toUpperCase() + unit.slice(1)}</option>`).join('')}
+          ${stockUnitTypes.map(unit => `<option value="${unit}" ${unit === currentUnitType ? 'selected' : ''}>${unit.charAt(0).toUpperCase() + unit.slice(1)}</option>`).join('')}
         </select>
-        <div class="text-xs text-muted" style="margin-top: 0.25rem;">What unit are you adding (boxes, strips, cups, etc)?</div>
+        <div class="text-xs text-muted" style="margin-top:0.25rem;">1 storage unit equals ${unitsPerBox.toLocaleString()} sellable unit${unitsPerBox === 1 ? '' : 's'} for this product.</div>
       </div>
       <div class="form-group">
         <label class="form-label">Quantity to Add *</label>
@@ -825,22 +1319,114 @@ function showRestockModal(productId, productName, user, updateView) {
 
   overlay.querySelector('#cancel-restock').addEventListener('click', closeModal);
   overlay.querySelector('#save-restock').addEventListener('click', async () => {
-    const qty = parseInt(overlay.querySelector('#restock-qty').value);
-    const notes = overlay.querySelector('#restock-notes').value;
+    const qty = parseInt(overlay.querySelector('#restock-qty').value, 10);
+    const notes = overlay.querySelector('#restock-notes').value.trim();
     const unitType = overlay.querySelector('#restock-unit-type').value;
     const errEl = overlay.querySelector('#restock-err');
     if (!qty || qty < 1) { errEl.textContent = 'Enter a valid quantity.'; errEl.classList.remove('hidden'); return; }
-    if (!unitType) { errEl.textContent = 'Please select a unit type.'; errEl.classList.remove('hidden'); return; }
+    if (!unitType) { errEl.textContent = 'Please select a storage unit type.'; errEl.classList.remove('hidden'); return; }
     try {
-      await addStock(productId, productName, qty, notes, user.id, user.profile.pharmacy_id, null, unitType);
-      showToast(`Stock added successfully (${qty} ${unitType}s)`);
+      const deltaUnits = qty * unitsPerBox;
+      await queueStockDeltaOffline(product, deltaUnits, user, {
+        changeType: 'restock',
+        notes: notes || `Restocked ${qty} ${unitType}${qty === 1 ? '' : 's'}`,
+        stockUnitType: unitType
+      });
+      showToast(navigator.onLine ? `Restock saved and syncing (${qty} ${unitType}${qty === 1 ? '' : 's'})` : `Restock saved offline (${qty} ${unitType}${qty === 1 ? '' : 's'})`);
       closeModal();
-      // Update the view without losing branch selection
-      await updateView();
+      await updateView({ preferCache: !navigator.onLine });
     } catch (err) {
       errEl.textContent = err.message;
       errEl.classList.remove('hidden');
     }
+  });
+}
+
+function showStockAdjustmentModal(product, user, updateView) {
+  const unitsPerBox = Math.max(1, Number(product.units_per_box || 1));
+  const storageUnit = product.stock_unit_type || 'box';
+  const sellUnit = product.unit_type || 'unit';
+  const { overlay, closeModal } = createModal({
+    id: 'stock-adjustment-modal',
+    title: `Adjust Stock: ${escapeHtml(product.name)}`,
+    body: `
+      <div class="inventory-offline-action-note">
+        Stock adjustments use quantity changes, not absolute stock replacement. This is safer when devices work offline.
+      </div>
+      <div class="grid-2">
+        <div class="form-group">
+          <label class="form-label">Adjustment *</label>
+          <select class="form-select" id="adjust-direction">
+            <option value="increase">Increase stock</option>
+            <option value="decrease">Decrease stock</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Measure As *</label>
+          <select class="form-select" id="adjust-measure">
+            <option value="storage">${escapeHtml(storageUnit.charAt(0).toUpperCase() + storageUnit.slice(1))} (${unitsPerBox} ${escapeHtml(sellUnit)}${unitsPerBox === 1 ? '' : 's'} each)</option>
+            <option value="loose">Loose ${escapeHtml(sellUnit)}${sellUnit.endsWith('s') ? '' : 's'}</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Quantity *</label>
+        <input type="number" class="form-input" id="adjust-qty" min="1" value="1" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Reason / Notes *</label>
+        <input type="text" class="form-input" id="adjust-notes" placeholder="e.g. Physical count correction, damaged stock" />
+      </div>
+      <div id="adjust-err" class="alert alert-danger hidden"></div>
+    `,
+    footer: `
+      <button class="btn btn-ghost" id="cancel-adjust">Cancel</button>
+      <button class="btn btn-primary" id="save-adjust">Save Adjustment</button>
+    `
+  });
+
+  overlay.querySelector('#cancel-adjust').addEventListener('click', closeModal);
+  overlay.querySelector('#save-adjust').addEventListener('click', async () => {
+    const direction = overlay.querySelector('#adjust-direction').value;
+    const measure = overlay.querySelector('#adjust-measure').value;
+    const qty = parseInt(overlay.querySelector('#adjust-qty').value, 10);
+    const notes = overlay.querySelector('#adjust-notes').value.trim();
+    const errEl = overlay.querySelector('#adjust-err');
+    errEl.classList.add('hidden');
+    if (!qty || qty < 1) { errEl.textContent = 'Enter a valid quantity.'; errEl.classList.remove('hidden'); return; }
+    if (!notes) { errEl.textContent = 'Please enter a reason for this adjustment.'; errEl.classList.remove('hidden'); return; }
+    const rawUnits = qty * (measure === 'storage' ? unitsPerBox : 1);
+    const deltaUnits = direction === 'decrease' ? -rawUnits : rawUnits;
+    try {
+      await queueStockDeltaOffline(product, deltaUnits, user, {
+        changeType: 'adjustment',
+        notes,
+        stockUnitType: storageUnit
+      });
+      showToast(navigator.onLine ? 'Stock adjustment saved and syncing' : 'Stock adjustment saved offline');
+      closeModal();
+      await updateView({ preferCache: !navigator.onLine });
+    } catch (err) {
+      errEl.textContent = err.message;
+      errEl.classList.remove('hidden');
+    }
+  });
+}
+
+function showOfflineProductActivity(product) {
+  const pendingPatch = product.pending_metadata_patch || {};
+  const pendingDelta = Number(product.pending_delta_units || 0);
+  createModal({
+    id: 'offline-product-activity',
+    title: `Offline Activity · ${escapeHtml(product.name)}`,
+    body: `
+      <div class="alert alert-info">Full server stock history is available when internet returns.</div>
+      <div class="inventory-history-summary">
+        <div><span class="text-xs text-muted">Local status</span><strong>${product.offline_status === 'conflict' ? 'Conflict needs review' : product.offline_status === 'pending' || product.offline_created ? 'Waiting to sync' : 'Cached copy'}</strong></div>
+        <div><span class="text-xs text-muted">Pending stock change</span><strong>${pendingDelta > 0 ? '+' : ''}${pendingDelta.toLocaleString()} base units</strong></div>
+        <div><span class="text-xs text-muted">Pending detail fields</span><strong>${Object.keys(pendingPatch).length}</strong></div>
+      </div>
+    `
   });
 }
 

@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'v2.0.34';
+const CACHE_VERSION = 'v2.0.35';
 const CACHE_NAME = `sammia-pharm-shell-${CACHE_VERSION}`;
 const CACHE_PREFIX = 'sammia-pharm-shell-';
 const LEGACY_CACHE_PREFIX = 'pharmacare-shell-';
@@ -144,9 +144,9 @@ self.addEventListener('fetch', (event) => {
 
 
 self.addEventListener('sync', (event) => {
-  if (event.tag !== 'sammia-pos-sync') return;
+  if (!['sammia-pos-sync', 'sammia-offline-sync'].includes(event.tag)) return;
   event.waitUntil((async () => {
     const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
-    clients.forEach((client) => client.postMessage({ type: 'SAMMIA_POS_SYNC_REQUESTED' }));
+    clients.forEach((client) => client.postMessage({ type: 'SAMMIA_OFFLINE_SYNC_REQUESTED' }));
   })());
 });

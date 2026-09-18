@@ -8525,3 +8525,193 @@ body {
   .pos-sync-sale-row { flex-direction:column; gap:.35rem; }
   .pos-sync-sale-row > div:last-child { text-align:left; }
 }
+
+/* ===================== OFFLINE INVENTORY PHASE 2 ===================== */
+.inventory-sync-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  min-height: 38px;
+  padding: 0.55rem 0.8rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: #fff;
+  color: var(--gray-700);
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.inventory-sync-chip.synced {
+  color: var(--success);
+  border-color: rgba(22, 163, 74, 0.28);
+  background: rgba(22, 163, 74, 0.06);
+}
+
+.inventory-sync-chip.pending,
+.inventory-sync-chip.syncing {
+  color: var(--warning);
+  border-color: rgba(217, 119, 6, 0.32);
+  background: rgba(245, 158, 11, 0.08);
+}
+
+.inventory-sync-chip.offline {
+  color: var(--gray-700);
+  border-color: var(--gray-300);
+  background: var(--gray-100);
+}
+
+.inventory-sync-chip.conflict {
+  color: var(--danger);
+  border-color: rgba(220, 38, 38, 0.3);
+  background: rgba(220, 38, 38, 0.06);
+}
+
+.inventory-offline-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  padding: 0.8rem 1rem;
+  border: 1px solid rgba(217, 119, 6, 0.28);
+  border-radius: var(--radius);
+  background: rgba(245, 158, 11, 0.08);
+}
+
+.inventory-offline-banner > div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.18rem;
+  min-width: 0;
+}
+
+.inventory-offline-banner span {
+  color: var(--gray-600);
+  font-size: 0.8rem;
+}
+
+.inventory-sync-badge.pending {
+  background: var(--warning-light);
+  color: var(--warning);
+}
+
+.inventory-sync-badge.conflict {
+  background: var(--danger-light);
+  color: var(--danger);
+}
+
+.inventory-offline-action-note {
+  margin-bottom: 1rem;
+  padding: 0.7rem 0.8rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--gray-50);
+  color: var(--gray-600);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.inventory-sync-overview {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.7rem;
+}
+
+.inventory-sync-overview > div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--gray-50);
+}
+
+.inventory-sync-overview span,
+.inventory-conflict-heading span,
+.inventory-sync-list-row span {
+  font-size: 0.75rem;
+  color: var(--gray-500);
+}
+
+.inventory-sync-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.inventory-sync-list-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.inventory-sync-list-row > div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.inventory-conflict-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.inventory-conflict-card {
+  padding: 1rem;
+  border: 1px solid rgba(217, 119, 6, 0.28);
+  border-radius: var(--radius-lg, 12px);
+  background: rgba(245, 158, 11, 0.035);
+}
+
+.inventory-conflict-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.8rem;
+}
+
+.inventory-conflict-heading > div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.inventory-conflict-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-top: 0.8rem;
+}
+
+@media (max-width: 768px) {
+  .inventory-sync-chip {
+    flex: 1 1 100%;
+  }
+
+  .inventory-offline-banner {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .inventory-sync-overview {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .inventory-conflict-heading,
+  .inventory-sync-list-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}

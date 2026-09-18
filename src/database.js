@@ -1105,6 +1105,24 @@ export async function getPOSProductsPage(pharmacyId, {
 }
 
 
+export async function getInventoryCachePage(pharmacyId, branchId, { page = 1, pageSize = 250 } = {}) {
+  const safePage = Math.max(1, Number(page) || 1);
+  const safePageSize = Math.min(500, Math.max(50, Number(pageSize) || 250));
+  const from = (safePage - 1) * safePageSize;
+  const to = from + safePageSize - 1;
+  let query = supabase
+    .from('products')
+    .select('*', { count: 'exact' })
+    .eq('pharmacy_id', pharmacyId)
+    .eq('is_active', true)
+    .order('name', { ascending: true })
+    .range(from, to);
+  if (branchId) query = query.eq('branch_id', branchId);
+  const { data, error, count } = await query;
+  if (error) throw error;
+  return { products: data || [], count: Number(count || 0), page: safePage, pageSize: safePageSize };
+}
+
 export async function getPOSProductsByIds(pharmacyId, branchId, ids = []) {
   const cleanIds = [...new Set((ids || []).filter(Boolean))].slice(0, 30);
   if (!cleanIds.length) return [];
@@ -1872,6 +1890,40 @@ export async function syncQueuedPOSSale(record) {
   });
   if (error) throw error;
   return data || {};
+}
+
+export async function syncQueuedInventoryOperation(record) {
+  if (!record?.operation_id) throw new Error('Missing offline inventory operation ID.');
+  const { data, error } = await supabase.rpc('sync_offline_inventory_operation', {
+    p_operation_id: record.operation_id,
+    p_operation: {
+      operation_type: record.operation_type,
+      product_id: record.product_id,
+      pharmacy_id: record.pharmacy_id,
+      branch_id: record.branch_id,
+      payload: record.payload || {},
+      stock_delta_units: Number(record.stock_delta_units || 0),
+      stock_unit_type: record.stock_unit_type || null,
+      change_type: record.change_type || null,
+      notes: record.notes || '',
+      base_metadata_version: Number(record.base_metadata_version || 1),
+      force: Boolean(record.force),
+      server_conflict_id: record.server_conflict_id || null,
+      created_at: record.created_at || new Date().toISOString()
+    }
+  });
+  if (error) throw error;
+  return data || {};
+}
+
+export async function resolveOfflineInventoryConflict(conflictId, resolution = 'keep_server') {
+  if (!conflictId) return null;
+  const { data, error } = await supabase.rpc('resolve_offline_inventory_conflict', {
+    p_conflict_id: conflictId,
+    p_resolution: resolution
+  });
+  if (error) throw error;
+  return data || null;
 }
 
 export async function createPOSSaleAtomic(salePayload, items, { clientTransactionId, invoiceNumber } = {}) {
